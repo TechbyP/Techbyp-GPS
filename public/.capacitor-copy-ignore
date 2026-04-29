@@ -1,0 +1,5 @@
+# Exclude patterns for Capacitor copy
+# These files won't be copied to the native app bundle
+
+# Generated APK files (would create infinite recursion)
+gps-tracker.apk

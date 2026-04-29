@@ -1,0 +1,35 @@
+{
+  "appId": "io.gpsapp.tracker",
+  "appName": "GPS Tracker",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "http",
+    "cleartext": false
+  },
+  "android": {
+    "buildOptions": {
+      "keystorePath": "",
+      "keystoreAlias": ""
+    }
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "backgroundColor": "#1e293b",
+      "showSpinner": false
+    },
+    "Geolocation": {
+      "requestPermissions": true,
+      "androidEnableMockLocations": true
+    },
+    "CapacitorSQLite": {
+      "androidIsEncryption": false,
+      "androidBiometric": {
+        "biometricAuth": false,
+        "biometricTitle": "Biometric login",
+        "biometricSubTitle": "Log in using your biometric"
+      }
+    }
+  }
+}

@@ -1,0 +1,232 @@
+/* Leaflet CSS must be imported first */
+@import 'leaflet/dist/leaflet.css';
+@import 'leaflet-draw/dist/leaflet.draw.css';
+
+/* Tablet optimizations for Phase 4 */
+@import './styles/tablet-optimizations.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Hide Leaflet top-left control icon on offline PMTiles maps */
+.pmtiles-active .leaflet-top.leaflet-left .leaflet-control {
+  display: none !important;
+}
+
+/* Remove any remaining Leaflet top-left controls/icons */
+.leaflet-top.leaflet-left {
+  display: none !important;
+}
+
+/* Keep Orders map draw controls visible above bottom-right overlays */
+.orders-map-canvas .leaflet-bottom.leaflet-right {
+  z-index: 1700;
+}
+
+.orders-map-canvas .leaflet-control-container .leaflet-bottom.leaflet-right .leaflet-draw {
+  display: none !important;
+}
+
+/* Keep field boundary strokes consistent during zoom */
+.field-vectors-pane svg path,
+.field-vectors-pane svg polygon {
+  vector-effect: non-scaling-stroke;
+}
+
+/* Header status filters responsive breakpoint at 1130px */
+.header-status-filters {
+  display: flex;
+}
+
+.header-status-burger {
+  display: none;
+}
+
+.header-status-burger-panel {
+  display: none;
+}
+
+@media (max-width: 1130px) {
+  .header-status-filters {
+    display: none;
+  }
+
+  .header-status-burger {
+    display: flex;
+  }
+
+  .header-status-burger-panel {
+    display: block;
+  }
+}
+
+
+/* Reusable frosted glass background */
+@layer components {
+  .glass-panel {
+    @apply rounded-2xl shadow-lg;
+  }
+  
+  /* Hide scrollbars but keep functionality */
+  .scrollbar-hide {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE and Edge */
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
+  }
+  
+  /* Modern custom scrollbars - Light theme */
+  .scrollbar-modern {
+    scrollbar-width: thin; /* Firefox */
+    scrollbar-color: rgba(156, 163, 175, 0.5) rgba(229, 231, 235, 0.3); /* Firefox */
+  }
+  
+  .scrollbar-modern::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  .scrollbar-modern::-webkit-scrollbar-track {
+    background: rgba(229, 231, 235, 0.2);
+    border-radius: 999px;
+  }
+  
+  .scrollbar-modern::-webkit-scrollbar-thumb {
+    background: rgba(156, 163, 175, 0.45);
+    border-radius: 999px;
+    transition: background-color 0.2s ease;
+  }
+  
+  .scrollbar-modern::-webkit-scrollbar-thumb:hover {
+    background: rgba(107, 114, 128, 0.7);
+  }
+  
+  .scrollbar-modern::-webkit-scrollbar-thumb:active {
+    background: rgba(75, 85, 99, 0.85);
+  }
+  
+  .scrollbar-modern::-webkit-scrollbar-corner {
+    background: rgba(229, 231, 235, 0.2);
+  }
+  
+  /* Modern custom scrollbars - Dark theme */
+  .dark .scrollbar-modern {
+    scrollbar-color: rgba(107, 114, 128, 0.45) rgba(17, 24, 39, 0.2); /* Firefox */
+  }
+  
+  .dark .scrollbar-modern::-webkit-scrollbar-track {
+    background: rgba(17, 24, 39, 0.2);
+  }
+  
+  .dark .scrollbar-modern::-webkit-scrollbar-thumb {
+    background: rgba(107, 114, 128, 0.45);
+  }
+  
+  .dark .scrollbar-modern::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.65);
+  }
+  
+  .dark .scrollbar-modern::-webkit-scrollbar-thumb:active {
+    background: rgba(148, 163, 184, 0.8);
+  }
+  
+  .dark .scrollbar-modern::-webkit-scrollbar-corner {
+    background: rgba(17, 24, 39, 0.2);
+  }
+  
+  /* Slide down animation for sidebar */
+  @keyframes slide-down {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  .animate-slide-down {
+    animation: slide-down 0.2s ease-out;
+  }
+  
+  .glass-panel-dark {
+    @apply bg-gray-900/80 border border-gray-700/30;
+  }
+  
+  .glass-panel-light {
+    @apply bg-white/80 border border-gray-200/50;
+  }
+  
+  /* Field Boundary Popup Styling */
+  .field-popup .leaflet-popup-content-wrapper {
+    border-radius: 12px;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  }
+  
+  .dark-popup .leaflet-popup-content-wrapper {
+    background-color: rgba(31, 41, 55, 0.8) !important;
+    border: 1px solid rgba(75, 85, 99, 0.3);
+  }
+  
+  .light-popup .leaflet-popup-content-wrapper {
+    background-color: rgba(255, 255, 255, 0.8) !important;
+    border: 1px solid rgba(229, 231, 235, 0.5);
+  }
+  
+  .field-popup .leaflet-popup-tip {
+    border-radius: 2px;
+  }
+  
+  .dark-popup .leaflet-popup-tip {
+    background-color: rgba(31, 41, 55, 0.8) !important;
+    border: 1px solid rgba(75, 85, 99, 0.3) !important;
+    border-bottom: none !important;
+    border-right: none !important;
+  }
+  
+  .light-popup .leaflet-popup-tip {
+    background-color: rgba(255, 255, 255, 0.8) !important;
+    border: 1px solid rgba(229, 231, 235, 0.5) !important;
+    border-bottom: none !important;
+    border-right: none !important;
+  }
+  
+  .field-popup .leaflet-popup-close-button {
+    color: inherit !important;
+    font-size: 18px !important;
+    font-weight: bold !important;
+    padding: 8px !important;
+  }
+  
+  .dark-popup .leaflet-popup-close-button {
+    color: rgba(156, 163, 175, 1) !important;
+  }
+  
+  .light-popup .leaflet-popup-close-button {
+    color: rgba(75, 85, 99, 1) !important;
+  }
+
+  /* Avatar dropdown blur effect */
+  .avatar-dropdown {
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
+  }
+}

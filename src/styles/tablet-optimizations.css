@@ -1,0 +1,382 @@
+/**
+ * Tablet & Hardware Optimizations CSS
+ * Enhanced touch targets, landscape mode, and glove-friendly UI
+ */
+
+/* ============================================
+   LANDSCAPE MODE SUPPORT
+   ============================================ */
+
+@media (orientation: landscape) and (max-height: 800px) {
+  /* Optimize sidebar for landscape */
+  .gps-tracker-sidebar {
+    max-width: 320px !important;
+  }
+
+  /* Compact header in landscape */
+  .gps-tracker-header {
+    padding: 0.5rem 1rem !important;
+  }
+
+  /* Reduce vertical padding in landscape lists */
+  .gps-tracker-list-item {
+    padding-top: 0.5rem !important;
+    padding-bottom: 0.5rem !important;
+  }
+
+  /* Map takes more space in landscape */
+  .gps-map-container {
+    height: 100vh !important;
+  }
+
+  /* Horizontal toolbar for landscape */
+  .quick-actions-toolbar {
+    flex-direction: row !important;
+    justify-content: center !important;
+    gap: 1rem !important;
+  }
+}
+
+/* ============================================
+   LARGE TOUCH TARGETS (Glove-Friendly)
+   ============================================ */
+
+/* Minimum touch target size: 48x48px (WCAG AAA) */
+.touch-target {
+  min-width: 48px !important;
+  min-height: 48px !important;
+  padding: 12px !important;
+}
+
+/* Extra large touch targets for primary actions */
+.touch-target-lg {
+  min-width: 64px !important;
+  min-height: 64px !important;
+  padding: 16px !important;
+}
+
+/* Button spacing for glove use */
+.button-group-glove {
+  gap: 12px !important;
+}
+
+/* Larger click area for small icons */
+.icon-button-glove {
+  width: 56px !important;
+  height: 56px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* GPS tracking buttons - extra large */
+.gps-tracking-button {
+  min-width: 72px !important;
+  min-height: 72px !important;
+  border-radius: 16px !important;
+  font-size: 1.125rem !important;
+  font-weight: 600 !important;
+}
+
+/* Sample recording button - prominent */
+.sample-record-button {
+  min-width: 80px !important;
+  min-height: 80px !important;
+  border-radius: 50% !important;
+}
+
+/* ============================================
+   QUICK ACTION TOOLBAR
+   ============================================ */
+
+.quick-actions-toolbar {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.quick-actions-toolbar > * {
+  pointer-events: all;
+}
+
+/* Floating action button style */
+.fab {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s ease;
+}
+
+.fab:active {
+  transform: scale(0.95);
+}
+
+.fab-primary {
+  background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
+  color: white;
+}
+
+.fab-success {
+  background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+  color: white;
+}
+
+.fab-danger {
+  background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%);
+  color: white;
+}
+
+/* ============================================
+   ENHANCED FORM INPUTS (Touch-Friendly)
+   ============================================ */
+
+.form-input-touch {
+  min-height: 48px !important;
+  padding: 12px 16px !important;
+  font-size: 16px !important; /* Prevents zoom on iOS */
+  border-radius: 8px !important;
+}
+
+.form-select-touch {
+  min-height: 48px !important;
+  padding: 12px 16px !important;
+  font-size: 16px !important;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 20px;
+  padding-right: 44px !important;
+}
+
+.form-textarea-touch {
+  min-height: 96px !important;
+  padding: 12px 16px !important;
+  font-size: 16px !important;
+  border-radius: 8px !important;
+}
+
+/* Checkbox and radio buttons - larger */
+.form-checkbox-touch,
+.form-radio-touch {
+  width: 28px !important;
+  height: 28px !important;
+  cursor: pointer;
+}
+
+/* Switch toggle - larger */
+.form-switch-touch {
+  width: 56px !important;
+  height: 32px !important;
+  border-radius: 16px !important;
+}
+
+.form-switch-touch::after {
+  width: 26px !important;
+  height: 26px !important;
+  border-radius: 13px !important;
+}
+
+/* ============================================
+   MAP CONTROLS (Larger for Tablets)
+   ============================================ */
+
+.leaflet-control-zoom a {
+  width: 44px !important;
+  height: 44px !important;
+  line-height: 44px !important;
+  font-size: 24px !important;
+}
+
+.leaflet-control-layers-toggle {
+  width: 44px !important;
+  height: 44px !important;
+}
+
+/* Custom map buttons */
+.map-control-button {
+  width: 52px !important;
+  height: 52px !important;
+  border-radius: 8px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* ============================================
+   BATTERY SAVER MODE STYLES
+   ============================================ */
+
+.battery-saver-active {
+  /* Reduce animations */
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  /* Reduce map quality */
+  .leaflet-tile-container {
+    image-rendering: auto !important;
+  }
+
+  /* Dim screen slightly */
+  filter: brightness(0.9);
+}
+
+/* Battery indicator */
+.battery-indicator {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 20px;
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.battery-indicator-low {
+  background: rgba(239, 68, 68, 0.9);
+  animation: pulse-battery 2s infinite;
+}
+
+@keyframes pulse-battery {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* ============================================
+   DEVICE CONNECTION STATUS
+   ============================================ */
+
+.device-status-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 999;
+  padding: 8px 16px;
+  background: rgba(16, 185, 129, 0.95);
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.device-status-bar-connecting {
+  background: rgba(251, 146, 60, 0.95);
+}
+
+.device-status-bar-error {
+  background: rgba(239, 68, 68, 0.95);
+}
+
+/* ============================================
+   HAPTIC FEEDBACK INDICATOR
+   ============================================ */
+
+.haptic-active {
+  animation: haptic-pulse 0.3s ease-out;
+}
+
+@keyframes haptic-pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.95);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* ============================================
+   RESPONSIVE ADJUSTMENTS
+   ============================================ */
+
+/* Tablets in portrait (768px - 1024px) */
+@media (min-width: 768px) and (max-width: 1024px) and (orientation: portrait) {
+  .container-tablet {
+    max-width: 100% !important;
+    padding: 0 1rem !important;
+  }
+
+  /* Larger text on tablets */
+  body {
+    font-size: 18px !important;
+  }
+
+  h1 { font-size: 2.5rem !important; }
+  h2 { font-size: 2rem !important; }
+  h3 { font-size: 1.5rem !important; }
+}
+
+/* Tablets in landscape (768px - 1366px) */
+@media (min-width: 768px) and (max-width: 1366px) and (orientation: landscape) {
+  .sidebar-landscape {
+    width: 280px !important;
+    transition: width 0.3s ease !important;
+  }
+
+  .sidebar-landscape.collapsed {
+    width: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .map-landscape {
+    width: calc(100% - 280px) !important;
+    transition: width 0.3s ease !important;
+  }
+
+  .map-landscape.expanded {
+    width: 100% !important;
+  }
+}
+
+/* ============================================
+   ACCESSIBILITY ENHANCEMENTS
+   ============================================ */
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .button {
+    border: 2px solid currentColor !important;
+  }
+
+  .form-input-touch {
+    border: 2px solid currentColor !important;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Focus visible for keyboard navigation */
+.focus-visible:focus {
+  outline: 3px solid #3B82F6 !important;
+  outline-offset: 2px !important;
+}

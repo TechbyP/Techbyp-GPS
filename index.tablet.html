@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/app-logo.png" />
+    <link rel="shortcut icon" href="/app-logo.png" />
+    <link rel="manifest" href="/manifest.webmanifest">
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes" />
+    <title>GPS Tracker Tablet</title>
+    
+    <!-- PWA Meta Tags -->
+    <meta name="description" content="Professional GPS tracking application for field work and navigation" />
+    <meta name="application-name" content="GPS Tracker Tablet" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="GPS Tracker Tablet" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    
+    <!-- Theme Colors -->
+    <meta name="theme-color" content="#1e293b" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#3b82f6" media="(prefers-color-scheme: light)" />
+    
+    <!-- Apple Touch Icons -->
+    <link rel="apple-touch-icon" href="/app-logo.png" />
+    <link rel="apple-touch-icon-precomposed" href="/app-logo.png" />
+  </head>
+  <body>
+    <script>
+      (() => {
+        const darkModeStored = localStorage.getItem('darkMode');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const isDarkMode = darkModeStored ? darkModeStored === 'true' : prefersDark;
+        
+        window.__initialDarkMode = isDarkMode;
+        
+        if (isDarkMode) {
+          document.documentElement.classList.add('dark-mode-splash');
+        }
+        
+        const storedLang = localStorage.getItem('language');
+        const browserLang = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
+        const lang = (storedLang || browserLang).startsWith('de') ? 'de' : 'en';
+        document.documentElement.setAttribute('lang', lang);
+        const setLoaderLabel = () => {
+          const label = document.getElementById('app-loader-label');
+          if (!label) return;
+          const text = label.dataset[lang] || label.textContent;
+          label.textContent = text || '';
+        };
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', setLoaderLabel);
+        } else {
+          setLoaderLabel();
+        }
+      })();
+    </script>
+    <div id="root">
+      <!-- Enhanced animated splash screen loader -->
+      <div id="app-loader" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden;background:linear-gradient(135deg,rgba(59,130,246,0.08) 0%,rgba(16,185,129,0.08) 100%);background-color:#f9fafb;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+        <!-- Animated background particles -->
+        <div style="position:absolute;inset:0;overflow:hidden;pointer-events:none;">
+          <div style="position:absolute;width:4px;height:4px;background:rgba(59,130,246,0.3);border-radius:50%;left:10%;top:100vh;animation:floatParticle 12s infinite linear 0s;"></div>
+          <div style="position:absolute;width:4px;height:4px;background:rgba(16,185,129,0.3);border-radius:50%;left:20%;top:100vh;animation:floatParticle 14s infinite linear 2s;"></div>
+          <div style="position:absolute;width:4px;height:4px;background:rgba(59,130,246,0.3);border-radius:50%;left:30%;top:100vh;animation:floatParticle 16s infinite linear 4s;"></div>
+          <div style="position:absolute;width:4px;height:4px;background:rgba(16,185,129,0.3);border-radius:50%;left:40%;top:100vh;animation:floatParticle 13s infinite linear 1s;"></div>
+          <div style="position:absolute;width:4px;height:4px;background:rgba(59,130,246,0.3);border-radius:50%;left:50%;top:100vh;animation:floatParticle 15s infinite linear 3s;"></div>
+          <div style="position:absolute;width:4px;height:4px;background:rgba(16,185,129,0.3);border-radius:50%;left:60%;top:100vh;animation:floatParticle 17s infinite linear 5s;"></div>
+        </div>
+
+        <!-- Loading content -->
+        <div style="text-align:center;position:relative;z-index:10;animation:scaleInSplash 0.6s cubic-bezier(0.34,1.56,0.64,1);">
+          <!-- Logo with spinning rings -->
+          <div style="position:relative;width:120px;height:120px;margin:0 auto 32px;">
+            <!-- App Logo -->
+            <img src="/app-logo.png" alt="GPS Tracker" style="position:absolute;inset:0;margin:auto;width:64px;height:64px;border-radius:16px;box-shadow:0 8px 16px rgba(0,0,0,0.15);animation:pulseLogo 2s ease-in-out infinite;" />
+            <!-- Rotating rings -->
+            <div style="position:absolute;inset:0;border-radius:50%;border:3px solid rgba(59,130,246,0.2);border-top-color:#3b82f6;animation:spinOuter 2s linear infinite;"></div>
+            <div style="position:absolute;inset:10px;border-radius:50%;border:3px solid rgba(16,185,129,0.2);border-right-color:#10b981;animation:spinMiddle 3s linear infinite;"></div>
+            <div style="position:absolute;inset:20px;border-radius:50%;border:3px solid rgba(59,130,246,0.15);border-bottom-color:#60a5fa;animation:spinInner 4s linear infinite;"></div>
+          </div>
+
+          <!-- App name with gradient -->
+          <h1 style="font-size:2rem;font-weight:700;margin-bottom:12px;background:linear-gradient(to right,#3b82f6,#10b981);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:-0.02em;animation:slideUpSplash 0.8s cubic-bezier(0.34,1.56,0.64,1) 0.2s both;">GPS Tracker</h1>
+
+          <!-- Loading text with animated dots -->
+          <p style="color:#64748b;font-size:0.875rem;font-weight:500;animation:slideUpSplash 0.8s cubic-bezier(0.34,1.56,0.64,1) 0.4s both;">
+            <span id="app-loader-label" data-en="Loading" data-de="Laden">Loading</span><span style="display:inline-block;width:4px;margin:0 2px;animation:blinkDot 1.5s infinite 0s;">.</span><span style="display:inline-block;width:4px;margin:0 2px;animation:blinkDot 1.5s infinite 0.2s;">.</span><span style="display:inline-block;width:4px;margin:0 2px;animation:blinkDot 1.5s infinite 0.4s;">.</span>
+          </p>
+
+          <!-- Progress bar -->
+          <div style="margin-top:32px;width:200px;height:3px;background:rgba(203,213,225,0.4);border-radius:9999px;margin-left:auto;margin-right:auto;overflow:hidden;animation:slideUpSplash 0.8s cubic-bezier(0.34,1.56,0.64,1) 0.6s both;">
+            <div style="height:100%;width:50%;background:linear-gradient(to right,#3b82f6,#10b981);animation:progressBarSplash 1.5s ease-in-out infinite;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <style>
+      /* Reset & Base */
+      *{margin:0;padding:0;box-sizing:border-box}
+      body{margin:0;overflow:hidden}
+      
+      /* Animations */
+      @keyframes scaleInSplash{from{transform:scale(0.85);opacity:0}to{transform:scale(1);opacity:1}}
+      @keyframes spinOuter{to{transform:rotate(360deg)}}
+      @keyframes spinMiddle{to{transform:rotate(-360deg)}}
+      @keyframes spinInner{to{transform:rotate(360deg)}}
+      @keyframes pulseLogo{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.05);opacity:0.9}}
+      @keyframes slideUpSplash{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+      @keyframes blinkDot{0%,100%{opacity:0.3}50%{opacity:1}}
+      @keyframes progressBarSplash{0%{transform:translateX(-100%)}100%{transform:translateX(200%)}}
+      @keyframes floatParticle{to{transform:translateY(-110vh) translateX(50px);opacity:0}}
+      
+      /* Full screen loader */
+      #app-loader{width:100vw;height:100vh;position:fixed;top:0;left:0;right:0;bottom:0}
+      
+      /* Dark mode support - both system preference and explicit class */
+      @media (prefers-color-scheme:dark){
+        #app-loader{background:linear-gradient(135deg,rgba(59,130,246,0.1) 0%,rgba(16,185,129,0.1) 100%);background-color:#0f172a!important}
+        h1{background:linear-gradient(to right,#60a5fa,#34d399);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+        p{color:#94a3b8}
+      }
+      
+      /* Dark mode via class (from localStorage) */
+      .dark-mode-splash #app-loader{background:linear-gradient(135deg,rgba(59,130,246,0.1) 0%,rgba(16,185,129,0.1) 100%);background-color:#0f172a!important}
+      .dark-mode-splash h1{background:linear-gradient(to right,#60a5fa,#34d399);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+      .dark-mode-splash p{color:#94a3b8}
+    </style>
+    
+    <script type="module" src="/src/main-tablet.tsx"></script>
+  </body>
+</html>

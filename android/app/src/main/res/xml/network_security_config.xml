@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Android Network Security Configuration
+Handles HTTP/HTTPS connections based on domain and certificate validation
+This is required for Android 7+ and mandatory for Android 9+
+-->
+<network-security-config>
+    <!-- Development-only cleartext exceptions -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+    </domain-config>
+
+    <!-- Default: HTTPS only for production domains -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">example.com</domain>
+    </domain-config>
+
+    <!-- Accept custom CA certificates for development -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">gps-tracker.local</domain>
+        <trust-anchors>
+            <!-- System default certificates -->
+            <certificates src="system" />
+            <!-- Development certificates stored in app -->
+            <certificates src="@raw/ca_cert" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- Certificate pinning (optional, for production) -->
+    <!-- Enable for production domains that have their own certificates -->
+    <!-- 
+    <pin-set expiration="2026-12-31">
+        <pin digest="SHA-256">base64_encoded_pin_here</pin>
+    </pin-set>
+    -->
+
+    <!-- Secure default for all other domains -->
+    <default-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </default-config>
+</network-security-config>

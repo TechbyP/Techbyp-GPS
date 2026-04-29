@@ -1,0 +1,314 @@
+{
+  "missingKeys": {
+    "en": [],
+    "de": []
+  },
+  "hardcodedStrings": [
+    {
+      "file": "src\\utils\\deviceValidation.ts",
+      "line": 275,
+      "text": "): Partial",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\services\\userProfileService.ts",
+      "line": 53,
+      "text": "): Promise",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\services\\trackExport.ts",
+      "line": 56,
+      "text": "#trackStyle",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\services\\sqliteConnectionPool.ts",
+      "line": 108,
+      "text": "): Promise",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\services\\orderService.ts",
+      "line": 58,
+      "text": "; services: Set",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\services\\orderService.ts",
+      "line": 64,
+      "text": "(), services: new Set",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\services\\localDatabase.ts",
+      "line": 26,
+      "text": "(_key: string): Promise",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\services\\hybridDatabase.ts",
+      "line": 204,
+      "text": "): Promise",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\services\\hybridDatabase.ts",
+      "line": 3832,
+      "text": "(type: string, id: string): Promise",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\services\\gpsDevicePersistence.ts",
+      "line": 102,
+      "text": "): Promise",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\services\\gpsDevicePersistence.ts",
+      "line": 146,
+      "text": "): Promise",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\services\\firebaseSync.ts",
+      "line": 178,
+      "text": ", attempts = 3, baseDelayMs = 500): Promise",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\services\\conflictResolver.ts",
+      "line": 73,
+      "text": "(conflict: ConflictData",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\services\\conflictResolver.ts",
+      "line": 73,
+      "text": "): ConflictResolutionResult",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\services\\conflictResolver.ts",
+      "line": 83,
+      "text": "(conflict: ConflictData",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\services\\conflictResolver.ts",
+      "line": 83,
+      "text": "): ConflictResolutionResult",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\components\\Web\\Orders\\OrderWizard.tsx",
+      "line": 1414,
+      "text": "; badges: Set",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\components\\Web\\Orders\\OrderWizard.tsx",
+      "line": 1414,
+      "text": "; services: Set",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\components\\Web\\Orders\\OrderWizard.tsx",
+      "line": 3152,
+      "text": "DED",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\components\\Web\\Orders\\OrderWizard.tsx",
+      "line": 3153,
+      "text": "Nmin",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\components\\Web\\Orders\\OrderWizard.tsx",
+      "line": 3175,
+      "text": "123456/1234",
+      "type": "Attribute"
+    },
+    {
+      "file": "src\\components\\Web\\Orders\\OrderWizard.tsx",
+      "line": 3216,
+      "text": "Ntot, Smin",
+      "type": "Attribute"
+    },
+    {
+      "file": "src\\components\\Web\\Orders\\OrdersMainPage.tsx",
+      "line": 1853,
+      "text": "; badges: Set",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\components\\Web\\Orders\\OrdersMainPage.tsx",
+      "line": 1853,
+      "text": "; services: Set",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\components\\Web\\Orders\\OrdersMainPage.tsx",
+      "line": 2105,
+      "text": "Techbyp",
+      "type": "Attribute"
+    },
+    {
+      "file": "src\\components\\GPS\\UnifiedDeviceManager.tsx",
+      "line": 1095,
+      "text": "192.168.42.1",
+      "type": "Attribute"
+    },
+    {
+      "file": "src\\components\\GPS\\UnifiedDeviceManager.tsx",
+      "line": 1113,
+      "text": "9001",
+      "type": "Attribute"
+    },
+    {
+      "file": "src\\components\\GPS\\ReachRS3Config.tsx",
+      "line": 178,
+      "text": "rtk.example.com",
+      "type": "Attribute"
+    },
+    {
+      "file": "src\\components\\GPS\\ReachRS3Config.tsx",
+      "line": 196,
+      "text": "2101",
+      "type": "Attribute"
+    },
+    {
+      "file": "src\\components\\GPS\\ReachRS3Config.tsx",
+      "line": 214,
+      "text": "MOUNT1",
+      "type": "Attribute"
+    },
+    {
+      "file": "src\\components\\GPS\\ReachRS3Config.tsx",
+      "line": 232,
+      "text": "username",
+      "type": "Attribute"
+    },
+    {
+      "file": "src\\components\\GPS\\ReachRS3Config.tsx",
+      "line": 250,
+      "text": "••••••••",
+      "type": "Attribute"
+    },
+    {
+      "file": "src\\components\\GPS\\MapView.tsx",
+      "line": 148,
+      "text": "(cache: Map",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\components\\GPS\\MapView.tsx",
+      "line": 2829,
+      "text": "Esri",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\components\\GPS\\MapView.tsx",
+      "line": 2841,
+      "text": "Esri",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\components\\GPS\\GpsDeviceConfigDialog.tsx",
+      "line": 338,
+      "text": "4800",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\components\\GPS\\GpsDeviceConfigDialog.tsx",
+      "line": 339,
+      "text": "9600",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\components\\GPS\\GpsDeviceConfigDialog.tsx",
+      "line": 340,
+      "text": "19200",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\components\\GPS\\GpsDeviceConfigDialog.tsx",
+      "line": 341,
+      "text": "38400",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\components\\GPS\\GpsDeviceConfigDialog.tsx",
+      "line": 342,
+      "text": "57600",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\components\\GPS\\GpsDeviceConfigDialog.tsx",
+      "line": 343,
+      "text": "115200",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\components\\GPS\\GpsDeviceConfigDialog.tsx",
+      "line": 414,
+      "text": "sapos.de",
+      "type": "Attribute"
+    },
+    {
+      "file": "src\\components\\GPS\\GpsDeviceConfigDialog.tsx",
+      "line": 435,
+      "text": "VRS_3_4G_DE",
+      "type": "Attribute"
+    },
+    {
+      "file": "src\\components\\GPS\\FieldBoundaryEditor.tsx",
+      "line": 1392,
+      "text": "Esri",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\components\\GPS\\FieldBoundaryEditor.tsx",
+      "line": 1431,
+      "text": "OpenStreetMap",
+      "type": "JSX Text"
+    },
+    {
+      "file": "src\\components\\GPS\\FieldBoundaryEditor.tsx",
+      "line": 2021,
+      "text": "Wheat",
+      "type": "Attribute"
+    },
+    {
+      "file": "src\\components\\GPS\\FieldBoundaryEditor.tsx",
+      "line": 2035,
+      "text": "Winter 2025",
+      "type": "Attribute"
+    },
+    {
+      "file": "src\\components\\GPS\\FieldBoundaryEditor.tsx",
+      "line": 2051,
+      "text": "Jan 2025",
+      "type": "Attribute"
+    },
+    {
+      "file": "src\\components\\GPS\\FieldBoundaryEditor.tsx",
+      "line": 2065,
+      "text": "Jun 2025",
+      "type": "Attribute"
+    },
+    {
+      "file": "src\\components\\GPS\\FieldBoundaryEditor.tsx",
+      "line": 2080,
+      "text": "F-001",
+      "type": "Attribute"
+    },
+    {
+      "file": "src\\components\\GPS\\FieldBoundaryEditor.tsx",
+      "line": 2259,
+      "text": "Jun 2025",
+      "type": "Attribute"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+import { collection, doc, getDoc, getDocs, orderBy, query, updateDoc, where } from 'firebase/firestore';
+import { db } from '../firebase';
+import { OrderDraft } from '../types';
+
+const COLLECTION = 'orders';
+
+export const orderTabletService = {
+  async listAssignedOrders(userId: string) {
+    const ref = collection(db, COLLECTION);
+    const q = query(ref, where('assignedToId', '==', userId), orderBy('updatedAt', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })) as OrderDraft[];
+  },
+
+  async getOrder(orderId: string) {
+    const ref = doc(collection(db, COLLECTION), orderId);
+    const snapshot = await getDoc(ref);
+    return snapshot.exists() ? ({ id: snapshot.id, ...snapshot.data() } as OrderDraft) : null;
+  },
+
+  async updateOrderFields(orderId: string, fields: NonNullable<OrderDraft['fields']>, status?: OrderDraft['status']) {
+    const ref = doc(collection(db, COLLECTION), orderId);
+    const payload: Record<string, any> = {
+      fields,
+      updatedAt: new Date().toISOString()
+    };
+    if (status) payload.status = status;
+    await updateDoc(ref, payload);
+  }
+};

@@ -1,0 +1,137 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build outputs
+dist/
+build/
+/android/app/build/
+/android/build/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Firebase credentials (NEVER commit this!)
+backend/firebase-credentials.json
+firebase-credentials.json
+scripts/firebase-service-account.json
+service-account.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*.sublime-workspace
+*.sublime-project
+
+# OS
+.DS_Store
+Thumbs.db
+*.desktop
+
+# Logs
+*.log
+logs/
+
+# Temp files
+*.tmp
+tmp/
+temp/
+
+# APKs and builds
+*.apk
+*.aab
+*.aar
+
+# Gradle
+.gradle/
+gradle-app.setting
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# Android Studio
+local.properties
+captured_classes/
+
+# Test coverage
+coverage/
+.nyc_output/
+lcov.info
+
+# Tile files and large data
+*.pbf
+/*.pbf
+*.pmtiles
+*.mbtiles
+tiles/
+public/tiles/
+data/tmp/
+
+# Misc generated files
+*.cert
+*.csr
+.DS_Store*
+ehthumbs.db
+
+# Large geodata and binaries
+niedersachsen-latest.osm.pbf
+
+# Certificates and secrets
+certs/
+
+# Data sources and temp
+/data/
+/data/sources/
+/data/tmp/
+
+# Map tiles (can be huge)
+/public/leaflet/tiles/
+
+# Java runtime and tools
+/tools/jre21/
+
+# Android local config
+android/local.properties
+
+# Build scripts (optional, if not meant for repo)
+build-apk.ps1
+build-gps-backend.ps1
+
+# Ignore all markdown except key docs
+*.md
+!README.md
+!QUICK_START.md
+!PERFORMANCE_OPTIMIZATION.md
+!TILE_CACHING_OPTIMIZATION.md
+!WINDOWS_TABLET_SUPPORT.md
+!docs/
+
+# Ignore generated reports
+/android/build/reports/
+
+# Ignore any other sensitive or generated files
+firebase.json
+firestore.indexes.json
+firestore.rules
+
+germany.pmtiles
+
