@@ -8,14 +8,15 @@ import { useDarkMode } from '../../hooks/useDarkMode';
 import { useLanguage } from '../../hooks/useLanguage';
 import { GpsPosition, GpsTrackDetail, GpsPoint, GpsFieldBoundary, GpsFieldSample } from '../../types';
 import { getBoundaryLodLevel } from '../../utils/boundaryRenderMeta';
-import { getBlankTileUrl } from '../../utils/tileUtils';
+import { getBlankTileUrl, getBundledGermanyPmtilesUrl } from '../../utils/tileUtils';
 import { getDefaultPack, getPackForLocation, OFFLINE_MAP_PACKS } from '../../config/offlineMapPacks';
 import PMTilesVectorLayer from './PMTilesVectorLayer';
 import { tileDownloader, DownloadProgress } from '../../services/offlineTileDownloader';
 import 'leaflet/dist/leaflet.css';
 
 const onlineTileUrl = (window as any).__VITE_ONLINE_TILE_URL__ || (import.meta.env.VITE_ONLINE_TILE_URL as string | undefined);
-const offlinePmtilesUrl = (window as any).__VITE_PMTILES_URL__ || (import.meta.env.VITE_PMTILES_URL as string | undefined) || '/tiles/germany.pmtiles';
+const offlinePmtilesUrl = getBundledGermanyPmtilesUrl();
+const offlineTilesDisabledByEnv = ((import.meta.env.VITE_DISABLE_OFFLINE_TILES as string | undefined) || '').toLowerCase() === 'true';
 
 // Check for Germany offline tiles at runtime
 const checkGermanyTilesAvailable = (): boolean => {
@@ -622,6 +623,8 @@ const getBoundaryPointLimit = (zoom: number, isMoving: boolean, isTabletPerforma
   return 180;
 };
 
+const TABLET_BOUNDARY_VISUAL_ZOOM = 14;
+
 const simplifyRingForPerformance = (ring: [number, number][], maxPoints: number): [number, number][] => {
   if (!Array.isArray(ring) || ring.length < 4 || maxPoints <= 0 || ring.length <= maxPoints) {
     return ring;
@@ -1064,11 +1067,14 @@ const MapController = memo(function MapController({
 const ZoomTracker = memo(function ZoomTracker({
   onZoomChange,
   continuous = true,
+  emitOnZoomEnd = true,
 }: {
   onZoomChange: (zoom: number) => void;
   continuous?: boolean;
+  emitOnZoomEnd?: boolean;
 }) {
   const map = useMap();
+  const lastZoomRef = useRef<number | null>(null);
   
   useEffect(() => {
     let frameId: number | null = null;
@@ -1079,14 +1085,22 @@ const ZoomTracker = memo(function ZoomTracker({
       }
 
       frameId = requestAnimationFrame(() => {
-        onZoomChange(map.getZoom());
+        const nextZoom = map.getZoom();
+        if (lastZoomRef.current != null && Math.abs(lastZoomRef.current - nextZoom) < 0.001) {
+          return;
+        }
+
+        lastZoomRef.current = nextZoom;
+        onZoomChange(nextZoom);
       });
     };
 
     if (continuous) {
       map.on('zoom', handleZoom);
     }
-    map.on('zoomend', handleZoom);
+    if (emitOnZoomEnd) {
+      map.on('zoomend', handleZoom);
+    }
     handleZoom(); // Set initial zoom
     
     return () => {
@@ -1096,9 +1110,11 @@ const ZoomTracker = memo(function ZoomTracker({
       if (continuous) {
         map.off('zoom', handleZoom);
       }
-      map.off('zoomend', handleZoom);
+      if (emitOnZoomEnd) {
+        map.off('zoomend', handleZoom);
+      }
     };
-  }, [map, onZoomChange, continuous]);
+  }, [map, onZoomChange, continuous, emitOnZoomEnd]);
   
   return null;
 });
@@ -1122,34 +1138,75 @@ const LabelPaneSetup = memo(function LabelPaneSetup() {
 
 const MapViewportTracker = memo(function MapViewportTracker({
   onBoundsChange,
-  onMovingChange
+  onMovingChange,
+  suppressZoomMoveState = false,
+  disablePostZoomUpdates = false,
 }: {
   onBoundsChange: (bounds: L.LatLngBounds) => void;
   onMovingChange: (isMoving: boolean) => void;
+  suppressZoomMoveState?: boolean;
+  disablePostZoomUpdates?: boolean;
 }) {
   const map = useMap();
+  const zoomingRef = useRef(false);
+  const skipNextMoveEndRef = useRef(false);
 
   useEffect(() => {
     const updateBounds = () => onBoundsChange(map.getBounds());
-    const onMoveStart = () => onMovingChange(true);
+    const onMoveStart = () => {
+      if (!zoomingRef.current && skipNextMoveEndRef.current) {
+        skipNextMoveEndRef.current = false;
+      }
+
+      if (suppressZoomMoveState && zoomingRef.current) {
+        return;
+      }
+      onMovingChange(true);
+    };
     const onMoveEnd = () => {
+      if (skipNextMoveEndRef.current) {
+        skipNextMoveEndRef.current = false;
+        return;
+      }
+
       onMovingChange(false);
+      updateBounds();
+    };
+    const onZoomStart = () => {
+      zoomingRef.current = true;
+      if (!suppressZoomMoveState) {
+        onMovingChange(true);
+      }
+    };
+    const onZoomEnd = () => {
+      zoomingRef.current = false;
+
+      if (disablePostZoomUpdates) {
+        // Ignore the synthetic moveend that follows pinch/zoom to avoid end-of-gesture repaint.
+        skipNextMoveEndRef.current = true;
+        return;
+      }
+
+      skipNextMoveEndRef.current = true;
+      if (!suppressZoomMoveState) {
+        onMovingChange(false);
+      }
       updateBounds();
     };
 
     updateBounds();
     map.on('movestart', onMoveStart);
-    map.on('zoomstart', onMoveStart);
+    map.on('zoomstart', onZoomStart);
     map.on('moveend', onMoveEnd);
-    map.on('zoomend', onMoveEnd);
+    map.on('zoomend', onZoomEnd);
 
     return () => {
       map.off('movestart', onMoveStart);
-      map.off('zoomstart', onMoveStart);
+      map.off('zoomstart', onZoomStart);
       map.off('moveend', onMoveEnd);
-      map.off('zoomend', onMoveEnd);
+      map.off('zoomend', onZoomEnd);
     };
-  }, [map, onBoundsChange, onMovingChange]);
+  }, [map, onBoundsChange, onMovingChange, suppressZoomMoveState, disablePostZoomUpdates]);
 
   return null;
 });
@@ -1283,16 +1340,17 @@ const MapTapSelectionController = memo(function MapTapSelectionController({
 const TileHandoffController = memo(function TileHandoffController({
   enabled,
   fadeOutMs = 160,
-  maxVisibleMs = 1000,
+  maxVisibleMs = 2200,
 }: {
   enabled: boolean;
   fadeOutMs?: number;
   maxVisibleMs?: number;
 }) {
   const map = useMap();
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const isLoadingRef = useRef(false);
   const hideTimerRef = useRef<number | null>(null);
-  const fallbackTimerRef = useRef<number | null>(null);
+  const settleTimerRef = useRef<number | null>(null);
 
   const clearTimer = useCallback((timerRef: MutableRefObject<number | null>) => {
     if (timerRef.current != null) {
@@ -1301,10 +1359,10 @@ const TileHandoffController = memo(function TileHandoffController({
     }
   }, []);
 
-  const ensureCanvas = useCallback(() => {
+  const ensureOverlay = useCallback(() => {
     const container = map.getContainer();
-    const existing = canvasRef.current ?? document.createElement('canvas');
-    canvasRef.current = existing;
+    const existing = overlayRef.current ?? document.createElement('div');
+    overlayRef.current = existing;
 
     existing.className = 'tile-handoff-overlay';
     existing.style.position = 'absolute';
@@ -1316,6 +1374,7 @@ const TileHandoffController = memo(function TileHandoffController({
     existing.style.zIndex = '300';
     existing.style.opacity = '0';
     existing.style.willChange = 'opacity';
+    existing.style.overflow = 'hidden';
 
     if (!container.contains(existing)) {
       container.appendChild(existing);
@@ -1324,101 +1383,115 @@ const TileHandoffController = memo(function TileHandoffController({
     return existing;
   }, [map]);
 
-  const resizeCanvas = useCallback((canvas: HTMLCanvasElement) => {
-    const size = map.getSize();
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
-    const targetWidth = Math.max(1, Math.round(size.x * dpr));
-    const targetHeight = Math.max(1, Math.round(size.y * dpr));
-
-    if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
-      canvas.width = targetWidth;
-      canvas.height = targetHeight;
-    }
-  }, [map]);
-
   const captureCurrentTiles = useCallback((): boolean => {
     if (!enabled) return false;
 
-    const canvas = ensureCanvas();
-    resizeCanvas(canvas);
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return false;
-
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
-    const width = canvas.width / dpr;
-    const height = canvas.height / dpr;
-    const containerRect = map.getContainer().getBoundingClientRect();
+    const overlay = ensureOverlay();
     const tilePane = map.getPanes().tilePane;
-
     if (!tilePane) return false;
 
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, width, height);
+    const snapshot = tilePane.cloneNode(true) as HTMLElement;
 
-    let drawnCount = 0;
-
-    const tileImages = tilePane.querySelectorAll<HTMLImageElement>('img.leaflet-tile');
-    tileImages.forEach((img) => {
-      if (!img.complete || img.naturalWidth === 0 || img.naturalHeight === 0) return;
-      if (!img.classList.contains('leaflet-tile-loaded')) return;
-
-      const rect = img.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
-
-      const x = rect.left - containerRect.left;
-      const y = rect.top - containerRect.top;
-      if (x + rect.width <= 0 || y + rect.height <= 0 || x >= width || y >= height) return;
-
-      try {
-        ctx.drawImage(img, x, y, rect.width, rect.height);
-        drawnCount += 1;
-      } catch {
-        // Ignore cross-origin draw failures from individual tiles.
+    snapshot.querySelectorAll('img.leaflet-tile:not(.leaflet-tile-loaded)').forEach((tile) => tile.remove());
+    snapshot.querySelectorAll<HTMLCanvasElement>('canvas').forEach((canvas) => {
+      if (canvas.width <= 0 || canvas.height <= 0) {
+        canvas.remove();
       }
     });
 
-    const tileCanvases = tilePane.querySelectorAll<HTMLCanvasElement>('canvas');
-    tileCanvases.forEach((sourceCanvas) => {
-      if (sourceCanvas.width <= 0 || sourceCanvas.height <= 0) return;
+    const drawableCount = snapshot.querySelectorAll('img.leaflet-tile-loaded, canvas').length;
+    if (drawableCount === 0) {
+      overlay.innerHTML = '';
+      return false;
+    }
 
-      const rect = sourceCanvas.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
+    snapshot.style.pointerEvents = 'none';
+    overlay.innerHTML = '';
+    overlay.appendChild(snapshot);
+    return true;
+  }, [enabled, ensureOverlay, map]);
 
-      const x = rect.left - containerRect.left;
-      const y = rect.top - containerRect.top;
-      if (x + rect.width <= 0 || y + rect.height <= 0 || x >= width || y >= height) return;
+  const hasPendingTiles = useCallback((): boolean => {
+    const tilePane = map.getPanes().tilePane;
+    if (!tilePane) return false;
 
-      try {
-        ctx.drawImage(sourceCanvas, x, y, rect.width, rect.height);
-        drawnCount += 1;
-      } catch {
-        // Ignore tainted canvas sources.
-      }
-    });
+    const pendingCount = tilePane.querySelectorAll('img.leaflet-tile:not(.leaflet-tile-loaded)').length;
+    const drawableCount = tilePane.querySelectorAll('img.leaflet-tile-loaded, canvas').length;
+    const mapLoading = (map as any)._loading === true || isLoadingRef.current;
 
-    return drawnCount > 0;
-  }, [enabled, ensureCanvas, map, resizeCanvas]);
+    if (pendingCount > 0) {
+      return true;
+    }
+
+    // During tile swap there can be a short gap where no pending images exist yet
+    // and no drawable tiles remain in the pane. Treat that as still loading.
+    if (mapLoading && drawableCount === 0) {
+      return true;
+    }
+
+    return false;
+  }, [map]);
 
   const showSnapshot = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const overlay = overlayRef.current;
+    if (!overlay) return;
 
     clearTimer(hideTimerRef);
-    canvas.style.transition = `opacity ${fadeOutMs}ms ease`;
-    canvas.style.opacity = '1';
+    overlay.style.transition = `opacity ${fadeOutMs}ms ease`;
+    overlay.style.opacity = '1';
   }, [clearTimer, fadeOutMs]);
 
   const hideSnapshot = useCallback((delayMs: number = 0) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const overlay = overlayRef.current;
+    if (!overlay) return;
 
     clearTimer(hideTimerRef);
+    clearTimer(settleTimerRef);
     hideTimerRef.current = window.setTimeout(() => {
-      canvas.style.opacity = '0';
+      overlay.style.opacity = '0';
       hideTimerRef.current = null;
     }, delayMs);
   }, [clearTimer]);
+
+  const waitForTilesToSettle = useCallback(() => {
+    clearTimer(settleTimerRef);
+
+    const startedAt = performance.now();
+    const minimumStableMs = 140;
+    let settledAt: number | null = null;
+
+    const tick = () => {
+      if (!enabled) {
+        hideSnapshot(0);
+        return;
+      }
+
+      const elapsed = performance.now() - startedAt;
+      if (hasPendingTiles()) {
+        settledAt = null;
+      } else {
+        if (settledAt === null) {
+          settledAt = performance.now();
+        }
+
+        if ((performance.now() - settledAt) >= minimumStableMs) {
+          hideSnapshot(60);
+          settleTimerRef.current = null;
+          return;
+        }
+      }
+
+      if (elapsed >= maxVisibleMs) {
+        hideSnapshot(0);
+        settleTimerRef.current = null;
+        return;
+      }
+
+      settleTimerRef.current = window.setTimeout(tick, 45);
+    };
+
+    settleTimerRef.current = window.setTimeout(tick, 45);
+  }, [clearTimer, enabled, hasPendingTiles, hideSnapshot, maxVisibleMs]);
 
   const startHandoff = useCallback(() => {
     if (!enabled) return;
@@ -1427,13 +1500,8 @@ const TileHandoffController = memo(function TileHandoffController({
     if (!hasSnapshot) return;
 
     showSnapshot();
-
-    clearTimer(fallbackTimerRef);
-    fallbackTimerRef.current = window.setTimeout(() => {
-      hideSnapshot(0);
-      fallbackTimerRef.current = null;
-    }, maxVisibleMs);
-  }, [enabled, captureCurrentTiles, showSnapshot, clearTimer, fallbackTimerRef, hideSnapshot, maxVisibleMs]);
+    waitForTilesToSettle();
+  }, [enabled, captureCurrentTiles, showSnapshot, waitForTilesToSettle]);
 
   useEffect(() => {
     if (!enabled) {
@@ -1441,43 +1509,87 @@ const TileHandoffController = memo(function TileHandoffController({
       return;
     }
 
-    const handleLoading = () => startHandoff();
-    const handleZoomStart = () => startHandoff();
+    const handleLoading = () => {
+      isLoadingRef.current = true;
+      startHandoff();
+    };
     const handleLoad = () => {
-      clearTimer(fallbackTimerRef);
-      hideSnapshot(40);
+      isLoadingRef.current = false;
+      waitForTilesToSettle();
     };
-    const handleZoomEnd = () => {
-      if (fallbackTimerRef.current == null) {
-        hideSnapshot(80);
-      }
-    };
+    const handleZoomStart = () => startHandoff();
+    const handleMoveEnd = () => waitForTilesToSettle();
 
     map.on('loading', handleLoading);
-    map.on('zoomstart', handleZoomStart);
     map.on('load', handleLoad);
-    map.on('zoomend', handleZoomEnd);
+    map.on('zoomstart', handleZoomStart);
+    map.on('moveend', handleMoveEnd);
 
     return () => {
       map.off('loading', handleLoading);
-      map.off('zoomstart', handleZoomStart);
       map.off('load', handleLoad);
-      map.off('zoomend', handleZoomEnd);
+      map.off('zoomstart', handleZoomStart);
+      map.off('moveend', handleMoveEnd);
     };
-  }, [enabled, map, startHandoff, hideSnapshot, clearTimer]);
+  }, [enabled, map, startHandoff, hideSnapshot, waitForTilesToSettle]);
 
   useEffect(() => {
     return () => {
       clearTimer(hideTimerRef);
-      clearTimer(fallbackTimerRef);
+      clearTimer(settleTimerRef);
 
-      const canvas = canvasRef.current;
-      if (canvas && canvas.parentElement) {
-        canvas.parentElement.removeChild(canvas);
+      const overlay = overlayRef.current;
+      if (overlay && overlay.parentElement) {
+        overlay.parentElement.removeChild(overlay);
       }
-      canvasRef.current = null;
+      overlayRef.current = null;
     };
   }, [clearTimer]);
+
+  return null;
+});
+
+const TouchZoomEndStabilizer = memo(function TouchZoomEndStabilizer({
+  enabled,
+}: {
+  enabled: boolean;
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const handler: any = (map as any).touchZoom;
+    if (!handler || typeof handler._onTouchEnd !== 'function') {
+      return;
+    }
+
+    const originalOnTouchEnd = handler._onTouchEnd;
+
+    handler._onTouchEnd = function () {
+      if (!this._moved || !this._zooming) {
+        this._zooming = false;
+        return;
+      }
+
+      this._zooming = false;
+      if (this._animRequest != null) {
+        cancelAnimationFrame(this._animRequest);
+        this._animRequest = null;
+      }
+
+      L.DomEvent.off(document, 'touchmove', this._onTouchMove, this);
+      L.DomEvent.off(document, 'touchend touchcancel', this._onTouchEnd, this);
+
+      const finalZoom = this._map._limitZoom(this._zoom);
+      this._map._move(this._center, finalZoom, undefined, true);
+      this._map._moveEnd(true);
+    };
+
+    return () => {
+      handler._onTouchEnd = originalOnTouchEnd;
+    };
+  }, [map, enabled]);
 
   return null;
 });
@@ -1485,9 +1597,11 @@ const TileHandoffController = memo(function TileHandoffController({
 const SampleCanvasLayer = memo(function SampleCanvasLayer({
   enabled,
   pathPoints,
+  suppressMoveEndInvalidate = false,
 }: {
   enabled: boolean;
   pathPoints: [number, number][];
+  suppressMoveEndInvalidate?: boolean;
 }) {
   const map = useMap();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1597,17 +1711,25 @@ const SampleCanvasLayer = memo(function SampleCanvasLayer({
     }
 
     const handleInvalidate = () => scheduleDraw();
-    map.on('viewreset', handleInvalidate);
-    map.on('moveend', handleInvalidate);
-    map.on('zoomend', handleInvalidate);
+    if (suppressMoveEndInvalidate) {
+      map.on('move', handleInvalidate);
+      map.on('zoom', handleInvalidate);
+    } else {
+      map.on('viewreset', handleInvalidate);
+      map.on('moveend', handleInvalidate);
+    }
     map.on('resize', handleInvalidate);
 
     scheduleDraw();
 
     return () => {
-      map.off('viewreset', handleInvalidate);
-      map.off('moveend', handleInvalidate);
-      map.off('zoomend', handleInvalidate);
+      if (suppressMoveEndInvalidate) {
+        map.off('move', handleInvalidate);
+        map.off('zoom', handleInvalidate);
+      } else {
+        map.off('viewreset', handleInvalidate);
+        map.off('moveend', handleInvalidate);
+      }
       map.off('resize', handleInvalidate);
       if (frameRef.current != null) {
         cancelAnimationFrame(frameRef.current);
@@ -1617,7 +1739,7 @@ const SampleCanvasLayer = memo(function SampleCanvasLayer({
         overlayPane.removeChild(canvas);
       }
     };
-  }, [map, enabled, scheduleDraw]);
+  }, [map, enabled, scheduleDraw, suppressMoveEndInvalidate]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1822,7 +1944,7 @@ function MapView({
   const hasLocationPack = !!locationPack;
   const isWithinOfflineBounds = hasLocationPack || !currentPosition;
   const offlineTilesReady = !!offlinePmtilesUri || offlineRasterAvailable;
-  const offlineTilesDisabled = true;
+  const offlineTilesDisabled = offlineTilesDisabledByEnv;
   const shouldUseOfflineTiles = !offlineTilesDisabled && isWithinOfflineBounds && (germanyTilesAvailable || offlineTilesReady);
   const isOnline = !isOffline;
   const isNative = Capacitor.isNativePlatform();
@@ -1832,24 +1954,34 @@ function MapView({
     || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)
   );
   const usePreciseGestures = isTabletPerformanceMode || isCoarsePointerDevice;
+  const useWebLikeZoomBehavior = isNative;
+  const enableGesturePrecisionController = usePreciseGestures && !useWebLikeZoomBehavior;
   // Keep previously loaded tiles visible while new tiles stream in.
-  const tileKeepBuffer = isTabletPerformanceMode ? 3 : 4;
-  const tileUpdateWhenZooming = true;
-  const tileUpdateWhenIdle = isTabletPerformanceMode ? false : true;
-  const mapZoomAnimation = !usePreciseGestures;
-  const mapFadeAnimation = true;
-  const mapMarkerZoomAnimation = !usePreciseGestures;
+  const tileKeepBuffer = isTabletPerformanceMode ? 8 : (useWebLikeZoomBehavior ? 4 : 4);
+  const tileUpdateWhenZooming = useWebLikeZoomBehavior ? true : !usePreciseGestures;
+  const tileUpdateWhenIdle = useWebLikeZoomBehavior ? false : (isTabletPerformanceMode ? false : true);
+  const satelliteTileKeepBuffer = isTabletPerformanceMode ? Math.max(tileKeepBuffer, 6) : tileKeepBuffer;
+  const satelliteUpdateWhenZooming = tileUpdateWhenZooming;
+  const mapZoomAnimation = isTabletPerformanceMode ? false : (useWebLikeZoomBehavior ? true : !usePreciseGestures);
+  const mapFadeAnimation = isTabletPerformanceMode ? false : (useWebLikeZoomBehavior ? true : !usePreciseGestures);
+  const mapMarkerZoomAnimation = isTabletPerformanceMode ? false : (useWebLikeZoomBehavior ? true : !usePreciseGestures);
   const mapPanInertia = !usePreciseGestures;
   const mapBounceAtZoomLimits = !usePreciseGestures;
   const forceOfflineTiles = !offlineTilesDisabled && isNative && offlineTilesReady && !onlineTileUrl;
+  // Disable tile handoff on tablet/native mode to avoid end-of-zoom snapshot swap flicker.
+  const enableTileHandoff = isTabletPerformanceMode
+    ? false
+    : (isNative || (!usePreciseGestures && (shouldUseOfflineTiles || forceOfflineTiles)));
   const needsOfflineDownload = false;
   const preferRasterOnNative = !offlineTilesDisabled && isNative && offlineRasterAvailable && !offlinePmtilesUri;
   const activePackName = activePack.name;
   const hasDownloadUrl = !!activePack.downloadUrl;
   const canDownloadOffline = hasDownloadUrl && isOnline;
+  const boundaryVisualZoom = isTabletPerformanceMode ? TABLET_BOUNDARY_VISUAL_ZOOM : currentZoom;
+  const effectiveMapBounds = isTabletPerformanceMode ? null : mapBounds;
   const boundaryPointLimit = useMemo(() => {
-    return getBoundaryPointLimit(currentZoom, isMapMoving, isTabletPerformanceMode);
-  }, [currentZoom, isMapMoving, isTabletPerformanceMode]);
+    return getBoundaryPointLimit(boundaryVisualZoom, isMapMoving, isTabletPerformanceMode);
+  }, [boundaryVisualZoom, isMapMoving, isTabletPerformanceMode]);
 
   const boundaryLodLevel = useMemo(() => {
     if (isTabletPerformanceMode) {
@@ -1857,12 +1989,33 @@ function MapView({
       return 'mid' as const;
     }
 
-    return getBoundaryLodLevel(currentZoom, isMapMoving);
-  }, [currentZoom, isMapMoving, isTabletPerformanceMode]);
+    return getBoundaryLodLevel(boundaryVisualZoom, isMapMoving);
+  }, [boundaryVisualZoom, isMapMoving, isTabletPerformanceMode]);
 
   // Zoom change handler
   const handleZoomChange = useCallback((zoom: number) => {
-    setCurrentZoom(zoom);
+    if (isTabletPerformanceMode) {
+      return;
+    }
+
+    setCurrentZoom((prev) => (Math.abs(prev - zoom) < 0.001 ? prev : zoom));
+  }, [isTabletPerformanceMode]);
+
+  const handleMapBoundsChange = useCallback((bounds: L.LatLngBounds) => {
+    if (isTabletPerformanceMode) {
+      return;
+    }
+
+    setMapBounds((prev) => {
+      if (prev && prev.equals(bounds)) {
+        return prev;
+      }
+      return bounds;
+    });
+  }, [isTabletPerformanceMode]);
+
+  const handleMapMovingChange = useCallback((moving: boolean) => {
+    setIsMapMoving((prev) => (prev === moving ? prev : moving));
   }, []);
 
   // Memoize unique field boundaries to avoid recalculation on every render
@@ -2013,17 +2166,19 @@ function MapView({
   }, [uniqueFieldBoundaries, boundaryLodLevel, boundaryPointLimit]);
 
   const boundaryRenderLimit = useMemo(() => {
-    return getBoundaryRenderLimit(currentZoom, isMapMoving);
-  }, [currentZoom, isMapMoving]);
+    const movingForBoundaries = isTabletPerformanceMode ? false : isMapMoving;
+    return getBoundaryRenderLimit(boundaryVisualZoom, movingForBoundaries);
+  }, [boundaryVisualZoom, isMapMoving, isTabletPerformanceMode]);
 
   const boundaryVertexBudget = useMemo(() => {
-    return getBoundaryVertexBudget(currentZoom, isMapMoving, isTabletPerformanceMode);
-  }, [currentZoom, isMapMoving, isTabletPerformanceMode]);
+    const movingForBoundaries = isTabletPerformanceMode ? false : isMapMoving;
+    return getBoundaryVertexBudget(boundaryVisualZoom, movingForBoundaries, isTabletPerformanceMode);
+  }, [boundaryVisualZoom, isMapMoving, isTabletPerformanceMode]);
 
   const visibleBoundaryRenderData = useMemo(() => {
-    const visible = !mapBounds
+    const visible = !effectiveMapBounds
       ? boundaryRenderData
-      : boundaryRenderData.filter(item => mapBounds.intersects(item.bounds));
+      : boundaryRenderData.filter(item => effectiveMapBounds.intersects(item.bounds));
 
     const ranked = [...visible]
       .sort((a, b) => {
@@ -2065,7 +2220,7 @@ function MapView({
     }
 
     return selected.slice(0, boundaryRenderLimit);
-  }, [boundaryRenderData, mapBounds, boundaryRenderLimit, boundaryVertexBudget, focusedBoundaryId]);
+  }, [boundaryRenderData, effectiveMapBounds, boundaryRenderLimit, boundaryVertexBudget, focusedBoundaryId]);
 
   const activeBoundaryRenderData = useMemo(() => {
     // Keep outlines visible while moving; fill/labels are simplified separately.
@@ -2073,8 +2228,9 @@ function MapView({
   }, [visibleBoundaryRenderData]);
 
   const labelLimit = useMemo(() => {
-    return getBoundaryLabelLimit(currentZoom, isMapMoving);
-  }, [currentZoom, isMapMoving]);
+    const movingForBoundaries = isTabletPerformanceMode ? false : isMapMoving;
+    return getBoundaryLabelLimit(boundaryVisualZoom, movingForBoundaries);
+  }, [boundaryVisualZoom, isMapMoving, isTabletPerformanceMode]);
 
   const visibleLabelIds = useMemo(() => {
     if (labelLimit <= 0 || activeBoundaryRenderData.length === 0) {
@@ -2123,24 +2279,24 @@ function MapView({
       const hasSamplesInField = fieldsWithSamples.has(String(boundary.id));
       const fieldColor = hasSamplesInField ? '#FF4D6D' : (boundary.color || '#00FF00');
       const labelColor = useSatellite ? '#ffffff' : '#000000';
-      const shouldRenderLabel = currentZoom >= 13 && visibleLabelIds.has(String(boundary.id));
+      const shouldRenderLabel = boundaryVisualZoom >= 13 && visibleLabelIds.has(String(boundary.id));
       const labelIcons = shouldRenderLabel
         ? getLabelIcons(String(boundary.id), item.fieldNumber, labelColor)
         : null;
       const labelIcon = labelIcons
-        ? (currentZoom < 14
+        ? (boundaryVisualZoom < 14
             ? labelIcons.labelIconSmall
-            : (currentZoom < 15 ? labelIcons.labelIconLarge : labelIcons.labelIconLargeOutlined))
+            : (boundaryVisualZoom < 15 ? labelIcons.labelIconLarge : labelIcons.labelIconLargeOutlined))
         : null;
       const isFocusedField = focusedBoundaryId != null && String(boundary.id) === String(focusedBoundaryId);
-      const fieldWeight = isFocusedField
-        ? (currentZoom < 14 ? 1.6 : 2.1)
-        : (currentZoom < 14 ? 0.9 : 1.2);
-      const fillOpacity = isMapMoving ? 0 : (isFocusedField ? 0.14 : 0.10);
-      const showManualSamples = !isTabletPerformanceMode && currentZoom >= 15 && (focusedBoundaryId == null || isFocusedField);
-      const showSampleX = !isMapMoving && currentZoom >= 16;
-      const startEndRadius = currentZoom < 16 ? 6 : 8;
-      const midRadius = currentZoom < 16 ? 5 : 7;
+      const baseFocusedWeight = boundaryVisualZoom < 14 ? 1.6 : 2.1;
+      const baseRegularWeight = boundaryVisualZoom < 14 ? 0.9 : 1.2;
+      const fieldWeight = isFocusedField ? baseFocusedWeight : baseRegularWeight;
+      const fillOpacity = (isTabletPerformanceMode ? false : isMapMoving) ? 0 : (isFocusedField ? 0.14 : 0.10);
+      const showManualSamples = !isTabletPerformanceMode && boundaryVisualZoom >= 15 && (focusedBoundaryId == null || isFocusedField);
+      const showSampleX = !isMapMoving && boundaryVisualZoom >= 16;
+      const startEndRadius = boundaryVisualZoom < 16 ? 6 : 8;
+      const midRadius = boundaryVisualZoom < 16 ? 5 : 7;
       const renderManualSamples = () => {
         if (!showManualSamples || !boundary.manual_samples?.enabled || boundary.manual_samples.count <= 0) {
           return null;
@@ -2161,7 +2317,7 @@ function MapView({
             {samplePositions.length > 0 && (
               <Circle
                 center={samplePositions[0]}
-                radius={pixelRadiusToMeters(currentZoom, samplePositions[0][0], startEndRadius)}
+                radius={pixelRadiusToMeters(boundaryVisualZoom, samplePositions[0][0], startEndRadius)}
                 pathOptions={{
                   color: '#ffffff',
                   fillColor: dotColor,
@@ -2176,7 +2332,7 @@ function MapView({
               <div key={`manual-sample-${boundary.id}-${idx}`}>
                 <Circle
                   center={pos}
-                  radius={pixelRadiusToMeters(currentZoom, pos[0], midRadius)}
+                  radius={pixelRadiusToMeters(boundaryVisualZoom, pos[0], midRadius)}
                   pathOptions={{
                     color: '#ffffff',
                     fillColor: dotColor,
@@ -2188,7 +2344,7 @@ function MapView({
                 {showSampleX && (
                   <CircleMarker
                     center={pos}
-                    radius={currentZoom >= 17 ? 2 : 1.5}
+                    radius={boundaryVisualZoom >= 17 ? 2 : 1.5}
                     pathOptions={{
                       color: '#ffffff',
                       fillColor: '#111111',
@@ -2204,7 +2360,7 @@ function MapView({
             {samplePositions.length > 1 && (
               <Circle
                 center={samplePositions[samplePositions.length - 1]}
-                radius={pixelRadiusToMeters(currentZoom, samplePositions[samplePositions.length - 1][0], startEndRadius)}
+                radius={pixelRadiusToMeters(boundaryVisualZoom, samplePositions[samplePositions.length - 1][0], startEndRadius)}
                 pathOptions={{
                   color: '#ffffff',
                   fillColor: dotColor,
@@ -2223,6 +2379,7 @@ function MapView({
           <div key={boundary.id}>
             <Polygon
               positions={item.positions}
+              smoothFactor={0}
               pathOptions={{
                 color: fieldColor,
                 fillColor: fieldColor,
@@ -2262,6 +2419,7 @@ function MapView({
               <Polygon
                 key={`${boundary.id}-${idx}`}
                 positions={polygon}
+                smoothFactor={0}
                 pathOptions={{
                   color: fieldColor,
                   fillColor: fieldColor,
@@ -2300,7 +2458,7 @@ function MapView({
   }, [
     activeBoundaryRenderData,
     fieldsWithSamples,
-    currentZoom,
+    boundaryVisualZoom,
     isMapMoving,
     isTabletPerformanceMode,
     canvasRenderer,
@@ -2336,7 +2494,7 @@ function MapView({
     return sorted.filter((sample) => String(sample.field_boundary_id) === String(focusedBoundaryId));
   }, [fieldSamples, focusedBoundaryId, isTabletPerformanceMode]);
 
-  const sampleBounds = isTabletPerformanceMode ? null : mapBounds;
+  const sampleBounds = effectiveMapBounds;
 
   const sampleRenderData = useMemo(() => {
     const emptyData = {
@@ -2359,7 +2517,7 @@ function MapView({
     }
 
     if (isTabletPerformanceMode) {
-      const renderLimit = getTabletSamplePathLimit(currentZoom, isMapMoving);
+      const renderLimit = getTabletSamplePathLimit(TABLET_BOUNDARY_VISUAL_ZOOM, isMapMoving);
       const sampleLinePoints = reduceSamplesToPathPoints(fieldSamplesForRender, renderLimit);
 
       if (sampleLinePoints.length === 0) {
@@ -2718,15 +2876,23 @@ function MapView({
       >
         {/* MapScaleUpdater removed for lighter rendering */}
         <LabelPaneSetup />
-        <GesturePrecisionController enabled={usePreciseGestures} />
+        <GesturePrecisionController enabled={enableGesturePrecisionController} />
+        <TouchZoomEndStabilizer enabled={isTabletPerformanceMode} />
         <MapTapSelectionController
           enabled={usePreciseGestures}
           fieldBoundaries={uniqueFieldBoundaries}
           onFieldTap={onFieldClick}
           onEmptyTap={onMapEmptyTap}
         />
-        <TileHandoffController enabled={usePreciseGestures} />
-        <MapViewportTracker onBoundsChange={setMapBounds} onMovingChange={setIsMapMoving} />
+        <TileHandoffController enabled={enableTileHandoff} />
+        {!isTabletPerformanceMode && (
+          <MapViewportTracker
+            onBoundsChange={handleMapBoundsChange}
+            onMovingChange={handleMapMovingChange}
+            suppressZoomMoveState={isTabletPerformanceMode}
+            disablePostZoomUpdates={isTabletPerformanceMode}
+          />
+        )}
         {/* Tile Layer - Street Map or Satellite */}
         {(() => {
 
@@ -2776,6 +2942,11 @@ function MapView({
                 attribution='© OpenStreetMap contributors | Offline PMTiles'
                 theme={Capacitor.isNativePlatform() && isDarkMode ? 'dark' : 'light'}
                 schema="openmaptiles"
+                disableLabels={isTabletPerformanceMode}
+                keepBuffer={isTabletPerformanceMode ? Math.max(tileKeepBuffer, 6) : tileKeepBuffer}
+                updateWhenIdle={tileUpdateWhenIdle}
+                updateWhenZooming={tileUpdateWhenZooming}
+                tileDelay={isTabletPerformanceMode ? 0.01 : 3}
               />
             );
           }
@@ -2822,9 +2993,9 @@ function MapView({
                   key="esri-satellite"
                   url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
                   maxZoom={20}
-                  keepBuffer={tileKeepBuffer}
+                  keepBuffer={satelliteTileKeepBuffer}
                   updateWhenIdle={tileUpdateWhenIdle}
-                  updateWhenZooming={tileUpdateWhenZooming}
+                  updateWhenZooming={satelliteUpdateWhenZooming}
                   reuseTiles={true}
                   attribution='&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
                 />
@@ -2834,9 +3005,9 @@ function MapView({
                     url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
                     maxZoom={20}
                     opacity={0.7}
-                    keepBuffer={tileKeepBuffer}
+                    keepBuffer={satelliteTileKeepBuffer}
                     updateWhenIdle={tileUpdateWhenIdle}
-                    updateWhenZooming={tileUpdateWhenZooming}
+                    updateWhenZooming={satelliteUpdateWhenZooming}
                     reuseTiles={true}
                     attribution='&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
                   />
@@ -2880,7 +3051,13 @@ function MapView({
             />
           );
         })()}
-        <ZoomTracker onZoomChange={handleZoomChange} continuous={true} />
+        {!isTabletPerformanceMode && (
+          <ZoomTracker
+            onZoomChange={handleZoomChange}
+            continuous={true}
+            emitOnZoomEnd={!isTabletPerformanceMode}
+          />
+        )}
         <MapController
           currentPosition={currentPosition}
           fieldBoundaries={uniqueFieldBoundaries}
@@ -2902,6 +3079,7 @@ function MapView({
                   fillColor: '#3b82f6',
                   fillOpacity: 0.1,
                   weight: 2,
+                  className: 'gps-accuracy-circle',
                 }}
               />
             )}
@@ -2919,6 +3097,7 @@ function MapView({
         <SampleCanvasLayer
           enabled={isTabletPerformanceMode && sampleRenderData.sampleLinePoints.length > 0}
           pathPoints={sampleRenderData.sampleLinePoints}
+          suppressMoveEndInvalidate={isTabletPerformanceMode}
         />
 
         {/* Render dedicated field samples (web vector path only) */}

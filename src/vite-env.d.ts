@@ -11,3 +11,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
+
+declare const __GERMANY_TILES_AVAILABLE__: boolean
+declare const __GERMANY_PMTILES_AVAILABLE__: boolean

@@ -136,14 +136,23 @@ export const generateAgrolabCsv = (draft: OrderDraft) => {
     const hRows = fields.map((field) => {
       const row = Array(hHeader.length).fill('');
       row[0] = 'H';
-      const suffix = field.fieldId.split('.').pop() || '';
-      setValue(row, hHeader, 'lfd.Nr. /GPS', field.fieldId);
+      const exportSampleKey = field.exportMapping?.sampleKey || field.fieldId;
+      const exportSampleName = field.exportMapping?.sampleDisplayName || field.fieldName || field.fieldId;
+      const exportSourceBaseId = field.exportMapping?.sourceBaseId
+        || field.samplingCell?.parentBaseId
+        || field.baseId
+        || field.fieldId;
+      const suffix = field.samplingCell?.cellIndex
+        ? String(field.samplingCell.cellIndex)
+        : (exportSampleKey.split('.').pop() || '');
+
+      setValue(row, hHeader, 'lfd.Nr. /GPS', exportSampleKey);
       if (field.barcode) {
         setValue(row, hHeader, 'Tütenbarcode', field.barcode);
       }
-      setValue(row, hHeader, 'Schlagnr.', field.baseId || field.fieldId);
+      setValue(row, hHeader, 'Schlagnr.', exportSourceBaseId);
       setValue(row, hHeader, 'Teilschlagnr.', suffix);
-      setValue(row, hHeader, 'Schlagname', field.fieldName);
+      setValue(row, hHeader, 'Schlagname', exportSampleName);
       setValue(row, hHeader, 'Schlag-größe [ha]', field.areaHa ? String(field.areaHa) : '');
       setValue(row, hHeader, 'Proben-Fläche [ha]', field.areaHa ? String(field.areaHa) : '');
 

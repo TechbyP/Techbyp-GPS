@@ -112,6 +112,15 @@ npm run dev
 
 Visit `http://localhost:5173`
 
+### Web Production Build
+
+```bash
+npm run build
+```
+
+`npm run build` is the web build and emits `dist/index.html`.
+You can also run `npm run build:web` explicitly; it produces the same output.
+
 ### Android Development
 
 ```bash
@@ -224,6 +233,34 @@ npm run build
 # Preview production build
 npm run preview
 ```
+
+## 🌐 Deploying `dist` To A Website
+
+When deploying the web app, upload the contents of `dist/`, not the `dist` folder itself.
+
+Replace these together on the server each time:
+
+- `index.html`
+- `sw.js`
+- `manifest.webmanifest`
+- `assets/`
+- any copied static files like `app-logo.png`, `leaflet/`, and `tiles/`
+
+This app registers a production service worker for PWA/offline behavior. If desktop/local preview looks correct but iPhone still shows old sizing after upload, the most common cause is stale cached HTML/CSS/JS on the phone.
+
+Recommended hosting cache rules:
+
+- `index.html`: `no-cache` or very short cache lifetime
+- `sw.js`: `no-cache` or very short cache lifetime
+- `manifest.webmanifest`: `no-cache` or very short cache lifetime
+- hashed files under `assets/`: long cache lifetime is fine
+
+If an iPhone still shows the old layout after deploy:
+
+1. Close all tabs for the site.
+2. In Safari, clear the website data for that domain.
+3. If the site was added to the Home Screen, remove that app shortcut and reopen the site once in Safari.
+4. Open the deployed site again so it can fetch the latest `index.html` and `sw.js`.
 
 ## 📦 Building for Production
 

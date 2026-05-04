@@ -73,6 +73,23 @@ export interface LufaImportConfig {
   dateFormatHint?: 'YYYYMMDD_HH24MISS' | 'DDMMYYYY_HHMMSS';
 }
 
+export interface SamplingCellMetadata {
+  parentBaseId: string;
+  parentBaseName: string;
+  cellIndex: number;
+  row: number;
+  column: number;
+  gridSizeHa: 3 | 5;
+  generatedAt?: string;
+}
+
+export interface OrderFieldExportMapping {
+  sampleKey: string;
+  sampleDisplayName?: string;
+  sourceBaseId: string;
+  sourceBaseName: string;
+}
+
 export interface OrderDraft {
   id: string;
   name?: string;
@@ -133,6 +150,8 @@ export interface OrderDraft {
     km?: string;
     sampleCount?: string;
   };
+  agrolabMetadataEnabled?: boolean;
+  lufaImportEnabled?: boolean;
   lufaImport?: LufaImportConfig;
   gridSizeHa?: 3 | 5;
   samplingRequirements?: SamplingRequirements;
@@ -142,6 +161,8 @@ export interface OrderDraft {
     areaHa: number;
     geometry?: GeoJSON.Polygon | GeoJSON.MultiPolygon;
     labAttributes?: Record<string, string>;
+    samplingCell?: SamplingCellMetadata;
+    exportMapping?: OrderFieldExportMapping;
   }>;
   fields?: Array<{
     fieldId: string;
@@ -166,6 +187,8 @@ export interface OrderDraft {
     sampleCount?: number;
     notSampleable?: boolean;
     note?: string;
+    samplingCell?: SamplingCellMetadata;
+    exportMapping?: OrderFieldExportMapping;
   }>;
   parameters?: {
     landUseType?: string;

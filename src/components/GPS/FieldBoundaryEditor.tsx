@@ -5,7 +5,7 @@ import { Capacitor } from '@capacitor/core';
 import 'leaflet-draw';
 import { getCurrentPosition } from '../../utils/geolocation';
 import { hasInternetAccess } from '../../utils/networkDetection';
-import { getBlankTileUrl, getGermanyBounds } from '../../utils/tileUtils';
+import { getBlankTileUrl, getBundledGermanyPmtilesUrl, getGermanyBounds } from '../../utils/tileUtils';
 import PMTilesVectorLayer from './PMTilesVectorLayer';
 
 // Check for Germany offline tiles at runtime
@@ -23,7 +23,7 @@ const germanyTilesAvailable = checkGermanyTilesAvailable();
 const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 const isCapacitorApp = typeof window !== 'undefined' && Capacitor.getPlatform() !== 'web';
 const forceOffline = isOffline || isCapacitorApp;
-const offlinePmtilesUrl = (window as any).__VITE_PMTILES_URL__ || (import.meta.env.VITE_PMTILES_URL as string | undefined) || '/tiles/germany.pmtiles';
+const offlinePmtilesUrl = getBundledGermanyPmtilesUrl();
 const BLANK_TILE_URL = getBlankTileUrl();
 const onlineTileUrl = (window as any).__VITE_ONLINE_TILE_URL__ || (import.meta.env.VITE_ONLINE_TILE_URL as string | undefined);
 const usePmtilesVector = (() => {
@@ -1406,7 +1406,7 @@ const FieldBoundaryEditor: React.FC<FieldBoundaryEditorProps> = () => {
                   errorTileUrl={BLANK_TILE_URL}
                   crossOrigin="anonymous"
                 />
-                {usePmtilesVector && <PMTilesVectorLayer url={offlinePmtilesUrl} schema="openmaptiles" />}
+                {usePmtilesVector && offlinePmtilesUrl && <PMTilesVectorLayer url={offlinePmtilesUrl} schema="openmaptiles" />}
               </>
             );
           }

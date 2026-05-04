@@ -1,6 +1,6 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, User, LogOut, Settings, Square, Pentagon, ChevronDown, Trash2, ShieldCheck, Menu } from 'lucide-react';
+import { Plus, User, LogOut, Settings, Square, Pentagon, ChevronDown, Trash2, ShieldCheck, Menu, ArrowRight, FileText, Send, Pencil } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDarkMode } from '../../../hooks/useDarkMode';
 import { useLanguage } from '../../../hooks/useLanguage';
@@ -10,7 +10,7 @@ import OrdersMapView from './OrdersMapView';
 import OrderWizard from './OrderWizard';
 import area from '@turf/area';
 import type { DrawnField } from './types';
-import type { LufaStandarduntersuchungsumfang, OrderLabProvider } from '../../../types';
+import type { LufaStandarduntersuchungsumfang, OrderDraft, OrderLabProvider } from '../../../types';
 import { userProfileService, type UserProfile } from '../../../services/userProfileService';
 import { createOrderDraft } from './orderDraftUtils';
 import { db } from '../../../firebase';
@@ -19,6 +19,11 @@ import { deserializeGeometryFromFirestore, simplifyGeometryForStorage } from '..
 import toast from 'react-hot-toast';
 
 type OrderFilter = 'submitted' | 'in_progress' | 'completed';
+
+type WizardSourceField = NonNullable<OrderDraft['sourceFields']>[number] & {
+  color?: string;
+  firestoreId?: string;
+};
 
 type ContractEntry = {
   id: string;
@@ -36,6 +41,9 @@ type ContractField = {
   areaHa: number;
   geometry: any;
   color?: string;
+  labAttributes?: Record<string, string>;
+  samplingCell?: NonNullable<OrderDraft['sourceFields']>[number]['samplingCell'];
+  exportMapping?: NonNullable<OrderDraft['sourceFields']>[number]['exportMapping'];
   projectId: string;
   clientId?: string;
 };
@@ -52,6 +60,10 @@ export default function OrdersMainPage() {
   const [showSidebar, setShowSidebar] = useState(false);
   const [showStepModal, setShowStepModal] = useState(false);
   const [selectedStep, setSelectedStep] = useState(1);
+  const [viewportHeightPx, setViewportHeightPx] = useState<number | null>(null);
+  const [mapLayoutSyncToken, setMapLayoutSyncToken] = useState(0);
+  const [gridPreviewEnabled, setGridPreviewEnabled] = useState(true);
+  const [gridPreviewSizeHa, setGridPreviewSizeHa] = useState<3 | 5>(5);
   const submitOrderRef = useRef<(() => void) | null>(null);
   const stepContentRef = useRef<HTMLDivElement | null>(null);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
@@ -59,9 +71,18 @@ export default function OrdersMainPage() {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showNewContractModal, setShowNewContractModal] = useState(false);
+  const [newContractName, setNewContractName] = useState('');
+  const [newContractOwnerId, setNewContractOwnerId] = useState('');
+  const [newContractLabProvider, setNewContractLabProvider] = useState<OrderLabProvider | ''>('');
+  const [newContractLufaScope, setNewContractLufaScope] = useState<LufaStandarduntersuchungsumfang>('DED');
+  const [isCreatingContract, setIsCreatingContract] = useState(false);
+  const [showOwnersDropdown, setShowOwnersDropdown] = useState(false);
+  const [wizardPanelCollapsed, setWizardPanelCollapsed] = useState(false);
   const [step3Collapsed, setStep3Collapsed] = useState(false);
+  const [compactFieldPanelCollapsed, setCompactFieldPanelCollapsed] = useState(false);
   const [drawingMode, setDrawingMode] = useState<'polygon' | 'rectangle' | 'edit' | 'delete' | null>(null);
-  const [uploadedFields, setUploadedFields] = useState<Array<{baseId: string; baseName: string; areaHa: number; geometry: any; color?: string}>>([]);
+  const [uploadedFields, setUploadedFields] = useState<WizardSourceField[]>([]);
   const [selectedFieldKey, setSelectedFieldKey] = useState<string | null>(null);
   const [selectedFieldKeys, setSelectedFieldKeys] = useState<string[]>([]);
   const [fieldSummaries, setFieldSummaries] = useState<Record<string, { status: 'pending' | 'completed' | 'skipped' | 'mixed'; badges: string[]; services: string[] }>>({});
@@ -70,10 +91,98 @@ export default function OrdersMainPage() {
     setSelectedFieldKeys([]);
   }, []);
 
+  const syncViewportHeight = useCallback((force = false) => {
+    if (typeof window === 'undefined') return;
+
+    const nextHeight = Math.round(window.visualViewport?.height ?? window.innerHeight);
+    let shouldSyncMap = force;
+
+    setViewportHeightPx((prev) => {
+      if (prev !== nextHeight) {
+        shouldSyncMap = true;
+        return nextHeight;
+      }
+      return prev;
+    });
+
+    if (shouldSyncMap) {
+      setMapLayoutSyncToken((prev) => prev + 1);
+    }
+  }, []);
+
+  const resetViewportPosition = useCallback(() => {
+    if (typeof window === 'undefined') return;
+
+    const activeElement = document.activeElement;
+    if (activeElement instanceof HTMLElement && activeElement !== document.body) {
+      activeElement.blur();
+    }
+
+    const scrollToTop = () => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    };
+
+    const syncAndScroll = () => {
+      scrollToTop();
+      syncViewportHeight(true);
+    };
+
+    syncAndScroll();
+    window.requestAnimationFrame(() => {
+      syncAndScroll();
+      window.requestAnimationFrame(syncAndScroll);
+    });
+    window.setTimeout(syncAndScroll, 120);
+    window.setTimeout(syncAndScroll, 280);
+  }, [syncViewportHeight]);
+
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    let frameId = 0;
+    const updateViewportHeight = () => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(() => {
+        syncViewportHeight();
+      });
+    };
+
+    updateViewportHeight();
+
+    window.addEventListener('resize', updateViewportHeight);
+    window.addEventListener('orientationchange', updateViewportHeight);
+    window.visualViewport?.addEventListener('resize', updateViewportHeight);
+    window.visualViewport?.addEventListener('scroll', updateViewportHeight);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener('resize', updateViewportHeight);
+      window.removeEventListener('orientationchange', updateViewportHeight);
+      window.visualViewport?.removeEventListener('resize', updateViewportHeight);
+      window.visualViewport?.removeEventListener('scroll', updateViewportHeight);
+    };
+  }, [syncViewportHeight]);
+
+  useEffect(() => {
+    syncViewportHeight(true);
+  }, [showNewContractModal, showStepModal, syncViewportHeight]);
+
+  const closeNewContractModal = useCallback(() => {
+    setShowNewContractModal(false);
+    resetViewportPosition();
+  }, [resetViewportPosition]);
+
   useEffect(() => {
     if (!stepContentRef.current) return;
     stepContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
   }, [selectedStep]);
+
+  useEffect(() => {
+    if (!showStepModal) return;
+    setWizardPanelCollapsed(false);
+  }, [showStepModal, selectedStep]);
 
   const selectFieldKey = useCallback((key: string, multiSelect: boolean) => {
     setSelectedFieldKey(key);
@@ -113,6 +222,11 @@ export default function OrdersMainPage() {
   const [editingFieldBackup, setEditingFieldBackup] = useState<DrawnField | null>(null);
   const editingFieldSourceRef = useRef<'drawn' | 'draft' | null>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const ownerDropdownRef = useRef<HTMLDivElement>(null);
+  const contractDropdownRef = useRef<HTMLDivElement>(null);
+  const headerStatusControlsRef = useRef<HTMLDivElement>(null);
+  const headerStatusPanelRef = useRef<HTMLDivElement>(null);
+  const headerSelectorPanelRef = useRef<HTMLDivElement>(null);
   const fieldItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const fieldsListRef = useRef<HTMLDivElement | null>(null);
   const toastCooldownRef = useRef<Record<string, number>>({});
@@ -133,12 +247,6 @@ export default function OrdersMainPage() {
   const [profileDraft, setProfileDraft] = useState<Partial<UserProfile> | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
-  const [showNewContractModal, setShowNewContractModal] = useState(false);
-  const [newContractName, setNewContractName] = useState('');
-  const [newContractOwnerId, setNewContractOwnerId] = useState('');
-  const [newContractLabProvider, setNewContractLabProvider] = useState<OrderLabProvider | ''>('');
-  const [newContractLufaScope, setNewContractLufaScope] = useState<LufaStandarduntersuchungsumfang>('DED');
-  const [isCreatingContract, setIsCreatingContract] = useState(false);
   const [draftOverrideId, setDraftOverrideId] = useState<string | null>(null);
   const [draftOverrideName, setDraftOverrideName] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<'client' | 'admin'>('client');
@@ -228,6 +336,22 @@ export default function OrdersMainPage() {
 
   const nowMs = useCallback(() => (typeof performance !== 'undefined' ? performance.now() : Date.now()), []);
 
+  const closeStatusMenus = useCallback(() => {
+    setOpenFilterMenu(null);
+    setShowHeaderMenu(false);
+  }, []);
+
+  const handleSelectContract = useCallback((contract: ContractEntry) => {
+    setSelectedContractId(contract.id);
+    setDraftOverrideId(null);
+    setDraftOverrideName(null);
+    setShowContractsDropdown(false);
+    closeStatusMenus();
+    if (isAdmin && contract.clientId) {
+      setSelectedOwnerId(contract.clientId);
+    }
+  }, [closeStatusMenus, isAdmin]);
+
   const logTelemetrySummary = useCallback((sessionId: string, reason: 'visible' | 'failed') => {
     const entry = saveTelemetryRef.current[sessionId];
     if (!entry) return;
@@ -264,6 +388,24 @@ export default function OrdersMainPage() {
     if (!selectedContractId) return null;
     return contracts.find((contract) => contract.id === selectedContractId) || null;
   }, [contracts, selectedContractId]);
+
+  const selectedOwnerDropdownValue = selectedOwnerId || '';
+  const selectedOwnerOption = useMemo(() => (
+    userOptions.find((option) => option.id === selectedOwnerDropdownValue) || null
+  ), [userOptions, selectedOwnerDropdownValue]);
+  const selectedOwnerButtonLabel = selectedOwnerOption?.label || t('orders.mapUserAll');
+  const selectedContractButtonLabel = selectedContractId
+    ? selectedContract?.name || t('orders.selectContract')
+    : t('orders.contracts');
+
+  const ownerLabelById = useMemo(() => {
+    const map = new globalThis.Map<string, string>();
+    userOptions.forEach((option) => {
+      if (!option.id) return;
+      map.set(option.id, option.label);
+    });
+    return map;
+  }, [userOptions]);
 
   const resolveContractStatus = useCallback((projectData: any, hasTracks: boolean): OrderFilter => {
     // Completion markers and explicit completed status take highest priority
@@ -826,12 +968,15 @@ export default function OrdersMainPage() {
   }, [selectedContractId, loadContractFields, loadContractTracks, loadContractFieldSamples, loadContracts, notifyToast, t, nowMs, logTelemetrySummary]);
 
   const handleNewOrder = useCallback(() => {
+    closeStatusMenus();
+    setShowOwnersDropdown(false);
+    setShowContractsDropdown(false);
     setNewContractName('');
     setNewContractOwnerId(selectedOwnerId || user?.uid || '');
     setNewContractLabProvider('');
     setNewContractLufaScope('DED');
     setShowNewContractModal(true);
-  }, [selectedOwnerId, user?.uid]);
+  }, [closeStatusMenus, selectedOwnerId, user?.uid]);
 
   const handleCreateContract = useCallback(async () => {
     if (!user?.uid) return;
@@ -879,6 +1024,7 @@ export default function OrdersMainPage() {
       setSelectedStep(1);
       setShowStepModal(true);
       setShowNewContractModal(false);
+      resetViewportPosition();
       toast.success(t('orders.contractDraftReady'));
     } catch (error) {
       console.error('Failed to create contract:', error);
@@ -886,7 +1032,7 @@ export default function OrdersMainPage() {
     } finally {
       setIsCreatingContract(false);
     }
-  }, [newContractName, t, user?.uid, userRole, newContractOwnerId, newContractLabProvider, newContractLufaScope, clearSelectedFields]);
+  }, [newContractName, t, user?.uid, userRole, newContractOwnerId, newContractLabProvider, newContractLufaScope, clearSelectedFields, resetViewportPosition]);
 
   const handleDiscardContract = useCallback(async () => {
     const discardQuips = [
@@ -938,7 +1084,8 @@ export default function OrdersMainPage() {
     setNewContractOwnerId(selectedOwnerId || user?.uid || '');
     setNewContractLabProvider('');
     setNewContractLufaScope('DED');
-  }, [draftOverrideId, clearSelectedFields, selectedOwnerId, user?.uid, showConfirmation, t]);
+    resetViewportPosition();
+  }, [draftOverrideId, clearSelectedFields, selectedOwnerId, user?.uid, showConfirmation, t, resetViewportPosition]);
 
   const handleOpenStep = useCallback((step: number) => {
     setSelectedStep(step);
@@ -971,7 +1118,8 @@ export default function OrdersMainPage() {
   const handleCloseStepModal = useCallback(() => {
     setShowStepModal(false);
     setStep3Collapsed(false);
-  }, []);
+    resetViewportPosition();
+  }, [resetViewportPosition]);
 
   const handleOrderComplete = useCallback(() => {
     setShowSidebar(false);
@@ -986,8 +1134,9 @@ export default function OrdersMainPage() {
     setFocusedBoundaryId(null);
     setFocusedDrawnFieldId(null);
     setMapSelectionEvent(null);
+    resetViewportPosition();
     loadContracts();
-  }, [clearSelectedFields, loadContracts]);
+  }, [clearSelectedFields, loadContracts, resetViewportPosition]);
 
   const handleDeleteContract = useCallback(async (contract: ContractEntry) => {
     if (!contract.clientId) return;
@@ -1029,7 +1178,7 @@ export default function OrdersMainPage() {
     }
   }, [selectedContractId, showConfirmation, t]);
 
-  const handleFieldsLoaded = useCallback((fields: Array<{baseId: string; baseName: string; areaHa: number; geometry: any; color?: string}>) => {
+  const handleFieldsLoaded = useCallback((fields: NonNullable<OrderDraft['sourceFields']>) => {
     const normalizedFields = fields.map((field) => ({ ...field, color: field.color ?? '#3B82F6' }));
     setUploadedFields(normalizedFields);
 
@@ -1082,7 +1231,10 @@ export default function OrdersMainPage() {
       baseName: field.baseName,
       areaHa: field.areaHa,
       geometry: field.geometry,
-      color: field.color
+      color: field.color,
+      labAttributes: field.labAttributes,
+      samplingCell: field.samplingCell,
+      exportMapping: field.exportMapping,
     }));
 
     const normalizedDraftDrawn = draftDrawnFields.map((field) => ({
@@ -1565,6 +1717,53 @@ export default function OrdersMainPage() {
   }, [showUserMenu]);
 
   useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const targetNode = event.target as Node;
+      const insideOwnerDropdown = ownerDropdownRef.current?.contains(targetNode) ?? false;
+      const insideContractDropdown = contractDropdownRef.current?.contains(targetNode) ?? false;
+      const insideSelectorPanel = headerSelectorPanelRef.current?.contains(targetNode) ?? false;
+
+      if (!insideOwnerDropdown && !insideSelectorPanel) {
+        setShowOwnersDropdown(false);
+      }
+      if (!insideContractDropdown && !insideSelectorPanel) {
+        setShowContractsDropdown(false);
+      }
+    };
+
+    if (showOwnersDropdown || showContractsDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showOwnersDropdown, showContractsDropdown]);
+
+  useEffect(() => {
+    if (!showOwnersDropdown && !showContractsDropdown && !showUserMenu) return;
+    closeStatusMenus();
+  }, [closeStatusMenus, showContractsDropdown, showOwnersDropdown, showUserMenu]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const targetNode = event.target as Node;
+      const insideControls = headerStatusControlsRef.current?.contains(targetNode);
+      const insidePanel = headerStatusPanelRef.current?.contains(targetNode);
+      if (!insideControls && !insidePanel) {
+        closeStatusMenus();
+      }
+    };
+
+    if (openFilterMenu || showHeaderMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [closeStatusMenus, openFilterMenu, showHeaderMenu]);
+
+  useEffect(() => {
+    if (!selectedContractId && !draftOverrideId) return;
+    closeStatusMenus();
+  }, [closeStatusMenus, draftOverrideId, selectedContractId]);
+
+  useEffect(() => {
     if (!showSettingsModal || !user?.uid) return;
     setProfileLoading(true);
     userProfileService.getProfile(user.uid)
@@ -1752,6 +1951,15 @@ export default function OrdersMainPage() {
     return contracts.filter((contract) => contract.clientId === (user?.uid || ''));
   }, [contracts, activeOwnerId, isAdmin, user?.uid]);
 
+  const contractsDropdownOptions = useMemo(() => {
+    if (isAdmin) {
+      if (!selectedOwnerId) return contracts;
+      return contracts.filter((contract) => contract.clientId === selectedOwnerId);
+    }
+    const ownerId = user?.uid || '';
+    return contracts.filter((contract) => contract.clientId === ownerId);
+  }, [contracts, isAdmin, selectedOwnerId, user?.uid]);
+
   const statusCounts = useMemo(() => {
     return ownerScopedContracts.reduce<Record<OrderFilter, number>>((acc, contract) => {
       const status = contractStatusMap[contract.id] || 'submitted';
@@ -1759,6 +1967,19 @@ export default function OrdersMainPage() {
       return acc;
     }, { submitted: 0, in_progress: 0, completed: 0 });
   }, [ownerScopedContracts, contractStatusMap]);
+
+  const openCompactHeaderSelector = showOwnersDropdown
+    ? 'owners'
+    : showContractsDropdown
+      ? 'contracts'
+      : null;
+
+  const openHeaderMenuContracts = useMemo(() => {
+    if (!openFilterMenu) return [] as ContractEntry[];
+    return ownerScopedContracts.filter(
+      (contract) => (contractStatusMap[contract.id] || 'submitted') === openFilterMenu
+    );
+  }, [contractStatusMap, openFilterMenu, ownerScopedContracts]);
 
   const handleMarkContractComplete = useCallback(async (contract: ContractEntry) => {
     if (!isAdmin || !contract.clientId) return;
@@ -2034,10 +2255,195 @@ export default function OrdersMainPage() {
   ), [selectedFieldKeys]);
 
   const canMapEdit = isAdmin || showStepModal || Boolean(draftOverrideId);
+  const showCompactFieldPanel = showRightSidebar && combinedFields.length > 0;
+  const showCompactFieldPanelExpanded = showCompactFieldPanel && !compactFieldPanelCollapsed;
+  const compactFieldStepActive = showCompactFieldPanelExpanded && showStepModal && (selectedStep === 4 || selectedStep === 5);
+  const wizardContentMaxHeightClass = compactFieldStepActive
+    ? 'max-h-[17.5rem] sm:max-h-[19.5rem] lg:max-h-[19rem] xl:max-h-[calc(100vh-19rem)]'
+    : showCompactFieldPanelExpanded
+      ? 'max-h-[38vh] sm:max-h-[42vh] lg:max-h-[42vh] xl:max-h-[calc(100vh-19rem)]'
+      : 'max-h-[calc(100vh-10.5rem)] sm:max-h-[calc(100vh-11.25rem)] xl:max-h-[calc(100vh-19rem)]';
+  const wizardContentMaxHeightStyle = useMemo(() => {
+    if (!viewportHeightPx) return undefined;
+
+    if (compactFieldStepActive) {
+      return { maxHeight: '17.5rem' };
+    }
+
+    if (showCompactFieldPanelExpanded) {
+      return { maxHeight: `${Math.max(260, Math.round(viewportHeightPx * 0.38))}px` };
+    }
+
+    return { maxHeight: `${Math.max(280, viewportHeightPx - 168)}px` };
+  }, [viewportHeightPx, compactFieldStepActive, showCompactFieldPanelExpanded]);
+  const compactFieldPanelHeightClass = showStepModal
+    ? 'h-[7.75rem] sm:h-[8rem] lg:h-[8.5rem]'
+    : 'h-[8rem] sm:h-[8.25rem] lg:h-[8.75rem]';
+
+  useEffect(() => {
+    if (!showCompactFieldPanel) {
+      setCompactFieldPanelCollapsed(false);
+    }
+  }, [showCompactFieldPanel]);
+
+  const renderFieldCards = useCallback((includeRefs: boolean, compact = false) => (
+    combinedFields.map((field) => (
+      <div
+        key={field.key}
+        onClick={(event) => {
+          const isMulti = event.ctrlKey || event.metaKey;
+          selectFieldKey(field.key, isMulti);
+          if (field.source === 'uploaded') {
+            setFocusedBoundaryId(field.boundaryId);
+            setFocusedDrawnFieldId(null);
+          } else {
+            setFocusedDrawnFieldId(field.drawnId);
+            setFocusedBoundaryId(null);
+          }
+          if (showStepModal && (selectedStep === 4 || selectedStep === 5)) {
+            const baseId = field.baseId || field.baseName;
+            if (baseId) {
+              setMapSelectionEvent({ baseId, ctrlKey: isMulti, timestamp: Date.now() });
+            }
+          }
+        }}
+        ref={includeRefs ? ((el) => {
+          fieldItemRefs.current[field.key] = el;
+        }) : undefined}
+        className={`${compact ? 'h-auto min-h-full min-w-[11.5rem] max-w-[11.5rem] sm:min-w-[12.5rem] sm:max-w-[12.5rem] p-1.5 sm:p-2 snap-start overflow-hidden' : 'p-3'} rounded-lg border cursor-pointer transition-all ${
+          selectedFieldKeys.includes(field.key)
+            ? 'bg-blue-500/20 dark:bg-blue-500/30 border-blue-500/40 ring-1 ring-blue-500/50'
+            : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/50 dark:border-gray-700/50 hover:bg-white dark:hover:bg-gray-800'
+        }`}
+      >
+        {(() => {
+          const summaryKey = field.baseId || field.baseName;
+          const summary = summaryKey ? fieldSummaries[summaryKey] : undefined;
+          const summaryStatus = summary?.status;
+          const sampleCount = field.source === 'uploaded'
+            ? (fieldSampleCountByBoundaryId[String(field.boundaryId)] || 0)
+            : 0;
+          const status: 'pending' | 'completed' | 'skipped' | 'mixed' | undefined =
+            field.source === 'uploaded'
+              ? (
+                sampleCount > fieldCompletionSampleThreshold
+                  ? 'completed'
+                  : (summaryStatus === 'skipped' ? 'skipped' : 'pending')
+              )
+              : summaryStatus;
+          const landUseBadge = summary?.badges?.find((badge) => badge.startsWith('LU '));
+          const landUseValue = landUseBadge ? landUseBadge.slice(3).trim() : '';
+          const otherBadges = summary?.badges?.filter((badge) => badge !== landUseBadge) || [];
+          return (
+            <div className={`${compact ? 'mb-0.5 space-y-0.5' : 'mb-2 space-y-2'}`}>
+              {status && (
+                <div className="flex flex-wrap items-center gap-1">
+                  <span className={`${compact ? 'text-[9px]' : 'text-[10px]'} uppercase tracking-wide text-gray-500 dark:text-gray-400`}>{t('orders.statusLabel')}</span>
+                  <span
+                    className={`${compact ? 'text-[9px] px-1.5' : 'text-[11px] px-2'} py-0.5 rounded-full font-semibold ${
+                      status === 'completed'
+                        ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+                        : status === 'skipped'
+                        ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300'
+                        : status === 'pending'
+                        ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                        : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200'
+                    }`}
+                  >
+                    {t(`orders.status.${status}`, { defaultValue: status })}
+                  </span>
+                  {landUseValue && (
+                    <span className={`${compact ? 'text-[9px] px-1.5' : 'text-[11px] px-2'} py-0.5 rounded-full font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200`}>
+                      {t('orders.landUseBadge', { value: landUseValue }) || `Land use ${landUseValue}`}
+                    </span>
+                  )}
+                </div>
+              )}
+              {(((summary?.services?.length ?? 0) > 0) || otherBadges.length > 0) && (
+                <div className="flex flex-wrap items-center gap-1">
+                  {summary?.services?.map((label) => (
+                    <span
+                      key={`${field.key}-${label}`}
+                      className={`${compact ? 'text-[8px] px-1.5' : 'text-[10px] px-2'} py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200`}
+                    >
+                      {label}
+                    </span>
+                  ))}
+                  {otherBadges.map((badge) => (
+                    <span
+                      key={`${field.key}-${badge}`}
+                      className={`${compact ? 'text-[9px] px-1.5' : 'text-[11px] px-2'} py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200`}
+                    >
+                      {badge}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+        <div className={`flex items-start ${compact ? 'gap-1.5' : 'gap-2'}`}>
+          <div
+            className={`${compact ? 'w-3 h-3' : 'w-4 h-4'} rounded border-2 border-white flex-shrink-0 mt-0.5`}
+            style={{
+              backgroundColor: field.source === 'uploaded' && (fieldSampleCountByBoundaryId[String(field.boundaryId)] || 0) > 0
+                ? '#FF1493'
+                : (field.color ?? '#3B82F6')
+            }}
+          />
+          <div className="flex-1 min-w-0">
+            <div className={`${compact ? 'text-[11px] sm:text-[12px] leading-4' : 'text-sm'} font-medium text-gray-900 dark:text-white truncate`}>
+              {field.baseName}
+            </div>
+            <div className={`${compact ? 'text-[8px] sm:text-[9px] leading-3.5' : 'text-xs'} text-gray-600 dark:text-gray-400 space-y-0`}>
+              <div>{t('orders.fieldIdLabel', { id: field.baseId }) || `ID: ${field.baseId}`}</div>
+              <div>{t('orders.fieldAreaLabel', { area: field.areaHa }) || `Area: ${field.areaHa} ha`}</div>
+              {field.source === 'uploaded' && (
+                <div className={`${compact ? 'text-[9px] sm:text-[10px]' : 'text-xs'} font-semibold ${(fieldSampleCountByBoundaryId[String(field.boundaryId)] || 0) > 0 ? 'text-pink-600 dark:text-pink-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                  {fieldSampleCountByBoundaryId[String(field.boundaryId)] || 0} samples
+                </div>
+              )}
+            </div>
+          </div>
+          {isAdmin && (
+            <button
+              onClick={(event) => {
+                event.stopPropagation();
+                openFieldDetails(field.key);
+              }}
+              title={t('common.edit')}
+              aria-label={t('common.edit')}
+              className={compact
+                ? 'ml-auto flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-full border border-gray-200/60 dark:border-gray-700/60 bg-white/90 dark:bg-gray-900/85 text-blue-700 dark:text-blue-200 shadow-sm transition-colors hover:bg-white dark:hover:bg-gray-900 touch-manipulation shrink-0'
+                : 'ml-auto rounded-lg border border-gray-200/50 dark:border-gray-700/50 bg-white/80 dark:bg-gray-900/80 px-2.5 py-1.5 text-xs font-semibold text-blue-700 dark:text-blue-200 shadow-sm hover:bg-white dark:hover:bg-gray-900'
+              }
+            >
+              {compact ? <Pencil className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> : t('common.edit')}
+            </button>
+          )}
+        </div>
+      </div>
+    ))
+  ), [
+    combinedFields,
+    fieldCompletionSampleThreshold,
+    fieldSampleCountByBoundaryId,
+    fieldSummaries,
+    isAdmin,
+    openFieldDetails,
+    selectFieldKey,
+    selectedFieldKeys,
+    selectedStep,
+    showStepModal,
+    t,
+  ]);
 
   return (
     <div className={isDarkMode ? 'dark' : ''}>
-      <div className="h-screen relative bg-gray-50 dark:bg-gray-900">
+      <div
+        className="mobile-web-safe-shell relative bg-gray-50 dark:bg-gray-900"
+        style={viewportHeightPx ? { minHeight: `${viewportHeightPx}px`, height: `${viewportHeightPx}px` } : undefined}
+      >
         {/* Map view - full screen */}
         <div className="absolute inset-0">
           {/* Debug: Log what we're sending to the map */}
@@ -2056,6 +2462,9 @@ export default function OrdersMainPage() {
             focusedDrawnFieldId={focusedDrawnFieldId}
             selectedBoundaryIds={selectedBoundaryIds}
             selectedDrawnIds={selectedDrawnIds}
+            gridOverlayEnabled={showStepModal && selectedStep === 4 && gridPreviewEnabled}
+            gridOverlaySizeHa={gridPreviewSizeHa}
+            layoutSyncToken={mapLayoutSyncToken}
             disableSelectionFocus={showStepModal && selectedStep === 5}
             isTracking={false}
             isSidebarCollapsed={false}
@@ -2137,61 +2546,94 @@ export default function OrdersMainPage() {
         </div>
 
         {/* Header with filter buttons - overlay */}
-        <header className="absolute top-4 left-4 right-4 rounded-xl shadow-2xl overflow-visible backdrop-blur-2xl bg-white/70 dark:bg-gray-900/70 border border-gray-200/50 dark:border-gray-700/50 z-[5002]">
-          <div className="px-4 h-16 flex items-center">
-            <div className="flex items-center justify-between gap-4 w-full">
+        <header className="absolute top-3 left-3 right-3 sm:top-4 sm:left-4 sm:right-4 rounded-xl shadow-2xl overflow-visible backdrop-blur-2xl bg-white/70 dark:bg-gray-900/70 border border-gray-200/50 dark:border-gray-700/50 z-[5002]">
+          <div className="px-3 sm:px-4 h-14 sm:h-16 flex items-center">
+            <div className="flex items-center justify-between gap-2 sm:gap-4 w-full min-w-0">
               {/* Left side - App icon and controls */}
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 sm:gap-4 min-w-0">
                 <a
                   href="https://www.techbyp.com"
                   target="_blank"
                   rel="noreferrer"
-                  className="h-12 w-12 rounded-xl border border-gray-200/60 dark:border-gray-700/60 bg-white/80 dark:bg-gray-900/80 shadow-sm flex items-center justify-center overflow-hidden"
+                  className="h-10 w-10 sm:h-12 sm:w-12 rounded-xl border border-gray-200/60 dark:border-gray-700/60 bg-white/80 dark:bg-gray-900/80 shadow-sm flex items-center justify-center overflow-hidden shrink-0"
                   aria-label="Techbyp"
                 >
-                  <img src="/app-logo.png" alt="Techbyp" className="h-9 w-9 object-contain" />
+                  <img src="/app-logo.png" alt="Techbyp" className="h-8 w-8 sm:h-9 sm:w-9 object-contain" />
                 </a>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 min-w-0">
                   <button
                     onClick={handleNewOrder}
-                    className="glass-panel glass-panel-light dark:glass-panel-dark flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-gray-900 dark:text-white hover:bg-blue-600/20 dark:hover:bg-blue-500/20 transition-all w-fit"
+                    className="glass-panel glass-panel-light dark:glass-panel-dark h-10 w-10 lg:w-auto lg:px-4 rounded-xl text-sm font-semibold text-gray-900 dark:text-white hover:bg-blue-600/20 dark:hover:bg-blue-500/20 transition-all flex items-center justify-center gap-2 shrink-0"
+                    title={t('orders.newContract')}
+                    aria-label={t('orders.newContract')}
                   >
                     <Plus className="w-4 h-4" />
-                    {t('orders.newContract')}
+                    <span className="hidden lg:inline">{t('orders.newContract')}</span>
                   </button>
                   
                   {isAdmin && userOptions.length > 0 ? (
-                    <div className="flex items-center gap-3 rounded-lg border border-gray-200/60 dark:border-gray-700/60 bg-white/70 dark:bg-gray-900/70 px-2 py-1">
-                      <select
-                        className="rounded-md border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-2 py-1 text-xs text-gray-900 dark:text-white"
-                        value={selectedOwnerId || ''}
-                        onChange={(event) => setSelectedOwnerId(event.target.value || null)}
-                      >
-                        {userOptions.map((option) => (
-                          <option key={option.id} value={option.id}>
-                            {option.label}{option.id && option.id === user?.uid ? ` ${t('orders.userYou')}` : ''}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="flex items-center gap-2 rounded-lg border border-gray-200/60 dark:border-gray-700/60 bg-white/70 dark:bg-gray-900/70 px-1.5 sm:px-2 py-1 min-w-0">
+                      {/* Users dropdown */}
+                      <div className="relative" ref={ownerDropdownRef}>
+                        <button
+                          onClick={() => {
+                            setShowOwnersDropdown((prev) => !prev);
+                            setShowContractsDropdown(false);
+                          }}
+                          className="glass-panel glass-panel-light dark:glass-panel-dark h-10 w-10 xl:w-auto xl:max-w-[12rem] xl:px-4 rounded-xl text-sm font-semibold text-gray-900 dark:text-white hover:bg-gray-600/20 dark:hover:bg-gray-500/20 transition-all flex items-center justify-center xl:justify-start gap-2 shrink-0"
+                          title={selectedOwnerButtonLabel}
+                          aria-label={selectedOwnerButtonLabel}
+                        >
+                          <User className="w-4 h-4 xl:hidden" />
+                          <span className="hidden xl:inline truncate">{selectedOwnerButtonLabel}</span>
+                          <ChevronDown className="hidden xl:block w-4 h-4 shrink-0" />
+                        </button>
+
+                        {showOwnersDropdown && (
+                          <div className="hidden xl:block absolute top-full left-0 mt-2 w-56 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50 overflow-hidden">
+                            {userOptions.map((option) => (
+                              <div
+                                key={option.id}
+                                className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700"
+                              >
+                                <button
+                                  onClick={() => {
+                                    setSelectedOwnerId(option.id || null);
+                                    setShowOwnersDropdown(false);
+                                  }}
+                                  className="w-full text-left text-sm text-gray-900 dark:text-white truncate"
+                                  title={`${option.label}${option.id && option.id === user?.uid ? ` ${t('orders.userYou')}` : ''}`}
+                                >
+                                  {option.label}{option.id && option.id === user?.uid ? ` ${t('orders.userYou')}` : ''}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
 
                       {/* Contracts dropdown */}
-                      <div className="relative">
+                      <div className="relative" ref={contractDropdownRef}>
                         <button
-                          onClick={() => setShowContractsDropdown(!showContractsDropdown)}
-                          className="glass-panel glass-panel-light dark:glass-panel-dark flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-gray-900 dark:text-white hover:bg-gray-600/20 dark:hover:bg-gray-500/20 transition-all"
+                          onClick={() => {
+                            setShowContractsDropdown(!showContractsDropdown);
+                            setShowOwnersDropdown(false);
+                          }}
+                          className="glass-panel glass-panel-light dark:glass-panel-dark h-10 w-10 xl:w-auto xl:max-w-[14rem] xl:px-4 rounded-xl text-sm font-semibold text-gray-900 dark:text-white hover:bg-gray-600/20 dark:hover:bg-gray-500/20 transition-all flex items-center justify-center xl:justify-start gap-2 min-w-0 shrink-0"
+                          title={selectedContractButtonLabel}
+                          aria-label={selectedContractButtonLabel}
                         >
-                          {selectedContractId 
-                            ? selectedContract?.name || (t('orders.selectContract'))
-                            : (t('orders.contracts'))}
-                          <ChevronDown className="w-4 h-4" />
+                          <FileText className="w-4 h-4 xl:hidden" />
+                          <span className="hidden xl:inline truncate">{selectedContractButtonLabel}</span>
+                          <ChevronDown className="hidden xl:block w-4 h-4 shrink-0" />
                         </button>
                         
                         {showContractsDropdown && (
-                          <div className="absolute top-full left-0 mt-2 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50 min-w-max">
+                          <div className="hidden xl:block absolute top-full left-0 mt-2 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50 min-w-max">
                             {contractsLoading ? (
                               <div className="px-4 py-2 text-xs text-gray-500 dark:text-gray-400">{t('common.loading')}</div>
-                            ) : contracts.length > 0 ? (
-                              contracts.map((contract) => (
+                            ) : contractsDropdownOptions.length > 0 ? (
+                              contractsDropdownOptions.map((contract) => (
                                 <div
                                   key={contract.id}
                                   className="flex items-center justify-between gap-2 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -2210,6 +2652,11 @@ export default function OrdersMainPage() {
                                   >
                                     <div className="flex items-center gap-2">
                                       <span>{contract.name}</span>
+                                      {isAdmin && !selectedOwnerId && contract.clientId && (
+                                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                                          ({ownerLabelById.get(contract.clientId) || contract.clientId})
+                                        </span>
+                                      )}
                                       <span className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
                                         {statusLabels[contractStatusMap[contract.id] || 'submitted']}
                                       </span>
@@ -2236,23 +2683,27 @@ export default function OrdersMainPage() {
                       </div>
                     </div>
                   ) : (
-                    <div className="relative">
+                    <div className="relative" ref={contractDropdownRef}>
                       <button
-                        onClick={() => setShowContractsDropdown(!showContractsDropdown)}
-                        className="glass-panel glass-panel-light dark:glass-panel-dark flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-gray-900 dark:text-white hover:bg-gray-600/20 dark:hover:bg-gray-500/20 transition-all"
+                        onClick={() => {
+                          setShowContractsDropdown(!showContractsDropdown);
+                          setShowOwnersDropdown(false);
+                        }}
+                        className="glass-panel glass-panel-light dark:glass-panel-dark h-10 w-10 xl:w-auto xl:max-w-[14rem] xl:px-4 rounded-xl text-sm font-semibold text-gray-900 dark:text-white hover:bg-gray-600/20 dark:hover:bg-gray-500/20 transition-all flex items-center justify-center xl:justify-start gap-2 min-w-0 shrink-0"
+                        title={selectedContractButtonLabel}
+                        aria-label={selectedContractButtonLabel}
                       >
-                        {selectedContractId 
-                          ? selectedContract?.name || (t('orders.selectContract'))
-                          : (t('orders.contracts'))}
-                        <ChevronDown className="w-4 h-4" />
+                        <FileText className="w-4 h-4 xl:hidden" />
+                        <span className="hidden xl:inline truncate">{selectedContractButtonLabel}</span>
+                        <ChevronDown className="hidden xl:block w-4 h-4 shrink-0" />
                       </button>
                       
                       {showContractsDropdown && (
-                        <div className="absolute top-full left-0 mt-2 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50 min-w-max">
+                        <div className="hidden xl:block absolute top-full left-0 mt-2 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50 min-w-max">
                           {contractsLoading ? (
                             <div className="px-4 py-2 text-xs text-gray-500 dark:text-gray-400">{t('common.loading')}</div>
-                          ) : contracts.length > 0 ? (
-                            contracts.map((contract) => (
+                          ) : contractsDropdownOptions.length > 0 ? (
+                            contractsDropdownOptions.map((contract) => (
                               <div
                                 key={contract.id}
                                 className="flex items-center justify-between gap-2 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -2268,6 +2719,11 @@ export default function OrdersMainPage() {
                                 >
                                   <div className="flex items-center gap-2">
                                     <span>{contract.name}</span>
+                                    {isAdmin && !selectedOwnerId && contract.clientId && (
+                                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                                        ({ownerLabelById.get(contract.clientId) || contract.clientId})
+                                      </span>
+                                    )}
                                     <span className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
                                       {statusLabels[contractStatusMap[contract.id] || 'submitted']}
                                     </span>
@@ -2297,7 +2753,7 @@ export default function OrdersMainPage() {
               </div>
 
               {/* Right side - Filter buttons and User menu */}
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 sm:gap-3 shrink-0" ref={headerStatusControlsRef}>
                 <div className="header-status-filters flex-wrap gap-2 justify-end">
                   {filterButtons.map(({ key, label }) => {
                     const isActive = activeFilter === key;
@@ -2322,35 +2778,27 @@ export default function OrdersMainPage() {
                           <ChevronDown className={`w-3.5 h-3.5 transition-transform ${openFilterMenu === key ? 'rotate-180' : ''}`} />
                         </button>
                         {openFilterMenu === key && (
-                          <div className="absolute right-0 mt-2 w-64 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-xl z-[5001] overflow-hidden">
+                          <div className="absolute right-0 mt-2 w-[calc(100vw-2rem)] max-w-[16rem] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-xl z-[5001] overflow-hidden">
                             {contractsForStatus.length === 0 ? (
                               <div className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">
                                 {t('orders.noContractsInStatus')}
                               </div>
                             ) : (
                               contractsForStatus.map((contract) => (
-                                <div key={contract.id} className="flex items-center justify-between gap-2 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-800">
+                                <div key={contract.id} className="flex min-w-0 items-center justify-between gap-2 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-800">
                                   <button
-                                    onClick={() => {
-                                      setSelectedContractId(contract.id);
-                                      setDraftOverrideId(null);
-                                      setDraftOverrideName(null);
-                                      setOpenFilterMenu(null);
-                                      if (isAdmin && contract.clientId) {
-                                        setSelectedOwnerId(contract.clientId);
-                                      }
-                                    }}
-                                    className="flex-1 text-left text-xs text-gray-900 dark:text-white"
+                                    onClick={() => handleSelectContract(contract)}
+                                    className="min-w-0 flex-1 text-left text-xs text-gray-900 dark:text-white"
                                   >
-                                    <div className="font-semibold">{contract.name}</div>
-                                    <div className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                    <div className="font-semibold truncate">{contract.name}</div>
+                                    <div className="truncate text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
                                       {statusLabels[contractStatusMap[contract.id] || 'submitted']}
                                     </div>
                                   </button>
                                   {isAdmin && (contractStatusMap[contract.id] || 'submitted') !== 'completed' && (
                                     <button
                                       onClick={() => handleMarkContractComplete(contract)}
-                                      className="text-[10px] uppercase tracking-wide text-green-700 dark:text-green-300 hover:text-green-800"
+                                      className="shrink-0 text-[10px] uppercase tracking-wide text-green-700 dark:text-green-300 hover:text-green-800"
                                     >
                                       {t('orders.markComplete')}
                                     </button>
@@ -2358,7 +2806,7 @@ export default function OrdersMainPage() {
                                   {isAdmin && (contractStatusMap[contract.id] || 'submitted') === 'completed' && (
                                     <button
                                       onClick={() => handleMarkContractInProgress(contract)}
-                                      className="text-[10px] uppercase tracking-wide text-amber-700 dark:text-amber-300 hover:text-amber-800"
+                                      className="shrink-0 text-[10px] uppercase tracking-wide text-amber-700 dark:text-amber-300 hover:text-amber-800"
                                     >
                                       {t('orders.markInProgress')}
                                     </button>
@@ -2374,7 +2822,14 @@ export default function OrdersMainPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => setShowHeaderMenu((prev) => !prev)}
+                    onClick={() => {
+                      const next = !showHeaderMenu;
+                      setShowHeaderMenu(next);
+                      setOpenFilterMenu(null);
+                      setShowUserMenu(false);
+                      setShowOwnersDropdown(false);
+                      setShowContractsDropdown(false);
+                    }}
                     className="header-status-burger glass-panel glass-panel-light dark:glass-panel-dark items-center justify-center w-10 h-10 rounded-xl text-gray-900 dark:text-white hover:bg-gray-200/20 dark:hover:bg-gray-700/20 transition-all"
                     title={t('common.menu')}
                     aria-expanded={showHeaderMenu}
@@ -2392,7 +2847,13 @@ export default function OrdersMainPage() {
                   )}
                   <div className="relative" ref={userMenuRef}>
                   <button
-                    onClick={() => setShowUserMenu(!showUserMenu)}
+                    onClick={() => {
+                      const next = !showUserMenu;
+                      if (next) {
+                        closeStatusMenus();
+                      }
+                      setShowUserMenu(next);
+                    }}
                     className="glass-panel glass-panel-light dark:glass-panel-dark flex items-center justify-center w-10 h-10 rounded-xl text-gray-900 dark:text-white hover:bg-gray-200/20 dark:hover:bg-gray-700/20 transition-all"
                     title={user?.email || (t('orders.userMenu'))}
                   >
@@ -2401,7 +2862,7 @@ export default function OrdersMainPage() {
 
                   {/* User dropdown menu */}
                   {showUserMenu && (
-                    <div className="absolute right-0 mt-2 w-64 rounded-xl shadow-xl overflow-hidden backdrop-blur-2xl bg-white/90 dark:bg-gray-900/90 border border-gray-200/50 dark:border-gray-700/50 z-[5001]">
+                    <div className="absolute right-0 mt-2 w-[min(18rem,calc(100vw-1rem))] sm:w-64 max-h-[calc(100vh-6rem)] overflow-y-auto overscroll-contain rounded-xl shadow-xl backdrop-blur-2xl bg-white/90 dark:bg-gray-900/90 border border-gray-200/50 dark:border-gray-700/50 z-[5001]">
                       <div className="px-4 py-3 border-b border-gray-200/50 dark:border-gray-700/50">
                         <div className="text-sm font-extrabold uppercase tracking-[0.2em] text-white">
                           {userDisplayName}
@@ -2477,15 +2938,94 @@ export default function OrdersMainPage() {
             </div>
           </div>
 
+          {openCompactHeaderSelector && (
+            <div ref={headerSelectorPanelRef} className="xl:hidden absolute top-full left-4 right-4 mt-2 z-[5001]">
+              <div className="flex justify-center">
+                <div className="w-full max-w-[18rem] rounded-xl shadow-2xl overflow-hidden backdrop-blur-2xl bg-white/90 dark:bg-gray-900/90 border border-gray-200/50 dark:border-gray-700/50">
+                  {openCompactHeaderSelector === 'owners' ? (
+                    <div className="max-h-[min(18rem,55vh)] overflow-y-auto py-1.5">
+                      {userOptions.map((option) => (
+                        <div
+                          key={option.id}
+                          className="px-3 py-1 hover:bg-gray-100 dark:hover:bg-gray-800"
+                        >
+                          <button
+                            onClick={() => {
+                              setSelectedOwnerId(option.id || null);
+                              setShowOwnersDropdown(false);
+                            }}
+                            className="w-full rounded-lg px-2 py-2 text-left text-sm text-gray-900 dark:text-white truncate"
+                            title={`${option.label}${option.id && option.id === user?.uid ? ` ${t('orders.userYou')}` : ''}`}
+                          >
+                            {option.label}{option.id && option.id === user?.uid ? ` ${t('orders.userYou')}` : ''}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="max-h-[min(20rem,60vh)] overflow-y-auto py-1.5">
+                      {contractsLoading ? (
+                        <div className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">{t('common.loading')}</div>
+                      ) : contractsDropdownOptions.length > 0 ? (
+                        contractsDropdownOptions.map((contract) => (
+                          <div
+                            key={contract.id}
+                            className="flex min-w-0 items-center justify-between gap-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-800"
+                          >
+                            <button
+                              onClick={() => {
+                                setSelectedContractId(contract.id);
+                                setDraftOverrideId(null);
+                                setDraftOverrideName(null);
+                                setShowContractsDropdown(false);
+                                if (isAdmin && contract.clientId) {
+                                  setSelectedOwnerId(contract.clientId);
+                                }
+                              }}
+                              className="min-w-0 flex-1 text-left text-sm text-gray-900 dark:text-white"
+                            >
+                              <div className="truncate font-medium">{contract.name}</div>
+                              <div className="flex flex-wrap items-center gap-1.5 text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                {isAdmin && !selectedOwnerId && contract.clientId && (
+                                  <span className="text-xs normal-case tracking-normal">
+                                    {ownerLabelById.get(contract.clientId) || contract.clientId}
+                                  </span>
+                                )}
+                                <span>{statusLabels[contractStatusMap[contract.id] || 'submitted']}</span>
+                              </div>
+                            </button>
+                            <button
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setShowContractsDropdown(false);
+                                handleDeleteContract(contract);
+                              }}
+                              className="shrink-0 p-2 rounded-lg text-red-500 hover:text-red-600 hover:bg-red-50/60 dark:hover:bg-red-900/20"
+                              title={t('orders.deleteContract')}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">{t('orders.noContracts')}</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {showHeaderMenu && (
-            <div className="header-status-burger-panel absolute top-full left-4 right-4 mt-2 rounded-xl shadow-2xl overflow-visible backdrop-blur-2xl bg-white/90 dark:bg-gray-900/90 border border-gray-200/50 dark:border-gray-700/50 z-[5001]">
+            <div ref={headerStatusPanelRef} className="header-status-burger-panel absolute top-full left-4 right-4 mt-2 rounded-xl shadow-2xl overflow-visible backdrop-blur-2xl bg-white/90 dark:bg-gray-900/90 border border-gray-200/50 dark:border-gray-700/50 z-[5001]">
               <div className="p-3 flex flex-col gap-3">
-                <div className="flex flex-wrap items-center justify-center gap-2">
+                <div className="flex flex-col items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-center gap-2">
                   {filterButtons.map(({ key, label }) => {
                     const isActive = activeFilter === key;
-                    const contractsForStatus = ownerScopedContracts.filter((contract) => (contractStatusMap[contract.id] || 'submitted') === key);
                     return (
-                      <div key={key} className="relative">
+                      <div key={key}>
                         <button
                           onClick={() => {
                             setActiveFilter(key);
@@ -2503,332 +3043,342 @@ export default function OrdersMainPage() {
                           </span>
                           <ChevronDown className={`w-3.5 h-3.5 transition-transform ${openFilterMenu === key ? 'rotate-180' : ''}`} />
                         </button>
-                        {openFilterMenu === key && (
-                          <div className="absolute right-0 mt-2 w-64 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-xl z-[5001] overflow-hidden">
-                            {contractsForStatus.length === 0 ? (
-                              <div className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">
-                                {t('orders.noContractsInStatus')}
-                              </div>
-                            ) : (
-                              contractsForStatus.map((contract) => (
-                                <div key={contract.id} className="flex items-center justify-between gap-2 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-800">
-                                  <button
-                                    onClick={() => {
-                                      setSelectedContractId(contract.id);
-                                      setDraftOverrideId(null);
-                                      setDraftOverrideName(null);
-                                      setOpenFilterMenu(null);
-                                      if (isAdmin && contract.clientId) {
-                                        setSelectedOwnerId(contract.clientId);
-                                      }
-                                    }}
-                                    className="flex-1 text-left text-xs text-gray-900 dark:text-white"
-                                  >
-                                    <div className="font-semibold">{contract.name}</div>
-                                    <div className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                                      {statusLabels[contractStatusMap[contract.id] || 'submitted']}
-                                    </div>
-                                  </button>
-                                  {isAdmin && (contractStatusMap[contract.id] || 'submitted') !== 'completed' && (
-                                    <button
-                                      onClick={() => handleMarkContractComplete(contract)}
-                                      className="text-[10px] uppercase tracking-wide text-green-700 dark:text-green-300 hover:text-green-800"
-                                    >
-                                      {t('orders.markComplete')}
-                                    </button>
-                                  )}
-                                  {isAdmin && (contractStatusMap[contract.id] || 'submitted') === 'completed' && (
-                                    <button
-                                      onClick={() => handleMarkContractInProgress(contract)}
-                                      className="text-[10px] uppercase tracking-wide text-amber-700 dark:text-amber-300 hover:text-amber-800"
-                                    >
-                                      {t('orders.markInProgress')}
-                                    </button>
-                                  )}
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        )}
                       </div>
                     );
                   })}
+                  </div>
+                  {openFilterMenu && (
+                    <div className="w-full flex justify-center">
+                      <div className="w-full max-w-[16rem] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-xl z-[5001] overflow-hidden">
+                        {openHeaderMenuContracts.length === 0 ? (
+                          <div className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">
+                            {t('orders.noContractsInStatus')}
+                          </div>
+                        ) : (
+                          openHeaderMenuContracts.map((contract) => (
+                            <div key={contract.id} className="flex min-w-0 items-center justify-between gap-2 px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-800">
+                              <button
+                                onClick={() => handleSelectContract(contract)}
+                                className="min-w-0 flex-1 text-left text-xs text-gray-900 dark:text-white"
+                              >
+                                <div className="font-semibold truncate">{contract.name}</div>
+                                <div className="truncate text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                  {statusLabels[contractStatusMap[contract.id] || 'submitted']}
+                                </div>
+                              </button>
+                              {isAdmin && (contractStatusMap[contract.id] || 'submitted') !== 'completed' && (
+                                <button
+                                  onClick={() => handleMarkContractComplete(contract)}
+                                  className="shrink-0 text-[10px] uppercase tracking-wide text-green-700 dark:text-green-300 hover:text-green-800"
+                                >
+                                  {t('orders.markComplete')}
+                                </button>
+                              )}
+                              {isAdmin && (contractStatusMap[contract.id] || 'submitted') === 'completed' && (
+                                <button
+                                  onClick={() => handleMarkContractInProgress(contract)}
+                                  className="shrink-0 text-[10px] uppercase tracking-wide text-amber-700 dark:text-amber-300 hover:text-amber-800"
+                                >
+                                  {t('orders.markInProgress')}
+                                </button>
+                              )}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           )}
         </header>
 
-        {selectedStep === 3 && (isDrawingSession || draftDrawnFields.length > 0) && (
-          <div className="absolute top-[6rem] left-[5rem] z-[3999]">
-            <div className="flex items-center gap-2 rounded-full shadow-2xl backdrop-blur-2xl bg-white/70 dark:bg-gray-900/70 border border-gray-200/50 dark:border-gray-700/50 px-2 py-1">
-            <button
-              onClick={() => {
-                if (draftDrawnFields.length) {
-                  setDrawnFields((prev) => [...prev, ...draftDrawnFields]);
-                  setDraftDrawnFields([]);
-                }
-                setDrawingMode(null);
-                setStep3Collapsed(false);
-                setShowStepModal(true);
-              }}
-              className="px-4 py-2 rounded-full bg-green-500/80 text-green-950 dark:text-green-100 text-sm font-semibold shadow-md hover:bg-green-500"
-            >
-              {t('orders.drawingAccept')}
-            </button>
-            <button
-              onClick={() => {
-                setDraftDrawnFields([]);
-                if (editingFieldBackup) {
-                  setDrawnFields((prev) => [...prev, editingFieldBackup]);
-                  setEditingFieldBackup(null);
-                }
-                setDrawingMode(null);
-                setStep3Collapsed(false);
-                setShowStepModal(true);
-              }}
-              className="px-4 py-2 rounded-full bg-red-500/80 text-red-950 dark:text-red-100 text-sm font-semibold shadow-md hover:bg-red-500"
-            >
-              {t('orders.drawingCancel')}
-            </button>
-            </div>
-          </div>
-        )}
-
-        {showSidebar && (
-          <div className="absolute top-[6rem] left-4 w-14 z-[3999] flex flex-col gap-3">
-            <div className="rounded-xl shadow-2xl overflow-visible backdrop-blur-2xl bg-white/70 dark:bg-gray-900/70 border border-gray-200/50 dark:border-gray-700/50 animate-slide-down">
-              <div className="p-2 max-h-[60vh] overflow-y-auto scrollbar-modern">
-                {wizardSteps.map(({ step }, index) => {
-                  const isActive = selectedStep === step && showStepModal;
-                  const isComplete = step < selectedStep;
-                  const isLast = index === wizardSteps.length - 1;
-                  return (
-                    <div key={step} className="flex flex-col items-center relative">
-                      <button
-                        onClick={() => handleOpenStep(step)}
-                        className="w-full flex items-center justify-center py-1 transition-colors"
-                        aria-current={isActive ? 'step' : undefined}
-                      >
-                        <div
-                          className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold transition-colors ${
-                            isActive
-                              ? 'bg-blue-600 text-white ring-2 ring-blue-300/70'
-                              : isComplete
-                              ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
-                              : 'bg-gray-200/70 text-gray-700 dark:bg-gray-800/70 dark:text-gray-300'
-                          }`}
-                        >
-                          {step}
+        {(showSidebar || showStepModal || showCompactFieldPanel) && (
+          <div className="pointer-events-none absolute top-20 left-3 right-3 bottom-16 sm:top-[5.5rem] sm:left-4 sm:right-4 sm:bottom-20 xl:left-4 xl:right-auto xl:bottom-auto z-[3999] flex items-start gap-2 sm:gap-3">
+            {showSidebar && (
+              <div className={`pointer-events-auto flex shrink-0 flex-col gap-2 sm:gap-3 ${selectedStep === 3 ? 'w-20 sm:w-24 xl:w-[8rem]' : 'w-11 sm:w-12 xl:w-14'}`}>
+                <div className="rounded-xl shadow-2xl overflow-visible backdrop-blur-2xl bg-white/70 dark:bg-gray-900/70 border border-gray-200/50 dark:border-gray-700/50 animate-slide-down">
+                  <div className="p-2 max-h-[60vh] overflow-y-auto scrollbar-modern">
+                    {wizardSteps.map(({ step }, index) => {
+                      const isActive = selectedStep === step && showStepModal;
+                      const isComplete = step < selectedStep;
+                      const isLast = index === wizardSteps.length - 1;
+                      return (
+                        <div key={step} className="flex flex-col items-center relative">
+                          <button
+                            onClick={() => handleOpenStep(step)}
+                            className="w-full flex items-center justify-center py-1 transition-colors"
+                            aria-current={isActive ? 'step' : undefined}
+                          >
+                            <div
+                              className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold transition-colors ${
+                                isActive
+                                  ? 'bg-blue-600 text-white ring-2 ring-blue-300/70'
+                                  : isComplete
+                                  ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+                                  : 'bg-gray-200/70 text-gray-700 dark:bg-gray-800/70 dark:text-gray-300'
+                              }`}
+                            >
+                              {step}
+                            </div>
+                          </button>
+                          {!isLast && (
+                            <div
+                              className={`w-[2px] h-5 ${
+                                isComplete
+                                  ? 'bg-green-400/80 dark:bg-green-400/70'
+                                  : 'bg-gray-300/70 dark:bg-gray-700/70'
+                              }`}
+                            />
+                          )}
                         </div>
-                      </button>
-                      {!isLast && (
-                        <div
-                          className={`w-[2px] h-5 ${
-                            isComplete
-                              ? 'bg-green-400/80 dark:bg-green-400/70'
-                              : 'bg-gray-300/70 dark:bg-gray-700/70'
-                          }`}
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {selectedStep === 3 && (
-              <div className="rounded-xl shadow-2xl overflow-hidden backdrop-blur-2xl bg-white/70 dark:bg-gray-900/70 border border-gray-200/50 dark:border-gray-700/50">
-                <div className="px-2 py-2 border-b border-gray-200/50 dark:border-gray-700/50">
-                  <div className="text-[11px] font-semibold text-gray-900 dark:text-white text-center leading-tight whitespace-normal">
-                    {t('orders.drawingControls')}
+                      );
+                    })}
                   </div>
                 </div>
 
-                <div className="p-2 space-y-1.5">
-                  <button
-                    onClick={() => {
-                      const next = drawingMode === 'polygon' ? null : 'polygon';
-                      setDrawingMode(next);
-                      if (next) setShowStepModal(false);
-                    }}
-                    className={`w-full flex items-center justify-center px-3 py-2 rounded-lg transition-colors ${
-                      drawingMode === 'polygon'
-                        ? 'bg-blue-500/20 dark:bg-blue-500/30 text-blue-900 dark:text-blue-100 border border-blue-500/40'
-                        : 'bg-gray-100/50 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300 hover:bg-gray-200/50 dark:hover:bg-gray-700/50'
-                    }`}
-                    title={t('orders.drawPolygon')}
-                    aria-label={t('orders.drawPolygon')}
-                  >
-                    <Pentagon className="w-4 h-4" />
-                  </button>
+                {selectedStep === 3 && (
+                  <div className="rounded-xl shadow-2xl overflow-hidden backdrop-blur-2xl bg-white/70 dark:bg-gray-900/70 border border-gray-200/50 dark:border-gray-700/50">
+                    <div className="px-2 py-2 border-b border-gray-200/50 dark:border-gray-700/50">
+                      <div className="text-[11px] font-semibold text-gray-900 dark:text-white text-center leading-tight whitespace-normal">
+                        {t('orders.controlsShort')}
+                      </div>
+                    </div>
 
-                  <button
-                    onClick={() => {
-                      const next = drawingMode === 'rectangle' ? null : 'rectangle';
-                      setDrawingMode(next);
-                      if (next) setShowStepModal(false);
-                    }}
-                    className={`w-full flex items-center justify-center px-3 py-2 rounded-lg transition-colors ${
-                      drawingMode === 'rectangle'
-                        ? 'bg-blue-500/20 dark:bg-blue-500/30 text-blue-900 dark:text-blue-100 border border-blue-500/40'
-                        : 'bg-gray-100/50 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300 hover:bg-gray-200/50 dark:hover:bg-gray-700/50'
-                    }`}
-                    title={t('orders.drawRectangle')}
-                    aria-label={t('orders.drawRectangle')}
-                  >
-                    <Square className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+                    <div className="p-2 space-y-1.5">
+                      <button
+                        onClick={() => {
+                          const next = drawingMode === 'polygon' ? null : 'polygon';
+                          setDrawingMode(next);
+                          if (next) setShowStepModal(false);
+                        }}
+                        className={`w-full flex min-h-[3.5rem] flex-col items-center justify-center gap-1 rounded-lg px-2 py-2.5 text-center transition-colors ${
+                          drawingMode === 'polygon'
+                            ? 'bg-blue-500/20 dark:bg-blue-500/30 text-blue-900 dark:text-blue-100 border border-blue-500/40'
+                            : 'bg-gray-100/50 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300 hover:bg-gray-200/50 dark:hover:bg-gray-700/50'
+                        }`}
+                        title={t('orders.drawPolygon')}
+                        aria-label={t('orders.drawPolygon')}
+                      >
+                        <Pentagon className="h-5 w-5 shrink-0" />
+                        <span className="max-w-full text-[10px] font-medium leading-tight sm:text-[11px]">
+                          {t('orders.polygonShort')}
+                        </span>
+                      </button>
 
-        {/* Step Panel - shows individual step next to sidebar */}
-        {showStepModal && (
-          <>
-            {selectedStep === 3 && step3Collapsed && (
-              <div className="absolute top-[6rem] left-[5rem] z-[3999] flex flex-wrap items-center gap-3">
-                <button
-                  onClick={() => setStep3Collapsed(false)}
-                  className="h-10 px-4 rounded-full border border-gray-200/50 dark:border-gray-700/50 bg-white/70 dark:bg-gray-900/70 backdrop-blur-2xl shadow-2xl text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2"
-                >
-                  <span>{t('orders.wizard.step3Title')}</span>
-                  {combinedFields.length > 0 && (
-                    <span className="text-xs text-green-600 dark:text-green-400 font-semibold">
-                      ✓ {combinedFields.length}
-                    </span>
-                  )}
-                  <span className="text-sm text-gray-500 dark:text-gray-400">›</span>
-                </button>
-                <button
-                  onClick={() => setSelectedStep(4)}
-                  disabled={!stepReadiness.step3Ready}
-                  className={`h-10 px-4 rounded-full text-sm font-semibold transition-all ${
-                    stepReadiness.step3Ready
-                      ? 'bg-blue-600 text-white hover:bg-blue-700'
-                      : 'bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500'
-                  }`}
-                >
-                  {t('orders.wizard.continueToStep4')}
-                </button>
-                {draftOverrideId && (
-                  <button
-                    onClick={handleDiscardContract}
-                    disabled={selectedStep === 6 && isSubmittingOrder}
-                    className={`h-10 px-4 rounded-full border border-red-200 text-red-600 bg-white/80 dark:bg-gray-900/80 dark:border-red-900/60 dark:text-red-300 text-sm font-semibold transition-colors ${
-                      selectedStep === 6 && isSubmittingOrder
-                        ? 'opacity-60 cursor-not-allowed'
-                        : 'hover:bg-red-50/60 dark:hover:bg-red-900/30'
-                    }`}
-                  >
-                    {t('orders.discard')}
-                  </button>
+                      <button
+                        onClick={() => {
+                          const next = drawingMode === 'rectangle' ? null : 'rectangle';
+                          setDrawingMode(next);
+                          if (next) setShowStepModal(false);
+                        }}
+                        className={`w-full flex min-h-[3.5rem] flex-col items-center justify-center gap-1 rounded-lg px-2 py-2.5 text-center transition-colors ${
+                          drawingMode === 'rectangle'
+                            ? 'bg-blue-500/20 dark:bg-blue-500/30 text-blue-900 dark:text-blue-100 border border-blue-500/40'
+                            : 'bg-gray-100/50 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300 hover:bg-gray-200/50 dark:hover:bg-gray-700/50'
+                        }`}
+                        title={t('orders.drawRectangle')}
+                        aria-label={t('orders.drawRectangle')}
+                      >
+                        <Square className="h-5 w-5 shrink-0" />
+                        <span className="max-w-full text-[10px] font-medium leading-tight sm:text-[11px]">
+                          {t('orders.rectangleShort')}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             )}
-            <div className="absolute top-[6rem] left-[5rem] z-[3999] flex items-start gap-3">
-              <div
-                className={`w-[calc(100%-6rem)] sm:w-[28rem] rounded-xl shadow-2xl overflow-hidden backdrop-blur-2xl bg-white/70 dark:bg-gray-900/70 border border-gray-200/50 dark:border-gray-700/50 animate-slide-down ${
-                  selectedStep === 3 && step3Collapsed ? 'hidden' : ''
-                }`}
-              >
-              <div
-                className={`flex items-center justify-between px-6 py-4 border-b border-gray-200/50 dark:border-gray-700/50 ${
-                  selectedStep === 3 ? 'cursor-pointer' : ''
-                }`}
-                onClick={selectedStep === 3 ? () => setStep3Collapsed(true) : undefined}
-              >
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    {t('orders.wizard.stepLabel', { step: selectedStep }) || `Step ${selectedStep}`}
-                  </div>
-                  <div className="text-lg font-semibold text-gray-900 dark:text-white">
-                    {wizardSteps[selectedStep - 1]?.label}
+
+            <div className="min-w-0 flex flex-1 flex-col gap-2 sm:gap-3 xl:flex-none xl:w-[38rem]">
+              {selectedStep === 3 && (isDrawingSession || draftDrawnFields.length > 0) && (
+                <div className="pointer-events-auto">
+                  <div className="flex flex-wrap items-center gap-2 rounded-full shadow-2xl backdrop-blur-2xl bg-white/70 dark:bg-gray-900/70 border border-gray-200/50 dark:border-gray-700/50 px-2 py-1">
+                    <button
+                      onClick={() => {
+                        if (draftDrawnFields.length) {
+                          setDrawnFields((prev) => [...prev, ...draftDrawnFields]);
+                          setDraftDrawnFields([]);
+                        }
+                        setDrawingMode(null);
+                        setStep3Collapsed(false);
+                        setShowStepModal(true);
+                      }}
+                      className="px-4 py-2 rounded-full bg-green-500/80 text-green-950 dark:text-green-100 text-sm font-semibold shadow-md hover:bg-green-500"
+                    >
+                      {t('orders.drawingAccept')}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setDraftDrawnFields([]);
+                        if (editingFieldBackup) {
+                          setDrawnFields((prev) => [...prev, editingFieldBackup]);
+                          setEditingFieldBackup(null);
+                        }
+                        setDrawingMode(null);
+                        setStep3Collapsed(false);
+                        setShowStepModal(true);
+                      }}
+                      className="px-4 py-2 rounded-full bg-red-500/80 text-red-950 dark:text-red-100 text-sm font-semibold shadow-md hover:bg-red-500"
+                    >
+                      {t('orders.drawingCancel')}
+                    </button>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {selectedStep < 6 && (
-                    <button
-                      onClick={() => setSelectedStep(selectedStep + 1)}
-                      disabled={!canContinueStep}
-                      className={`h-9 px-3 rounded-lg text-sm font-semibold transition-all ${
-                        canContinueStep
-                          ? 'bg-blue-600 text-white hover:bg-blue-700'
-                          : 'bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500'
-                      }`}
-                    >
-                      {getContinueLabel(selectedStep)}
-                    </button>
-                  )}
-                  {selectedStep === 6 && (
-                    <button
-                      onClick={() => submitOrderRef.current?.()}
-                      disabled={!canSubmitStep || isSubmittingOrder}
-                      className={`h-9 px-3 rounded-lg text-sm font-semibold transition-all ${
-                        canSubmitStep && !isSubmittingOrder
-                          ? 'bg-indigo-600 text-white hover:bg-indigo-700'
-                          : 'bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500'
-                      }`}
-                    >
-                      {t('orders.wizard.submitOrder')}
-                    </button>
-                  )}
-                  {draftOverrideId && (
-                    <button
-                      onClick={handleDiscardContract}
-                      disabled={selectedStep === 6 && isSubmittingOrder}
-                      className={`h-9 px-3 rounded-lg border border-red-200 text-red-600 bg-white/80 dark:bg-gray-900/80 dark:border-red-900/60 dark:text-red-300 text-sm font-semibold transition-colors ${
-                        selectedStep === 6 && isSubmittingOrder
-                          ? 'opacity-60 cursor-not-allowed'
-                          : 'hover:bg-red-50/60 dark:hover:bg-red-900/30'
-                      }`}
-                    >
-                      {t('orders.discard')}
-                    </button>
+              )}
+
+              {showStepModal && (
+                <div className="pointer-events-auto w-full rounded-xl shadow-2xl overflow-hidden backdrop-blur-2xl bg-white/70 dark:bg-gray-900/70 border border-gray-200/50 dark:border-gray-700/50 animate-slide-down">
+                  <div
+                    className="flex items-center justify-between gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 xl:px-6 py-2 sm:py-2.5 xl:py-4 border-b border-gray-200/50 dark:border-gray-700/50 cursor-pointer"
+                    onClick={() => setWizardPanelCollapsed((prev) => !prev)}
+                  >
+                    <div className="min-w-0">
+                      <div className="text-[10px] sm:text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 leading-none">
+                        {t('orders.wizard.stepLabel', { step: selectedStep }) || `Step ${selectedStep}`}
+                      </div>
+                      <div className="mt-0.5 text-sm sm:text-base xl:text-lg font-semibold text-gray-900 dark:text-white truncate leading-tight">
+                        {wizardSteps[selectedStep - 1]?.label}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 sm:gap-2 shrink-0" onClick={(event) => event.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => setWizardPanelCollapsed((prev) => !prev)}
+                        className="h-8 w-8 sm:h-9 sm:w-9 rounded-lg border border-gray-200/70 dark:border-gray-700/70 bg-white/80 dark:bg-gray-900/70 text-gray-600 dark:text-gray-300 hover:bg-gray-100/80 dark:hover:bg-gray-800/80 flex items-center justify-center"
+                        title={wizardPanelCollapsed ? (t('common.expand')) : (t('common.collapse'))}
+                        aria-label={wizardPanelCollapsed ? (t('common.expand')) : (t('common.collapse'))}
+                      >
+                        <ChevronDown className={`w-3.5 h-3.5 sm:w-4 sm:h-4 transition-transform ${wizardPanelCollapsed ? 'rotate-180' : ''}`} />
+                      </button>
+                      {selectedStep < 6 && (
+                        <button
+                          onClick={() => setSelectedStep(selectedStep + 1)}
+                          disabled={!canContinueStep}
+                          className={`h-8 w-8 sm:h-9 sm:w-9 xl:w-auto xl:px-3 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+                            canContinueStep
+                              ? 'bg-blue-600 text-white hover:bg-blue-700'
+                              : 'bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500'
+                          }`}
+                          title={getContinueLabel(selectedStep)}
+                          aria-label={getContinueLabel(selectedStep)}
+                        >
+                          <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 xl:hidden" />
+                          <span className="hidden xl:inline">{getContinueLabel(selectedStep)}</span>
+                        </button>
+                      )}
+                      {selectedStep === 6 && (
+                        <button
+                          onClick={() => submitOrderRef.current?.()}
+                          disabled={!canSubmitStep || isSubmittingOrder}
+                          className={`h-8 w-8 sm:h-9 sm:w-9 xl:w-auto xl:px-3 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+                            canSubmitStep && !isSubmittingOrder
+                              ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                              : 'bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500'
+                          }`}
+                          title={t('orders.wizard.submitOrder')}
+                          aria-label={t('orders.wizard.submitOrder')}
+                        >
+                          <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4 xl:hidden" />
+                          <span className="hidden xl:inline">{t('orders.wizard.submitOrder')}</span>
+                        </button>
+                      )}
+                      {draftOverrideId && (
+                        <button
+                          onClick={handleDiscardContract}
+                          disabled={selectedStep === 6 && isSubmittingOrder}
+                          className={`h-8 w-8 sm:h-9 sm:w-9 xl:w-auto xl:px-3 rounded-lg border border-red-200 text-red-600 bg-white/80 dark:bg-gray-900/80 dark:border-red-900/60 dark:text-red-300 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
+                            selectedStep === 6 && isSubmittingOrder
+                              ? 'opacity-60 cursor-not-allowed'
+                              : 'hover:bg-red-50/60 dark:hover:bg-red-900/30'
+                          }`}
+                          title={t('orders.discard')}
+                          aria-label={t('orders.discard')}
+                        >
+                          <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 xl:hidden" />
+                          <span className="hidden xl:inline">{t('orders.discard')}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {!wizardPanelCollapsed && (
+                    <div ref={stepContentRef} className={`overflow-y-auto ${wizardContentMaxHeightClass} p-2.5 sm:p-3.5 lg:p-5 xl:p-6 scrollbar-modern`} style={wizardContentMaxHeightStyle}>
+                      <OrderWizard 
+                        initialStep={selectedStep} 
+                        singleStepMode={true}
+                        onComplete={handleOrderComplete}
+                        onFieldsLoaded={handleFieldsLoaded}
+                        onStepChange={handleWizardStepChange}
+                        externalDrawnFields={drawnFields}
+                        onExternalDrawnFieldsChange={setDrawnFields}
+                        externalSourceFields={wizardSourceFields}
+                        step3Collapsed={step3Collapsed}
+                        onStep3CollapsedChange={setStep3Collapsed}
+                        draftId={draftOverrideId || selectedContractId || undefined}
+                        draftName={draftOverrideName || selectedContract?.name}
+                        deferProjectCreation={Boolean(draftOverrideId)}
+                        ownerIdOverride={userRole === 'admin'
+                          ? (draftOverrideId
+                            ? (newContractOwnerId || selectedOwnerId || undefined)
+                            : (selectedContract?.clientId || selectedOwnerId || undefined))
+                          : undefined}
+                        onSubmitHandlerChange={(handler) => {
+                          submitOrderRef.current = handler;
+                        }}
+                        onSubmitStateChange={setIsSubmittingOrder}
+                        mapSelectionEvent={mapSelectionEvent}
+                        onFieldFocusRequest={handleWizardFieldFocus}
+                        onClearSelectionRequest={handleMapBackgroundClick}
+                        onStepReadinessChange={setStepReadiness}
+                        onFieldSummariesChange={setFieldSummaries}
+                        onGridPreviewChange={({ enabled, sizeHa }) => {
+                          setGridPreviewEnabled(enabled);
+                          setGridPreviewSizeHa(sizeHa);
+                        }}
+                      />
+                    </div>
                   )}
                 </div>
-              </div>
-              <div ref={stepContentRef} className="overflow-y-auto max-h-[calc(100vh-19rem)] p-6 scrollbar-modern">
-                <OrderWizard 
-                  initialStep={selectedStep} 
-                  singleStepMode={true}
-                  onComplete={handleOrderComplete}
-                  onFieldsLoaded={handleFieldsLoaded}
-                  onStepChange={handleWizardStepChange}
-                  externalDrawnFields={drawnFields}
-                  onExternalDrawnFieldsChange={setDrawnFields}
-                  externalSourceFields={wizardSourceFields}
-                  step3Collapsed={step3Collapsed}
-                  onStep3CollapsedChange={setStep3Collapsed}
-                  draftId={draftOverrideId || selectedContractId || undefined}
-                  draftName={draftOverrideName || selectedContract?.name}
-                  deferProjectCreation={Boolean(draftOverrideId)}
-                  ownerIdOverride={userRole === 'admin'
-                    ? (draftOverrideId
-                      ? (newContractOwnerId || selectedOwnerId || undefined)
-                      : (selectedContract?.clientId || selectedOwnerId || undefined))
-                    : undefined}
-                  onSubmitHandlerChange={(handler) => {
-                    submitOrderRef.current = handler;
-                  }}
-                  onSubmitStateChange={setIsSubmittingOrder}
-                  mapSelectionEvent={mapSelectionEvent}
-                  onFieldFocusRequest={handleWizardFieldFocus}
-                  onStepReadinessChange={setStepReadiness}
-                  onFieldSummariesChange={setFieldSummaries}
-                />
-              </div>
+              )}
+
             </div>
-            </div>
-          </>
+
+            {showCompactFieldPanelExpanded && (
+              <div className="pointer-events-auto xl:hidden absolute bottom-0 left-0 right-0 rounded-xl shadow-2xl overflow-hidden backdrop-blur-2xl bg-white/70 dark:bg-gray-900/70 border border-gray-200/50 dark:border-gray-700/50">
+                <div className={`px-2 pb-2 pt-2 sm:px-3 sm:pb-2.5 sm:pt-2.5 overflow-x-auto overflow-y-hidden ${compactFieldPanelHeightClass} scrollbar-modern`}>
+                  <div className="flex h-full items-start gap-1.5 pr-1 snap-x snap-mandatory">
+                    {renderFieldCards(false, true)}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
-        {/* Right sidebar - Fields list (Step 5 or wizard closed) */}
+        {showCompactFieldPanel && (
+          <button
+            type="button"
+            onClick={() => setCompactFieldPanelCollapsed((prev) => !prev)}
+            className="pointer-events-auto xl:hidden absolute right-2 bottom-2 sm:right-3 sm:bottom-3 z-[4002] h-11 w-11 rounded-2xl border border-gray-200/60 dark:border-gray-700/60 bg-white/85 dark:bg-gray-900/85 shadow-xl backdrop-blur-xl flex items-center justify-center text-gray-700 dark:text-gray-200"
+            title={`${compactFieldPanelCollapsed ? t('common.expand') : t('common.collapse')} ${t('orders.fieldBoundaries')}`}
+            aria-label={`${compactFieldPanelCollapsed ? t('common.expand') : t('common.collapse')} ${t('orders.fieldBoundaries')}`}
+          >
+            <FileText className="h-5 w-5" />
+            <span className="absolute -top-1 -right-1 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-blue-600 text-white text-[9px] font-semibold leading-[1.1rem] text-center">
+              {combinedFields.length}
+            </span>
+            <span className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-white dark:bg-gray-900 border border-gray-200/70 dark:border-gray-700/70 flex items-center justify-center transition-transform ${compactFieldPanelCollapsed ? 'rotate-180' : ''}`}>
+              <ChevronDown className="h-3 w-3" />
+            </span>
+          </button>
+        )}
+
+        {/* Right sidebar - Fields list (desktop) */}
         {showRightSidebar && combinedFields.length > 0 && (
           <div
-            className={`absolute top-[6rem] right-4 rounded-xl shadow-2xl overflow-hidden backdrop-blur-2xl bg-white/70 dark:bg-gray-900/70 border border-gray-200/50 dark:border-gray-700/50 z-[4000] max-h-[calc(100vh-8.5rem)] transition-all duration-300 ${
+            className={`hidden xl:block absolute top-[6rem] right-4 rounded-xl shadow-2xl overflow-hidden backdrop-blur-2xl bg-white/70 dark:bg-gray-900/70 border border-gray-200/50 dark:border-gray-700/50 z-[4000] max-h-[calc(100vh-8.5rem)] transition-all duration-300 ${
               fieldsSidebarCollapsed ? 'w-12' : 'w-72'
             }`}
           >
@@ -2851,139 +3401,7 @@ export default function OrdersMainPage() {
             </div>
             {!fieldsSidebarCollapsed && (
               <div ref={fieldsListRef} className="p-3 space-y-2 overflow-y-auto max-h-[calc(100vh-10rem)] scrollbar-modern">
-                {combinedFields.map((field) => (
-                  <div
-                    key={field.key}
-                    onClick={(event) => {
-                      const isMulti = event.ctrlKey || event.metaKey;
-                      selectFieldKey(field.key, isMulti);
-                      if (field.source === 'uploaded') {
-                        setFocusedBoundaryId(field.boundaryId);
-                        setFocusedDrawnFieldId(null);
-                      } else {
-                        setFocusedDrawnFieldId(field.drawnId);
-                        setFocusedBoundaryId(null);
-                      }
-                      if (showStepModal && selectedStep === 5) {
-                        const baseId = field.baseId || field.baseName;
-                        if (baseId) {
-                          setMapSelectionEvent({ baseId, ctrlKey: isMulti, timestamp: Date.now() });
-                        }
-                      }
-                    }}
-                    ref={(el) => {
-                      fieldItemRefs.current[field.key] = el;
-                    }}
-                    className={`p-3 rounded-lg border cursor-pointer transition-all ${
-                      selectedFieldKeys.includes(field.key)
-                        ? 'bg-blue-500/20 dark:bg-blue-500/30 border-blue-500/40 ring-1 ring-blue-500/50'
-                        : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/50 dark:border-gray-700/50 hover:bg-white dark:hover:bg-gray-800'
-                    }`}
-                  >
-                    {(() => {
-                      const summaryKey = field.baseId || field.baseName;
-                      const summary = summaryKey ? fieldSummaries[summaryKey] : undefined;
-                      const summaryStatus = summary?.status;
-                      const sampleCount = field.source === 'uploaded'
-                        ? (fieldSampleCountByBoundaryId[String(field.boundaryId)] || 0)
-                        : 0;
-                      const status: 'pending' | 'completed' | 'skipped' | 'mixed' | undefined =
-                        field.source === 'uploaded'
-                          ? (
-                            sampleCount > fieldCompletionSampleThreshold
-                              ? 'completed'
-                              : (summaryStatus === 'skipped' ? 'skipped' : 'pending')
-                          )
-                          : summaryStatus;
-                      const landUseBadge = summary?.badges?.find((badge) => badge.startsWith('LU '));
-                      const landUseValue = landUseBadge ? landUseBadge.slice(3).trim() : '';
-                      const otherBadges = summary?.badges?.filter((badge) => badge !== landUseBadge) || [];
-                      return (
-                        <div className="mb-2 space-y-2">
-                          {status && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">{t('orders.statusLabel')}</span>
-                              <span
-                                className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${
-                                  status === 'completed'
-                                    ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
-                                    : status === 'skipped'
-                                    ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300'
-                                    : status === 'pending'
-                                    ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
-                                    : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200'
-                                }`}
-                              >
-                                {t(`orders.status.${status}`, { defaultValue: status })}
-                              </span>
-                              {landUseValue && (
-                                <span className="text-[11px] px-2 py-0.5 rounded-full font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">
-                                  {t('orders.landUseBadge', { value: landUseValue }) || `Land use ${landUseValue}`}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          {(((summary?.services?.length ?? 0) > 0) || otherBadges.length > 0) && (
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              {summary?.services?.map((label) => (
-                                <span
-                                  key={`${field.key}-${label}`}
-                                  className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200"
-                                >
-                                  {label}
-                                </span>
-                              ))}
-                              {otherBadges.map((badge) => (
-                                <span
-                                  key={`${field.key}-${badge}`}
-                                  className="text-[11px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200"
-                                >
-                                  {badge}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                    <div className="flex items-start gap-2">
-                      <div
-                        className="w-4 h-4 rounded border-2 border-white flex-shrink-0 mt-0.5"
-                        style={{
-                          // Show pink if field has tracks, otherwise use field color
-                          backgroundColor: field.source === 'uploaded' && (fieldSampleCountByBoundaryId[String(field.boundaryId)] || 0) > 0
-                            ? '#FF1493'
-                            : (field.color ?? '#3B82F6')
-                        }}
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                          {field.baseName}
-                        </div>
-                        <div className="text-xs text-gray-600 dark:text-gray-400 space-y-0.5">
-                          <div>{t('orders.fieldIdLabel', { id: field.baseId }) || `ID: ${field.baseId}`}</div>
-                          <div>{t('orders.fieldAreaLabel', { area: field.areaHa }) || `Area: ${field.areaHa} ha`}</div>
-                          {field.source === 'uploaded' && (
-                            <div className={`text-xs font-semibold ${(fieldSampleCountByBoundaryId[String(field.boundaryId)] || 0) > 0 ? 'text-pink-600 dark:text-pink-400' : 'text-gray-500 dark:text-gray-400'}`}>
-                              {fieldSampleCountByBoundaryId[String(field.boundaryId)] || 0} samples
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      {isAdmin && (
-                        <button
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openFieldDetails(field.key);
-                          }}
-                          className="ml-auto px-2.5 py-1.5 rounded-lg text-xs font-semibold text-blue-700 dark:text-blue-200 bg-white/80 dark:bg-gray-900/80 border border-gray-200/50 dark:border-gray-700/50 shadow-sm hover:bg-white dark:hover:bg-gray-900"
-                        >
-                          {t('common.edit')}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                {renderFieldCards(true)}
               </div>
             )}
           </div>
@@ -3076,9 +3494,9 @@ export default function OrdersMainPage() {
         )}
 
         {showSettingsModal && (
-          <div className="absolute inset-0 z-[6000] flex items-center justify-center bg-black/30 backdrop-blur-sm">
-            <div className="w-full max-w-xl rounded-xl shadow-2xl overflow-hidden bg-white/95 dark:bg-gray-900/95 border border-gray-200/50 dark:border-gray-700/50">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200/50 dark:border-gray-700/50">
+          <div className="fixed inset-0 z-[6000] overflow-y-auto bg-black/30 backdrop-blur-sm p-3 sm:p-4">
+            <div className="mx-auto my-3 sm:my-6 flex w-full max-w-xl max-h-[calc(100vh-1.5rem)] sm:max-h-[calc(100vh-3rem)] flex-col rounded-xl shadow-2xl overflow-hidden bg-white/95 dark:bg-gray-900/95 border border-gray-200/50 dark:border-gray-700/50">
+              <div className="shrink-0 flex items-center justify-between px-4 sm:px-6 py-4 border-b border-gray-200/50 dark:border-gray-700/50">
                 <div>
                   <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {t('orders.settings.title')}
@@ -3096,7 +3514,7 @@ export default function OrdersMainPage() {
                   </svg>
                 </button>
               </div>
-              <div className="p-6 space-y-4">
+              <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-4">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2">
                     <div className="text-xs text-gray-500 dark:text-gray-400">{t('orders.settings.email')}</div>
@@ -3239,17 +3657,17 @@ export default function OrdersMainPage() {
                   </div>
                 )}
               </div>
-              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200/50 dark:border-gray-700/50">
+              <div className="shrink-0 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-3 px-4 sm:px-6 py-4 border-t border-gray-200/50 dark:border-gray-700/50">
                 <button
                   onClick={() => setShowSettingsModal(false)}
-                  className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  className="w-full sm:w-auto px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
                 >
                   {t('orders.settings.cancel')}
                 </button>
                 <button
                   onClick={handleSaveProfile}
                   disabled={profileSaving || profileLoading}
-                  className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
+                  className="w-full sm:w-auto px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
                 >
                   {profileSaving ? (t('orders.settings.saving')) : (t('orders.settings.save'))}
                 </button>
@@ -3259,8 +3677,8 @@ export default function OrdersMainPage() {
         )}
 
         {showNewContractModal && (
-          <div className="absolute inset-0 z-[6500] flex items-center justify-center bg-black/30 backdrop-blur-sm">
-            <div className="w-full max-w-md rounded-xl shadow-2xl overflow-hidden bg-white/95 dark:bg-gray-900/95 border border-gray-200/50 dark:border-gray-700/50">
+          <div className="absolute inset-0 z-[6500] flex items-start justify-center overflow-y-auto bg-black/30 px-4 pb-4 pt-[5.75rem] backdrop-blur-sm sm:items-center sm:px-4 sm:py-4">
+            <div className="mx-auto flex w-full max-w-[26rem] max-h-[calc(100%-6.5rem)] flex-col rounded-xl border border-gray-200/50 bg-white/95 shadow-2xl overflow-hidden dark:border-gray-700/50 dark:bg-gray-900/95 sm:max-h-[min(42rem,calc(100%-2rem))] sm:max-w-md">
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200/50 dark:border-gray-700/50">
                 <div>
                   <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -3271,7 +3689,7 @@ export default function OrdersMainPage() {
                   </div>
                 </div>
                 <button
-                  onClick={() => setShowNewContractModal(false)}
+                  onClick={closeNewContractModal}
                   className="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100/50 dark:hover:bg-gray-800/50 transition-colors"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3279,7 +3697,7 @@ export default function OrdersMainPage() {
                   </svg>
                 </button>
               </div>
-              <div className="p-5 space-y-3">
+              <div className="flex-1 overflow-y-auto p-5 space-y-3">
                 <label className="text-xs font-semibold text-gray-600 dark:text-gray-300">
                   {t('orders.contractNameLabel')}
                 </label>
@@ -3362,10 +3780,10 @@ export default function OrdersMainPage() {
                   </div>
                 )}
               </div>
-              <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-gray-200/50 dark:border-gray-700/50">
+              <div className="shrink-0 flex flex-col-reverse items-stretch justify-end gap-2 border-t border-gray-200/50 px-5 py-4 dark:border-gray-700/50 sm:flex-row sm:items-center">
                 <button
-                  onClick={() => setShowNewContractModal(false)}
-                  className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  onClick={closeNewContractModal}
+                  className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800 sm:w-auto"
                   disabled={isCreatingContract}
                 >
                   {t('common.cancel')}
@@ -3373,7 +3791,7 @@ export default function OrdersMainPage() {
                 <button
                   onClick={handleCreateContract}
                   disabled={isCreatingContract || !newContractName.trim() || !newContractLabProvider}
-                  className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
+                  className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 sm:w-auto"
                 >
                   {isCreatingContract ? (t('orders.creatingContract')) : (t('orders.createContract'))}
                 </button>

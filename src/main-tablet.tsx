@@ -54,8 +54,10 @@ window.addEventListener('unhandledrejection', (event) => {
   event.preventDefault();
 });
 
+const swDevEnabled = ((import.meta.env.VITE_ENABLE_SW_DEV as string | undefined) || '').toLowerCase() === 'true';
+
 // In dev, unregister any existing service workers unless explicitly enabled
-if (import.meta.env.DEV && !import.meta.env.VITE_ENABLE_SW_DEV && 'serviceWorker' in navigator) {
+if (import.meta.env.DEV && !swDevEnabled && 'serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then((regs) => {
     regs.forEach((reg) => reg.unregister().catch(() => undefined));
   }).catch(() => undefined);

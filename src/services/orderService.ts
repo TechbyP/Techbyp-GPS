@@ -104,7 +104,10 @@ const compactField = (field: any) => ({
   samplingDepthCm: field?.samplingDepthCm,
   services: Array.isArray(field?.services) ? field.services : undefined,
   parameters: field?.parameters,
-  cropYield: field?.cropYield
+  cropYield: field?.cropYield,
+  labAttributes: field?.labAttributes,
+  samplingCell: field?.samplingCell,
+  exportMapping: field?.exportMapping
 });
 
 // Helper to serialize drafts for Firestore (avoid large geometry payloads)

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
+import type { MutableRefObject } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap, Polygon, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { Capacitor } from '@capacitor/core';
 import { GpsPosition, GpsFieldBoundary } from '../../../types';
-import { getBlankTileUrl, createTileLoadStartHandler } from '../../../utils/tileUtils';
+import { getBlankTileUrl, createTileLoadStartHandler, getBundledGermanyPmtilesUrl } from '../../../utils/tileUtils';
 import { getDefaultPack, getPackForLocation, OFFLINE_MAP_PACKS } from '../../../config/offlineMapPacks';
 import { useLanguage } from '../../../hooks/useLanguage';
 import { useDarkMode } from '../../../hooks/useDarkMode';
@@ -14,23 +15,134 @@ import 'leaflet/dist/leaflet.css';
 import 'leaflet-rotate';
 import 'leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css';
 import 'leaflet-defaulticon-compatibility';
-const offlinePmtilesUrl = (window as any).__VITE_PMTILES_URL__ || (import.meta.env.VITE_PMTILES_URL as string | undefined) || '/tiles/germany.pmtiles';
+const offlinePmtilesUrl = getBundledGermanyPmtilesUrl();
 const onlineTileUrl = (window as any).__VITE_ONLINE_TILE_URL__ || (import.meta.env.VITE_ONLINE_TILE_URL as string | undefined);
+const offlineTilesDisabledByEnv = ((import.meta.env.VITE_DISABLE_OFFLINE_TILES as string | undefined) || '').toLowerCase() === 'true';
 
-const simplifyLatLngByStep = (points: [number, number][], step: number): [number, number][] => {
-  if (step <= 1 || points.length <= 4) return points;
-  const simplified = points.filter((_, idx) => idx % step === 0);
-  if (simplified.length < 4) return points;
-  const first = simplified[0];
-  const last = simplified[simplified.length - 1];
-  if (first[0] !== last[0] || first[1] !== last[1]) {
-    simplified.push(first);
+const getBoundaryAreaScore = (boundary: GpsFieldBoundary, fallbackBounds: L.LatLngBounds): number => {
+  const bbox = boundary.render_meta?.bbox;
+  if (Array.isArray(bbox) && bbox.length === 4) {
+    const [minLon, minLat, maxLon, maxLat] = bbox;
+    if (Number.isFinite(minLon) && Number.isFinite(minLat) && Number.isFinite(maxLon) && Number.isFinite(maxLat)) {
+      const width = Math.max(0, maxLon - minLon);
+      const height = Math.max(0, maxLat - minLat);
+      if (width > 0 && height > 0) return width * height;
+    }
   }
-  return simplified;
+
+  const sw = fallbackBounds.getSouthWest();
+  const ne = fallbackBounds.getNorthEast();
+  const width = Math.max(0, ne.lng - sw.lng);
+  const height = Math.max(0, ne.lat - sw.lat);
+  return width * height;
 };
 
-const getPolygonSimplifyStep = (_zoom: number, _isMoving: boolean): number => {
-  return 1;
+const getFieldNumber = (name: string): string => {
+  const dashIndex = name.indexOf(' - ');
+  return dashIndex !== -1 ? name.substring(dashIndex + 3) : name;
+};
+
+const getBoundaryLabelLimit = (zoom: number, isMoving: boolean): number => {
+  if (zoom < 13) return 0;
+  if (isMoving) {
+    if (zoom < 14) return 3;
+    if (zoom < 15) return 6;
+    if (zoom < 16) return 10;
+    return 14;
+  }
+  if (zoom < 14) return 8;
+  if (zoom < 15) return 16;
+  if (zoom < 16) return 28;
+  return 40;
+};
+
+const getBoundaryRenderLimit = (zoom: number, isMoving: boolean): number => {
+  if (isMoving) {
+    if (zoom < 13) return 90;
+    if (zoom < 15) return 160;
+    return 220;
+  }
+
+  if (zoom < 12) return 90;
+  if (zoom < 13) return 140;
+  if (zoom < 14) return 220;
+  if (zoom < 15) return 300;
+  return 420;
+};
+
+const getBoundaryVertexBudget = (zoom: number, isMoving: boolean, isTabletPerformanceMode: boolean): number => {
+  if (!isTabletPerformanceMode) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  if (isMoving) {
+    if (zoom < 14) return 2800;
+    if (zoom < 16) return 4200;
+    return 6200;
+  }
+
+  if (zoom < 14) return 4600;
+  if (zoom < 16) return 7600;
+  return 10800;
+};
+
+const countRingVertices = (rings: [number, number][][]): number => {
+  return rings.reduce((sum, ring) => sum + ring.length, 0);
+};
+
+const countPolygonVertices = (polygons: [number, number][][][]): number => {
+  return polygons.reduce((sum, polygon) => sum + countRingVertices(polygon), 0);
+};
+
+const getBoundaryPointLimit = (_zoom: number, _isMoving: boolean, isTabletPerformanceMode: boolean): number => {
+  if (!isTabletPerformanceMode) return 0;
+  return 180;
+};
+
+const TABLET_BOUNDARY_VISUAL_ZOOM = 14;
+
+const simplifyRingForPerformance = (ring: [number, number][], maxPoints: number): [number, number][] => {
+  if (!Array.isArray(ring) || ring.length < 4 || maxPoints <= 0 || ring.length <= maxPoints) {
+    return ring;
+  }
+
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  const isClosed = first && last && first[0] === last[0] && first[1] === last[1];
+  const core = isClosed ? ring.slice(0, -1) : ring.slice();
+
+  if (core.length <= maxPoints) {
+    return ring;
+  }
+
+  const step = Math.max(1, Math.ceil(core.length / maxPoints));
+  const reduced = core.filter((_, idx) => idx % step === 0);
+
+  const finalCorePoint = core[core.length - 1];
+  const finalReducedPoint = reduced[reduced.length - 1];
+  if (!finalReducedPoint || finalReducedPoint[0] !== finalCorePoint[0] || finalReducedPoint[1] !== finalCorePoint[1]) {
+    reduced.push(finalCorePoint);
+  }
+
+  if (isClosed && reduced.length > 0) {
+    const reducedFirst = reduced[0];
+    const reducedLast = reduced[reduced.length - 1];
+    if (reducedLast[0] !== reducedFirst[0] || reducedLast[1] !== reducedFirst[1]) {
+      reduced.push([reducedFirst[0], reducedFirst[1]]);
+    }
+  }
+
+  return reduced.length >= 3 ? reduced : ring;
+};
+
+const simplifyRingsForPerformance = (rings: [number, number][][], maxPoints: number): [number, number][][] => {
+  if (maxPoints <= 0) return rings;
+  return rings.map((ring) => simplifyRingForPerformance(ring, maxPoints));
+};
+
+const simplifyPolygonsForPerformance = (polygons: [number, number][][][], maxPoints: number): [number, number][][][] => {
+  if (maxPoints <= 0) return polygons;
+  return polygons.map((polygon) => simplifyRingsForPerformance(polygon, maxPoints));
 };
 
 const getRouteSimplifyStep = (zoom: number, isMoving: boolean): number => {
@@ -248,38 +360,321 @@ const LabelPaneSetup = function LabelPaneSetup() {
 const MapViewportTracker = function MapViewportTracker({
   onBoundsChange,
   onMovingChange,
-  onZoomChange
+  onZoomChange,
+  suppressZoomMoveState = false,
+  disablePostZoomUpdates = false,
 }: {
   onBoundsChange: (bounds: L.LatLngBounds) => void;
   onMovingChange: (isMoving: boolean) => void;
   onZoomChange: (zoom: number) => void;
+  suppressZoomMoveState?: boolean;
+  disablePostZoomUpdates?: boolean;
+}) {
+  const map = useMap();
+  const zoomingRef = useRef(false);
+  const skipNextMoveEndRef = useRef(false);
+  const lastZoomRef = useRef<number | null>(null);
+  const frameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const updateBounds = () => onBoundsChange(map.getBounds());
+    const emitZoom = () => {
+      if (frameRef.current != null) {
+        cancelAnimationFrame(frameRef.current);
+      }
+
+      frameRef.current = requestAnimationFrame(() => {
+        const nextZoom = map.getZoom();
+        if (lastZoomRef.current != null && Math.abs(lastZoomRef.current - nextZoom) < 0.001) {
+          return;
+        }
+
+        lastZoomRef.current = nextZoom;
+        onZoomChange(nextZoom);
+      });
+    };
+    const onMoveStart = () => {
+      if (!zoomingRef.current && skipNextMoveEndRef.current) {
+        skipNextMoveEndRef.current = false;
+      }
+
+      if (suppressZoomMoveState && zoomingRef.current) {
+        return;
+      }
+      onMovingChange(true);
+    };
+    const onMoveEnd = () => {
+      if (skipNextMoveEndRef.current) {
+        skipNextMoveEndRef.current = false;
+        return;
+      }
+
+      onMovingChange(false);
+      updateBounds();
+    };
+    const onZoomStart = () => {
+      zoomingRef.current = true;
+      if (!suppressZoomMoveState) {
+        onMovingChange(true);
+      }
+    };
+    const onZoom = () => emitZoom();
+    const onZoomEnd = () => {
+      zoomingRef.current = false;
+
+      if (disablePostZoomUpdates) {
+        skipNextMoveEndRef.current = true;
+        return;
+      }
+
+      skipNextMoveEndRef.current = true;
+      if (!suppressZoomMoveState) {
+        onMovingChange(false);
+      }
+      updateBounds();
+      emitZoom();
+    };
+
+    updateBounds();
+    emitZoom();
+    map.on('movestart', onMoveStart);
+    map.on('zoomstart', onZoomStart);
+    map.on('moveend', onMoveEnd);
+    map.on('zoom', onZoom);
+    map.on('zoomend', onZoomEnd);
+
+    return () => {
+      if (frameRef.current != null) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+      map.off('movestart', onMoveStart);
+      map.off('zoomstart', onZoomStart);
+      map.off('moveend', onMoveEnd);
+      map.off('zoom', onZoom);
+      map.off('zoomend', onZoomEnd);
+    };
+  }, [map, onBoundsChange, onMovingChange, onZoomChange, suppressZoomMoveState, disablePostZoomUpdates]);
+
+  return null;
+};
+
+const TileHandoffController = function TileHandoffController({
+  enabled,
+  fadeOutMs = 160,
+  maxVisibleMs = 2200,
+}: {
+  enabled: boolean;
+  fadeOutMs?: number;
+  maxVisibleMs?: number;
+}) {
+  const map = useMap();
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const hideTimerRef = useRef<number | null>(null);
+  const settleTimerRef = useRef<number | null>(null);
+
+  const clearTimer = useCallback((timerRef: MutableRefObject<number | null>) => {
+    if (timerRef.current != null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const ensureOverlay = useCallback(() => {
+    const container = map.getContainer();
+    const existing = overlayRef.current ?? document.createElement('div');
+    overlayRef.current = existing;
+
+    existing.className = 'tile-handoff-overlay';
+    existing.style.position = 'absolute';
+    existing.style.left = '0';
+    existing.style.top = '0';
+    existing.style.width = '100%';
+    existing.style.height = '100%';
+    existing.style.pointerEvents = 'none';
+    existing.style.zIndex = '300';
+    existing.style.opacity = '0';
+    existing.style.willChange = 'opacity';
+    existing.style.overflow = 'hidden';
+
+    if (!container.contains(existing)) {
+      container.appendChild(existing);
+    }
+
+    return existing;
+  }, [map]);
+
+  const captureCurrentTiles = useCallback((): boolean => {
+    if (!enabled) return false;
+
+    const overlay = ensureOverlay();
+    const tilePane = map.getPanes().tilePane;
+    if (!tilePane) return false;
+
+    const snapshot = tilePane.cloneNode(true) as HTMLElement;
+    snapshot.querySelectorAll('img.leaflet-tile:not(.leaflet-tile-loaded)').forEach((tile) => tile.remove());
+    snapshot.querySelectorAll<HTMLCanvasElement>('canvas').forEach((canvas) => {
+      if (canvas.width <= 0 || canvas.height <= 0) {
+        canvas.remove();
+      }
+    });
+
+    const drawableCount = snapshot.querySelectorAll('img.leaflet-tile-loaded, canvas').length;
+    if (drawableCount === 0) {
+      overlay.innerHTML = '';
+      return false;
+    }
+
+    snapshot.style.pointerEvents = 'none';
+    overlay.innerHTML = '';
+    overlay.appendChild(snapshot);
+    return true;
+  }, [enabled, ensureOverlay, map]);
+
+  const hasPendingTiles = useCallback((): boolean => {
+    const tilePane = map.getPanes().tilePane;
+    if (!tilePane) return false;
+    return tilePane.querySelectorAll('img.leaflet-tile:not(.leaflet-tile-loaded)').length > 0;
+  }, [map]);
+
+  const showSnapshot = useCallback(() => {
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+
+    clearTimer(hideTimerRef);
+    overlay.style.transition = `opacity ${fadeOutMs}ms ease`;
+    overlay.style.opacity = '1';
+  }, [clearTimer, fadeOutMs]);
+
+  const hideSnapshot = useCallback((delayMs: number = 0) => {
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+
+    clearTimer(hideTimerRef);
+    clearTimer(settleTimerRef);
+    hideTimerRef.current = window.setTimeout(() => {
+      overlay.style.opacity = '0';
+      hideTimerRef.current = null;
+    }, delayMs);
+  }, [clearTimer]);
+
+  const waitForTilesToSettle = useCallback(() => {
+    clearTimer(settleTimerRef);
+
+    const startedAt = performance.now();
+    const tick = () => {
+      if (!enabled) {
+        hideSnapshot(0);
+        return;
+      }
+
+      const elapsed = performance.now() - startedAt;
+      if (!hasPendingTiles()) {
+        hideSnapshot(60);
+        settleTimerRef.current = null;
+        return;
+      }
+
+      if (elapsed >= maxVisibleMs) {
+        hideSnapshot(0);
+        settleTimerRef.current = null;
+        return;
+      }
+
+      settleTimerRef.current = window.setTimeout(tick, 45);
+    };
+
+    settleTimerRef.current = window.setTimeout(tick, 45);
+  }, [clearTimer, enabled, hasPendingTiles, hideSnapshot, maxVisibleMs]);
+
+  const startHandoff = useCallback(() => {
+    if (!enabled) return;
+
+    const hasSnapshot = captureCurrentTiles();
+    if (!hasSnapshot) return;
+
+    showSnapshot();
+    waitForTilesToSettle();
+  }, [enabled, captureCurrentTiles, showSnapshot, waitForTilesToSettle]);
+
+  useEffect(() => {
+    if (!enabled) {
+      hideSnapshot(0);
+      return;
+    }
+
+    const handleLoading = () => startHandoff();
+    const handleZoomStart = () => startHandoff();
+    const handleMoveEnd = () => waitForTilesToSettle();
+
+    map.on('loading', handleLoading);
+    map.on('zoomstart', handleZoomStart);
+    map.on('moveend', handleMoveEnd);
+
+    return () => {
+      map.off('loading', handleLoading);
+      map.off('zoomstart', handleZoomStart);
+      map.off('moveend', handleMoveEnd);
+    };
+  }, [enabled, map, startHandoff, hideSnapshot, waitForTilesToSettle]);
+
+  useEffect(() => {
+    return () => {
+      clearTimer(hideTimerRef);
+      clearTimer(settleTimerRef);
+
+      const overlay = overlayRef.current;
+      if (overlay && overlay.parentElement) {
+        overlay.parentElement.removeChild(overlay);
+      }
+      overlayRef.current = null;
+    };
+  }, [clearTimer]);
+
+  return null;
+};
+
+const TouchZoomEndStabilizer = function TouchZoomEndStabilizer({
+  enabled,
+}: {
+  enabled: boolean;
 }) {
   const map = useMap();
 
   useEffect(() => {
-    const updateBounds = () => onBoundsChange(map.getBounds());
-    const handleZoom = () => onZoomChange(map.getZoom());
-    const onMoveStart = () => onMovingChange(true);
-    const onMoveEnd = () => {
-      onMovingChange(false);
-      updateBounds();
-      handleZoom();
-    };
+    if (!enabled) return;
 
-    updateBounds();
-    handleZoom();
-    map.on('movestart', onMoveStart);
-    map.on('zoomstart', onMoveStart);
-    map.on('moveend', onMoveEnd);
-    map.on('zoomend', onMoveEnd);
+    const handler: any = (map as any).touchZoom;
+    if (!handler || typeof handler._onTouchEnd !== 'function') {
+      return;
+    }
+
+    const originalOnTouchEnd = handler._onTouchEnd;
+
+    handler._onTouchEnd = function () {
+      if (!this._moved || !this._zooming) {
+        this._zooming = false;
+        return;
+      }
+
+      this._zooming = false;
+      if (this._animRequest != null) {
+        cancelAnimationFrame(this._animRequest);
+        this._animRequest = null;
+      }
+
+      L.DomEvent.off(document, 'touchmove', this._onTouchMove, this);
+      L.DomEvent.off(document, 'touchend touchcancel', this._onTouchEnd, this);
+
+      const finalZoom = this._map._limitZoom(this._zoom);
+      this._map._move(this._center, finalZoom, undefined, true);
+      this._map._moveEnd(true);
+    };
 
     return () => {
-      map.off('movestart', onMoveStart);
-      map.off('zoomstart', onMoveStart);
-      map.off('moveend', onMoveEnd);
-      map.off('zoomend', onMoveEnd);
+      handler._onTouchEnd = originalOnTouchEnd;
     };
-  }, [map, onBoundsChange, onMovingChange, onZoomChange]);
+  }, [map, enabled]);
 
   return null;
 };
@@ -341,11 +736,13 @@ export default function NavigationMap({
   const [tileProbeCounter, setTileProbeCounter] = useState(0);
   const [showOfflinePrompt, setShowOfflinePrompt] = useState(false);
   const pmtilesVersion = import.meta.env.VITE_PMTILES_VERSION || '20260122';
+  const isNative = Capacitor.isNativePlatform();
+  const isTabletPerformanceMode = isNative;
   const [mapBounds, setMapBounds] = useState<L.LatLngBounds | null>(null);
   const [isMapMoving, setIsMapMoving] = useState(false);
   const [currentZoom, setCurrentZoom] = useState(currentPosition ? 13 : 6);
   const canvasRenderer = useMemo(() => L.canvas({ padding: 0.5 }), []);
-  const labelCacheRef = useRef(new Map<string, { centroid: [number, number] | null; labelIconSmall: L.DivIcon | null; labelIconLarge: L.DivIcon | null; labelIconSmallOutlined: L.DivIcon | null; labelIconLargeOutlined: L.DivIcon | null }>());
+  const labelCacheRef = useRef(new Map<string, { labelIconSmall: L.DivIcon; labelIconLarge: L.DivIcon; labelIconSmallOutlined: L.DivIcon; labelIconLargeOutlined: L.DivIcon }>());
   const routeLodCacheRef = useRef(new Map<string, { pointCount: number; points: [number, number][] }>());
   const [offlinePromptDismissed, setOfflinePromptDismissed] = useState(() => {
     if (typeof window === 'undefined') return false;
@@ -376,14 +773,22 @@ export default function NavigationMap({
   const hasLocationPack = !!locationPack;
   const isWithinOfflineBounds = hasLocationPack || !currentPosition;
   const offlineTilesReady = !!offlinePmtilesUri || offlineRasterAvailable;
-  const offlineTilesDisabled = true;
+  const offlineTilesDisabled = offlineTilesDisabledByEnv;
   const shouldUseOfflineTiles = !offlineTilesDisabled && isWithinOfflineBounds && (germanyTilesAvailable || offlineTilesReady);
   const needsOfflineDownload = false;
   const activePackName = activePack.name;
   const hasDownloadUrl = !!activePack.downloadUrl;
   const canDownloadOffline = hasDownloadUrl && isOnline;
-  const forceOfflineTiles = !offlineTilesDisabled && Capacitor.isNativePlatform() && offlineTilesReady && !onlineTileUrl;
-  const preferRasterOnNative = !offlineTilesDisabled && Capacitor.isNativePlatform() && offlineRasterAvailable && !offlinePmtilesUri;
+  const forceOfflineTiles = !offlineTilesDisabled && isNative && offlineTilesReady && !onlineTileUrl;
+  const preferRasterOnNative = !offlineTilesDisabled && isNative && offlineRasterAvailable && !offlinePmtilesUri;
+  const tileKeepBuffer = isTabletPerformanceMode ? 8 : 3;
+  const satelliteTileKeepBuffer = isTabletPerformanceMode ? Math.max(tileKeepBuffer, 6) : tileKeepBuffer;
+  const tileUpdateWhenZooming = true;
+  const tileUpdateWhenIdle = false;
+  const satelliteUpdateWhenZooming = tileUpdateWhenZooming;
+  const mapPanInertia = !isTabletPerformanceMode;
+  const mapBounceAtZoomLimits = !isTabletPerformanceMode;
+  const enableTileHandoff = isTabletPerformanceMode ? false : (isNative || shouldUseOfflineTiles || forceOfflineTiles);
   const [autoRotate] = useState(true);
 
   const handleDismissOfflinePrompt = useCallback(() => {
@@ -433,6 +838,16 @@ export default function NavigationMap({
     };
     const probe = async () => {
       try {
+        if (offlineTilesDisabledByEnv) {
+          if (!cancelled) {
+            setOfflinePmtilesUri(null);
+            setOfflineRasterAvailable(false);
+            setGermanyTilesAvailable(false);
+            setTileProbeComplete(true);
+          }
+          return;
+        }
+
         if (!cancelled) setTileProbeComplete(false);
         let pmtilesAvailable = false;
         let rasterAvailable = false;
@@ -440,8 +855,8 @@ export default function NavigationMap({
         if (!Capacitor.isNativePlatform()) {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 3000);
-          const bundledUrl = activePack.bundledUrl || offlinePmtilesUrl;
-          pmtilesAvailable = await verifyPmtiles(bundledUrl, controller.signal);
+          const bundledUrl = activePack.bundledUrl ?? offlinePmtilesUrl;
+          pmtilesAvailable = bundledUrl ? await verifyPmtiles(bundledUrl, controller.signal) : false;
           clearTimeout(timeoutId);
           if (!cancelled) {
             setOfflinePmtilesUri(pmtilesAvailable ? bundledUrl : null);
@@ -459,18 +874,18 @@ export default function NavigationMap({
           }
           // Fallback to bundled PMTiles in app assets if no downloaded file yet
           if (!pmtilesAvailable) {
-            const bundledUrl = activePack.bundledUrl || offlinePmtilesUrl;
-            const copiedUrl = await tileDownloader.ensureBundledTiles(bundledUrl, activePack);
-            pmtilesAvailable = !!copiedUrl || !!bundledUrl;
+            const bundledUrl = activePack.bundledUrl ?? offlinePmtilesUrl;
+            const copiedUrl = bundledUrl ? await tileDownloader.ensureBundledTiles(bundledUrl, activePack) : null;
+            pmtilesAvailable = !!copiedUrl;
             if (!cancelled) {
-              setOfflinePmtilesUri(copiedUrl || bundledUrl || null);
+              setOfflinePmtilesUri(copiedUrl || null);
             }
           }
         } else {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 3000);
-          const bundledUrl = activePack.bundledUrl || offlinePmtilesUrl;
-          pmtilesAvailable = await verifyPmtiles(bundledUrl, controller.signal);
+          const bundledUrl = activePack.bundledUrl ?? offlinePmtilesUrl;
+          pmtilesAvailable = bundledUrl ? await verifyPmtiles(bundledUrl, controller.signal) : false;
           clearTimeout(timeoutId);
           if (!cancelled) {
             setOfflinePmtilesUri(pmtilesAvailable ? bundledUrl : null);
@@ -577,17 +992,88 @@ export default function NavigationMap({
     }
   }, [isDownloadingOffline, t, activePack]);
 
-  // Memoized calculation of project bounds for performance
+  const uniqueFieldBoundaries = useMemo(() => {
+    const seen = new Set<string>();
+    return fieldBoundaries.filter((boundary) => {
+      if (!boundary) return false;
+      const id = String(boundary.id);
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  }, [fieldBoundaries]);
+
+  const createFieldLabelIcon = useCallback((
+    fieldNumber: string,
+    labelColor: string,
+    fontSizePx: number,
+    fontWeight: number
+  ): L.DivIcon => {
+    return L.divIcon({
+      className: 'field-label',
+      html: `<div style="
+        position: absolute;
+        left: 0;
+        top: 0;
+        font-weight: ${fontWeight};
+        font-size: ${fontSizePx}px;
+        color: ${labelColor};
+        white-space: nowrap;
+        pointer-events: none;
+        transform: translate(-50%, -50%);
+      ">${fieldNumber}</div>`,
+      iconSize: [0, 0],
+      iconAnchor: [0, 0],
+    });
+  }, []);
+
+  const getLabelIcons = useCallback((
+    boundaryId: string,
+    fieldNumber: string,
+    labelColor: string
+  ) => {
+    const cacheKey = `${boundaryId}:${fieldNumber}:${labelColor}`;
+    const cached = labelCacheRef.current.get(cacheKey);
+    if (cached) return cached;
+
+    const next = {
+      labelIconSmall: createFieldLabelIcon(fieldNumber, labelColor, 12, 600),
+      labelIconLarge: createFieldLabelIcon(fieldNumber, labelColor, 14, 600),
+      labelIconSmallOutlined: createFieldLabelIcon(fieldNumber, labelColor, 12, 700),
+      labelIconLargeOutlined: createFieldLabelIcon(fieldNumber, labelColor, 14, 700),
+    };
+
+    labelCacheRef.current.set(cacheKey, next);
+    return next;
+  }, [createFieldLabelIcon]);
+
+  const boundaryVisualZoom = isTabletPerformanceMode ? TABLET_BOUNDARY_VISUAL_ZOOM : currentZoom;
+  const effectiveMapBounds = isTabletPerformanceMode ? null : mapBounds;
+  const boundaryPointLimit = useMemo(() => {
+    return getBoundaryPointLimit(boundaryVisualZoom, isMapMoving, isTabletPerformanceMode);
+  }, [boundaryVisualZoom, isMapMoving, isTabletPerformanceMode]);
+
   const projectBounds = useMemo(() => {
-    if (fieldBoundaries.length === 0) return null;
+    if (uniqueFieldBoundaries.length === 0) return null;
 
-    let minLat = Infinity, maxLat = -Infinity;
-    let minLng = Infinity, maxLng = -Infinity;
+    let minLat = Infinity;
+    let maxLat = -Infinity;
+    let minLng = Infinity;
+    let maxLng = -Infinity;
+    let hasValidCoordinates = false;
 
-    fieldBoundaries.forEach(boundary => {
+    uniqueFieldBoundaries.forEach((boundary) => {
       if (boundary.geometry_type === 'Polygon') {
         const coords = boundary.coordinates as number[][][];
-        coords[0].forEach(([lng, lat]) => {
+        const exteriorRing = Array.isArray(coords) ? coords[0] : null;
+        if (!Array.isArray(exteriorRing) || exteriorRing.length === 0) return;
+
+        exteriorRing.forEach((coord) => {
+          if (!Array.isArray(coord) || coord.length < 2) return;
+          const [lng, lat] = coord;
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+          hasValidCoordinates = true;
           minLat = Math.min(minLat, lat);
           maxLat = Math.max(maxLat, lat);
           minLng = Math.min(minLng, lng);
@@ -595,8 +1081,16 @@ export default function NavigationMap({
         });
       } else if (boundary.geometry_type === 'MultiPolygon') {
         const coords = boundary.coordinates as number[][][][];
-        coords.forEach(polygon => {
-          polygon[0].forEach(([lng, lat]) => {
+        coords.forEach((polygon) => {
+          const exteriorRing = Array.isArray(polygon) ? polygon[0] : null;
+          if (!Array.isArray(exteriorRing) || exteriorRing.length === 0) return;
+
+          exteriorRing.forEach((coord) => {
+            if (!Array.isArray(coord) || coord.length < 2) return;
+            const [lng, lat] = coord;
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+            hasValidCoordinates = true;
             minLat = Math.min(minLat, lat);
             maxLat = Math.max(maxLat, lat);
             minLng = Math.min(minLng, lng);
@@ -606,105 +1100,10 @@ export default function NavigationMap({
       }
     });
 
+    if (!hasValidCoordinates) return null;
+
     return L.latLngBounds([minLat, minLng], [maxLat, maxLng]);
-  }, [fieldBoundaries]);
-
-  const labelMetaMap = useMemo(() => {
-    const next = new Map<string, { centroid: [number, number] | null; labelIconSmall: L.DivIcon | null; labelIconLarge: L.DivIcon | null; labelIconSmallOutlined: L.DivIcon | null; labelIconLargeOutlined: L.DivIcon | null }>();
-    fieldBoundaries.forEach((boundary) => {
-      if (!boundary) return;
-      const id = String(boundary.id);
-      const cached = labelCacheRef.current.get(id);
-      if (cached) {
-        next.set(id, cached);
-        return;
-      }
-      const dashIndex = boundary.name.indexOf(' - ');
-      const fieldNumber = dashIndex !== -1 ? boundary.name.substring(dashIndex + 3) : boundary.name;
-      const coords = boundary.coordinates as any;
-      let centroid: [number, number] | null = null;
-      if (boundary.geometry_type === 'Polygon') {
-        centroid = calculateCentroid(coords as number[][][]);
-      } else if (boundary.geometry_type === 'MultiPolygon') {
-        const polygons = (coords as number[][][][]) || [];
-        const firstPolygon = polygons[0] as number[][][] | undefined;
-        if (firstPolygon) centroid = calculateCentroid(firstPolygon);
-      }
-
-      const labelIconSmall = centroid ? L.divIcon({
-        className: 'field-label',
-        html: `<div style="
-          position: absolute;
-          left: 0;
-          top: 0;
-          font-weight: 600;
-          font-size: 12px;
-          color: #000000;
-          white-space: nowrap;
-          pointer-events: none;
-          transform: translate(-50%, -50%);
-        ">${fieldNumber}</div>`,
-        iconSize: [0, 0],
-        iconAnchor: [0, 0],
-      }) : null;
-
-      const labelIconLarge = centroid ? L.divIcon({
-        className: 'field-label',
-        html: `<div style="
-          position: absolute;
-          left: 0;
-          top: 0;
-          font-weight: 600;
-          font-size: 14px;
-          color: #000000;
-          white-space: nowrap;
-          pointer-events: none;
-          transform: translate(-50%, -50%);
-        ">${fieldNumber}</div>`,
-        iconSize: [0, 0],
-        iconAnchor: [0, 0],
-      }) : null;
-
-      const labelIconSmallOutlined = centroid ? L.divIcon({
-        className: 'field-label',
-        html: `<div style="
-          position: absolute;
-          left: 0;
-          top: 0;
-          font-weight: 700;
-          font-size: 12px;
-          color: #000000;
-          white-space: nowrap;
-          pointer-events: none;
-          transform: translate(-50%, -50%);
-        ">${fieldNumber}</div>`,
-        iconSize: [0, 0],
-        iconAnchor: [0, 0],
-      }) : null;
-
-      const labelIconLargeOutlined = centroid ? L.divIcon({
-        className: 'field-label',
-        html: `<div style="
-          position: absolute;
-          left: 0;
-          top: 0;
-          font-weight: 700;
-          font-size: 14px;
-          color: #000000;
-          white-space: nowrap;
-          pointer-events: none;
-          transform: translate(-50%, -50%);
-        ">${fieldNumber}</div>`,
-        iconSize: [0, 0],
-        iconAnchor: [0, 0],
-      }) : null;
-
-      const meta = { centroid, labelIconSmall, labelIconLarge, labelIconSmallOutlined, labelIconLargeOutlined };
-      labelCacheRef.current.set(id, meta);
-      next.set(id, meta);
-    });
-    return next;
-  }, [fieldBoundaries]);
+  }, [uniqueFieldBoundaries]);
 
   const routeBounds = useMemo(() => {
     if (!selectedRoute?.coordinates || selectedRoute.coordinates.length === 0) return null;
@@ -712,136 +1111,191 @@ export default function NavigationMap({
     return L.latLngBounds(points);
   }, [selectedRoute]);
 
-  // Memoized field boundaries rendering for performance
   const boundaryRenderData = useMemo(() => {
-    const step = getPolygonSimplifyStep(currentZoom, isMapMoving);
-    return fieldBoundaries.map((boundary) => {
+    return uniqueFieldBoundaries.map((boundary) => {
       if (!boundary) return null;
       const coordsRaw = boundary.coordinates as any;
       if (!coordsRaw || !Array.isArray(coordsRaw) || coordsRaw.length === 0) return null;
-      const labelMeta = labelMetaMap.get(String(boundary.id)) || { centroid: null, labelIconSmall: null, labelIconLarge: null, labelIconSmallOutlined: null, labelIconLargeOutlined: null };
+
+      const fieldNumber = getFieldNumber(boundary.name);
+      let centroid: [number, number] | null = null;
 
       if (boundary.geometry_type === 'Polygon') {
+        centroid = calculateCentroid(coordsRaw as number[][][]);
         const coords = boundary.coordinates as number[][][];
-        const positions = coords.map(ring => {
-          const latLngs = ring.map(coord => [coord[1], coord[0]] as [number, number]);
-          return simplifyLatLngByStep(latLngs, step);
-        });
-        const bounds = L.latLngBounds(positions[0]);
-        return { boundary, type: 'Polygon' as const, positions, bounds, centroid: labelMeta.centroid, labelIconSmall: labelMeta.labelIconSmall, labelIconLarge: labelMeta.labelIconLarge, labelIconSmallOutlined: labelMeta.labelIconSmallOutlined, labelIconLargeOutlined: labelMeta.labelIconLargeOutlined };
+        const positions = simplifyRingsForPerformance(
+          coords.map((ring) => ring.map((coord) => [coord[1], coord[0]] as [number, number])),
+          boundaryPointLimit
+        );
+        const bounds = L.latLngBounds(positions.flat() as [number, number][]);
+
+        return {
+          boundary,
+          type: 'Polygon' as const,
+          positions,
+          vertexCount: countRingVertices(positions),
+          bounds,
+          centroid,
+          fieldNumber,
+          areaScore: getBoundaryAreaScore(boundary, bounds),
+        };
       }
 
       if (boundary.geometry_type === 'MultiPolygon') {
-        const polygons = (boundary.coordinates as number[][][][]).filter(p => Array.isArray(p) && p.length > 0);
+        const polygons = (coordsRaw as number[][][][]).filter((polygon) => Array.isArray(polygon) && polygon.length > 0);
         if (polygons.length === 0) return null;
-        const positions = polygons.map(polygon =>
-          polygon.map(ring => simplifyLatLngByStep(ring.map(coord => [coord[1], coord[0]] as [number, number]), step))
+
+        const firstPolygon = polygons[0] as number[][][] | undefined;
+        if (firstPolygon) {
+          centroid = calculateCentroid(firstPolygon);
+        }
+
+        const positions = simplifyPolygonsForPerformance(
+          polygons.map((polygon) =>
+            polygon.map((ring) => ring.map((coord) => [coord[1], coord[0]] as [number, number]))
+          ),
+          boundaryPointLimit
         );
         const bounds = L.latLngBounds(positions.flat(2) as [number, number][]);
-        return { boundary, type: 'MultiPolygon' as const, positions, bounds, centroid: labelMeta.centroid, labelIconSmall: labelMeta.labelIconSmall, labelIconLarge: labelMeta.labelIconLarge, labelIconSmallOutlined: labelMeta.labelIconSmallOutlined, labelIconLargeOutlined: labelMeta.labelIconLargeOutlined };
+
+        return {
+          boundary,
+          type: 'MultiPolygon' as const,
+          positions,
+          vertexCount: countPolygonVertices(positions),
+          bounds,
+          centroid,
+          fieldNumber,
+          areaScore: getBoundaryAreaScore(boundary, bounds),
+        };
       }
 
       return null;
     }).filter(Boolean) as Array<
-      | { boundary: GpsFieldBoundary; type: 'Polygon'; positions: [number, number][][]; bounds: L.LatLngBounds; centroid: [number, number] | null; labelIconSmall: L.DivIcon | null; labelIconLarge: L.DivIcon | null; labelIconSmallOutlined: L.DivIcon | null; labelIconLargeOutlined: L.DivIcon | null }
-      | { boundary: GpsFieldBoundary; type: 'MultiPolygon'; positions: [number, number][][][]; bounds: L.LatLngBounds; centroid: [number, number] | null; labelIconSmall: L.DivIcon | null; labelIconLarge: L.DivIcon | null; labelIconSmallOutlined: L.DivIcon | null; labelIconLargeOutlined: L.DivIcon | null }
+      | { boundary: GpsFieldBoundary; type: 'Polygon'; positions: [number, number][][]; vertexCount: number; bounds: L.LatLngBounds; centroid: [number, number] | null; fieldNumber: string; areaScore: number }
+      | { boundary: GpsFieldBoundary; type: 'MultiPolygon'; positions: [number, number][][][]; vertexCount: number; bounds: L.LatLngBounds; centroid: [number, number] | null; fieldNumber: string; areaScore: number }
     >;
-  }, [fieldBoundaries, currentZoom, isMapMoving, labelMetaMap]);
+  }, [uniqueFieldBoundaries, boundaryPointLimit]);
+
+  const boundaryRenderLimit = useMemo(() => {
+    const movingForBoundaries = isTabletPerformanceMode ? false : isMapMoving;
+    return getBoundaryRenderLimit(boundaryVisualZoom, movingForBoundaries);
+  }, [boundaryVisualZoom, isMapMoving, isTabletPerformanceMode]);
+
+  const boundaryVertexBudget = useMemo(() => {
+    const movingForBoundaries = isTabletPerformanceMode ? false : isMapMoving;
+    return getBoundaryVertexBudget(boundaryVisualZoom, movingForBoundaries, isTabletPerformanceMode);
+  }, [boundaryVisualZoom, isMapMoving, isTabletPerformanceMode]);
 
   const visibleBoundaryRenderData = useMemo(() => {
-    if (!mapBounds) return boundaryRenderData;
-    return boundaryRenderData.filter(item => mapBounds.intersects(item.bounds));
-  }, [boundaryRenderData, mapBounds]);
+    const visible = !effectiveMapBounds
+      ? boundaryRenderData
+      : boundaryRenderData.filter((item) => effectiveMapBounds.intersects(item.bounds));
 
-  const visibleLabelIds = useMemo(() => {
-    const visible = new Set<string>();
-    const map = mapRef.current;
-    if (!map || !visibleBoundaryRenderData.length) {
-      visibleBoundaryRenderData.forEach(item => visible.add(String(item.boundary.id)));
-      return visible;
-    }
-
-    const labelFontSize = currentZoom < 13 ? 12 : 14;
-    const labelHeight = labelFontSize + 4;
-    const cellSize = Math.max(40, labelFontSize * 4);
-    const occupied = new Map<string, Array<{ x1: number; y1: number; x2: number; y2: number }>>();
-
-    const boxesOverlap = (a: { x1: number; y1: number; x2: number; y2: number }, b: { x1: number; y1: number; x2: number; y2: number }) => {
-      return !(a.x2 < b.x1 || a.x1 > b.x2 || a.y2 < b.y1 || a.y1 > b.y2);
-    };
-
-    visibleBoundaryRenderData.forEach(item => {
-      const centroid = item.centroid;
-      if (!centroid) return;
-      const point = map.latLngToContainerPoint(centroid as any);
-      const dashIndex = item.boundary.name.indexOf(' - ');
-      const fieldNumber = dashIndex !== -1 ? item.boundary.name.substring(dashIndex + 3) : item.boundary.name;
-      const labelWidth = Math.max(16, fieldNumber.length * labelFontSize * 0.6);
-
-      const box = {
-        x1: point.x - labelWidth / 2,
-        y1: point.y - labelHeight / 2,
-        x2: point.x + labelWidth / 2,
-        y2: point.y + labelHeight / 2,
-      };
-
-      const minCellX = Math.floor(box.x1 / cellSize);
-      const maxCellX = Math.floor(box.x2 / cellSize);
-      const minCellY = Math.floor(box.y1 / cellSize);
-      const maxCellY = Math.floor(box.y2 / cellSize);
-
-      let overlaps = false;
-      for (let cx = minCellX; cx <= maxCellX && !overlaps; cx += 1) {
-        for (let cy = minCellY; cy <= maxCellY && !overlaps; cy += 1) {
-          const key = `${cx}:${cy}`;
-          const existing = occupied.get(key);
-          if (!existing) continue;
-          overlaps = existing.some(existingBox => boxesOverlap(existingBox, box));
-        }
-      }
-
-      if (overlaps) return;
-
-      for (let cx = minCellX; cx <= maxCellX; cx += 1) {
-        for (let cy = minCellY; cy <= maxCellY; cy += 1) {
-          const key = `${cx}:${cy}`;
-          if (!occupied.has(key)) occupied.set(key, []);
-          occupied.get(key)!.push(box);
-        }
-      }
-
-      visible.add(String(item.boundary.id));
+    const ranked = [...visible].sort((a, b) => {
+      if (b.areaScore !== a.areaScore) return b.areaScore - a.areaScore;
+      const bPoints = b.boundary.render_meta?.point_count ?? 0;
+      const aPoints = a.boundary.render_meta?.point_count ?? 0;
+      return bPoints - aPoints;
     });
 
+    if (ranked.length <= boundaryRenderLimit && !Number.isFinite(boundaryVertexBudget)) {
+      return ranked;
+    }
+
+    const selected: typeof ranked = [];
+    let usedVertices = 0;
+
+    for (const item of ranked) {
+      if (selected.length >= boundaryRenderLimit) {
+        break;
+      }
+
+      if (Number.isFinite(boundaryVertexBudget) && (usedVertices + item.vertexCount) > boundaryVertexBudget) {
+        continue;
+      }
+
+      selected.push(item);
+      usedVertices += item.vertexCount;
+    }
+
+    return selected;
+  }, [boundaryRenderData, effectiveMapBounds, boundaryRenderLimit, boundaryVertexBudget]);
+
+  const activeBoundaryRenderData = useMemo(() => {
+    return visibleBoundaryRenderData;
+  }, [visibleBoundaryRenderData]);
+
+  const labelLimit = useMemo(() => {
+    const movingForBoundaries = isTabletPerformanceMode ? false : isMapMoving;
+    return getBoundaryLabelLimit(boundaryVisualZoom, movingForBoundaries);
+  }, [boundaryVisualZoom, isMapMoving, isTabletPerformanceMode]);
+
+  const visibleLabelIds = useMemo(() => {
+    if (labelLimit <= 0 || activeBoundaryRenderData.length === 0) {
+      return new Set<string>();
+    }
+
+    const ranked = [...activeBoundaryRenderData].sort((a, b) => {
+      if (b.areaScore !== a.areaScore) return b.areaScore - a.areaScore;
+      const bPoints = b.boundary.render_meta?.point_count ?? 0;
+      const aPoints = a.boundary.render_meta?.point_count ?? 0;
+      return bPoints - aPoints;
+    });
+
+    const visible = new Set<string>();
+    for (const item of ranked) {
+      visible.add(String(item.boundary.id));
+      if (visible.size >= labelLimit) {
+        break;
+      }
+    }
+
     return visible;
-  }, [visibleBoundaryRenderData, currentZoom, mapBounds, mapRef]);
+  }, [activeBoundaryRenderData, labelLimit]);
 
   const renderedBoundaries = useMemo(() => {
-    return visibleBoundaryRenderData.map((item) => {
+    return activeBoundaryRenderData.map((item) => {
       const boundary = item.boundary;
-      const labelIcon = isMapMoving || currentZoom < 14
-        ? (currentZoom < 13 ? item.labelIconSmall : item.labelIconLarge)
-        : (currentZoom < 15 ? item.labelIconSmallOutlined : item.labelIconLargeOutlined);
+      const fieldColor = boundary.color || '#00FF00';
+      const labelColor = useSatellite ? '#ffffff' : '#000000';
+      const shouldRenderLabel = boundaryVisualZoom >= 13 && visibleLabelIds.has(String(boundary.id));
+      const labelIcons = shouldRenderLabel
+        ? getLabelIcons(String(boundary.id), item.fieldNumber, labelColor)
+        : null;
+      const labelIcon = labelIcons
+        ? (boundaryVisualZoom < 14
+            ? labelIcons.labelIconSmall
+            : (boundaryVisualZoom < 15 ? labelIcons.labelIconLarge : labelIcons.labelIconLargeOutlined))
+        : null;
+      const baseRegularWeight = boundaryVisualZoom < 14 ? 0.9 : 1.2;
+      const fillOpacity = (isTabletPerformanceMode ? false : isMapMoving) ? 0 : 0.10;
+
+      const handleFieldClick = (event: L.LeafletMouseEvent) => {
+        if (event.originalEvent) {
+          L.DomEvent.stop(event.originalEvent);
+        }
+        onMapClick(event);
+      };
 
       if (item.type === 'Polygon') {
         return (
           <div key={boundary.id}>
             <Polygon
               positions={item.positions}
+              smoothFactor={0}
               pathOptions={{
-                color: boundary.color || '#00FF00',
-                fillColor: boundary.color || '#00FF00',
-                fillOpacity: 0.2,
-                weight: 2,
+                color: fieldColor,
+                fillColor: fieldColor,
+                fillOpacity,
+                weight: baseRegularWeight,
               }}
+              interactive={true}
               renderer={canvasRenderer}
-            >
-              <Popup>
-                <div className="text-sm">
-                  <strong>{(() => { const dashIndex = boundary.name.indexOf(' - '); return dashIndex !== -1 ? boundary.name.substring(dashIndex + 3) : boundary.name; })()}</strong>
-                </div>
-              </Popup>
-            </Polygon>
+              eventHandlers={{
+                click: handleFieldClick,
+              }}
+            />
             {item.centroid && labelIcon && visibleLabelIds.has(String(boundary.id)) && (
               <Marker
                 position={item.centroid}
@@ -861,15 +1315,17 @@ export default function NavigationMap({
               <Polygon
                 key={`${boundary.id}-${idx}`}
                 positions={polygon}
+                smoothFactor={0}
                 pathOptions={{
-                  color: boundary.color || '#00FF00',
-                  fillColor: boundary.color || '#00FF00',
-                  fillOpacity: 0.2,
-                  weight: 2,
+                  color: fieldColor,
+                  fillColor: fieldColor,
+                  fillOpacity,
+                  weight: baseRegularWeight,
                 }}
+                interactive={true}
                 renderer={canvasRenderer}
                 eventHandlers={{
-                  click: onMapClick,
+                  click: handleFieldClick,
                 }}
               />
             ))}
@@ -887,7 +1343,17 @@ export default function NavigationMap({
 
       return null;
     });
-  }, [visibleBoundaryRenderData, currentZoom, canvasRenderer, onMapClick, visibleLabelIds]);
+  }, [
+    activeBoundaryRenderData,
+    useSatellite,
+    boundaryVisualZoom,
+    visibleLabelIds,
+    getLabelIcons,
+    isTabletPerformanceMode,
+    isMapMoving,
+    onMapClick,
+    canvasRenderer,
+  ]);
 
   const [followUser, setFollowUser] = useState(true);
   const [forceSnap, setForceSnap] = useState(false);
@@ -1050,6 +1516,8 @@ export default function NavigationMap({
         maxZoom={22}
         zoomSnap={0}
         zoomDelta={1}
+        inertia={mapPanInertia}
+        bounceAtZoomLimits={mapBounceAtZoomLimits}
         className={`h-full w-full ${shouldUseOfflineTiles ? 'pmtiles-active' : ''}`}
         zoomControl={false}
         attributionControl={false}
@@ -1060,11 +1528,15 @@ export default function NavigationMap({
         style={{ height: '100%', minHeight: '320px', width: '100%' }}
       >
       <LabelPaneSetup />
+      <TouchZoomEndStabilizer enabled={isNative} />
       <MapViewportTracker
         onBoundsChange={setMapBounds}
         onMovingChange={setIsMapMoving}
         onZoomChange={setCurrentZoom}
+        suppressZoomMoveState={isTabletPerformanceMode}
+        disablePostZoomUpdates={isTabletPerformanceMode}
       />
+      <TileHandoffController enabled={enableTileHandoff} />
       <MapClickHandler onMapClick={onMapClick} />
       {/* Track current position during navigation */}
       <CurrentPositionTracker
@@ -1115,6 +1587,10 @@ export default function NavigationMap({
               maxNativeZoom={19}
               attribution='© OpenStreetMap contributors'
               crossOrigin="anonymous"
+              keepBuffer={tileKeepBuffer}
+              updateWhenIdle={tileUpdateWhenIdle}
+              updateWhenZooming={tileUpdateWhenZooming}
+              reuseTiles={true}
             />
           );
         }
@@ -1129,6 +1605,10 @@ export default function NavigationMap({
               maxNativeZoom={19}
               attribution='© Esri'
               crossOrigin="anonymous"
+              keepBuffer={satelliteTileKeepBuffer}
+              updateWhenIdle={tileUpdateWhenIdle}
+              updateWhenZooming={satelliteUpdateWhenZooming}
+              reuseTiles={true}
             />
           );
         }
@@ -1145,6 +1625,10 @@ export default function NavigationMap({
               attribution='Offline Maps - Germany Base Map (OpenStreetMap Data)'
               errorTileUrl='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
               crossOrigin="anonymous"
+              keepBuffer={tileKeepBuffer}
+              updateWhenIdle={tileUpdateWhenIdle}
+              updateWhenZooming={tileUpdateWhenZooming}
+              reuseTiles={true}
               eventHandlers={{
                 tileloadstart: createTileLoadStartHandler(false, '/tiles/germany/{z}/{x}/{y}.png')
               }}
@@ -1164,6 +1648,10 @@ export default function NavigationMap({
               attribution='Offline Maps - Germany Base Map (OpenStreetMap Data)'
               errorTileUrl='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
               crossOrigin="anonymous"
+              keepBuffer={tileKeepBuffer}
+              updateWhenIdle={tileUpdateWhenIdle}
+              updateWhenZooming={tileUpdateWhenZooming}
+              reuseTiles={true}
               eventHandlers={{
                 tileloadstart: createTileLoadStartHandler(false, '/tiles/germany/{z}/{x}/{y}.png')
               }}
@@ -1182,6 +1670,11 @@ export default function NavigationMap({
               attribution='© OpenStreetMap contributors | Offline PMTiles'
               theme={Capacitor.isNativePlatform() && isDarkMode ? 'dark' : 'light'}
               schema="openmaptiles"
+              disableLabels={isTabletPerformanceMode}
+              keepBuffer={isNative ? Math.max(tileKeepBuffer, 6) : tileKeepBuffer}
+              updateWhenIdle={isNative ? false : tileUpdateWhenIdle}
+              updateWhenZooming={isNative ? true : tileUpdateWhenZooming}
+              tileDelay={isNative ? 0.01 : 3}
             />
           );
         }
@@ -1202,8 +1695,27 @@ export default function NavigationMap({
           );
         }
         
-        // Still probing for offline tiles: show blank to avoid premature OSM calls
+        // Still probing for offline tiles: keep online tiles visible while probing when possible.
         if (!tileProbeComplete && (isWithinOfflineBounds || forceOfflineTiles)) {
+          if (isOnline) {
+            const probeUrl = onlineTileUrl || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+            return (
+              <TileLayer
+                key='nav-tiles-probe-online'
+                url={probeUrl}
+                minZoom={1}
+                maxZoom={20}
+                maxNativeZoom={19}
+                attribution={onlineTileUrl ? 'Self-hosted tiles' : '© OpenStreetMap contributors'}
+                crossOrigin="anonymous"
+                keepBuffer={tileKeepBuffer}
+                updateWhenIdle={tileUpdateWhenIdle}
+                updateWhenZooming={tileUpdateWhenZooming}
+                reuseTiles={true}
+              />
+            );
+          }
+
           console.log('[NavigationMap] Probing tiles - showing blank fallback');
           return (
             <TileLayer
@@ -1245,6 +1757,10 @@ export default function NavigationMap({
             attribution={onlineTileUrl || rasterFallback ? 'Self-hosted tiles | GPS Navigation' : '© OpenStreetMap contributors | GPS Navigation'}
             crossOrigin="anonymous"
             tileSize={256}
+            keepBuffer={tileKeepBuffer}
+            updateWhenIdle={tileUpdateWhenIdle}
+            updateWhenZooming={tileUpdateWhenZooming}
+            reuseTiles={true}
           />
         );
       })()}

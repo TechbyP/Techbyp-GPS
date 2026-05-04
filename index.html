@@ -8,15 +8,15 @@
     <link rel="shortcut icon" href="/app-logo.png" />
     <link rel="manifest" href="/manifest.webmanifest">
     
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes" />
-    <title>GPS Tracker</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover" />
+    <title>TECHBYP - GPS Pro</title>
     
     <!-- PWA Meta Tags -->
     <meta name="description" content="Professional GPS tracking application for field work and navigation" />
-    <meta name="application-name" content="GPS Tracker" />
+    <meta name="application-name" content="TECHBYP - GPS Pro" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="GPS Tracker" />
+    <meta name="apple-mobile-web-app-title" content="TECHBYP - GPS Pro" />
     <meta name="mobile-web-app-capable" content="yes" />
     
     <!-- Theme Colors -->
@@ -79,7 +79,7 @@
           <!-- Logo with spinning rings -->
           <div style="position:relative;width:120px;height:120px;margin:0 auto 32px;">
             <!-- App Logo -->
-            <img src="/app-logo.png" alt="GPS Tracker" style="position:absolute;inset:0;margin:auto;width:64px;height:64px;border-radius:16px;box-shadow:0 8px 16px rgba(0,0,0,0.15);animation:pulseLogo 2s ease-in-out infinite;" />
+            <img src="/app-logo.png" alt="TECHBYP - GPS Pro" style="position:absolute;inset:0;margin:auto;width:64px;height:64px;border-radius:16px;box-shadow:0 8px 16px rgba(0,0,0,0.15);animation:pulseLogo 2s ease-in-out infinite;" />
             <!-- Rotating rings -->
             <div style="position:absolute;inset:0;border-radius:50%;border:3px solid rgba(59,130,246,0.2);border-top-color:#3b82f6;animation:spinOuter 2s linear infinite;"></div>
             <div style="position:absolute;inset:10px;border-radius:50%;border:3px solid rgba(16,185,129,0.2);border-right-color:#10b981;animation:spinMiddle 3s linear infinite;"></div>
@@ -87,7 +87,7 @@
           </div>
 
           <!-- App name with gradient -->
-          <h1 style="font-size:2rem;font-weight:700;margin-bottom:12px;background:linear-gradient(to right,#3b82f6,#10b981);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:-0.02em;animation:slideUpSplash 0.8s cubic-bezier(0.34,1.56,0.64,1) 0.2s both;">GPS Tracker</h1>
+          <h1 style="font-size:2rem;font-weight:700;margin-bottom:12px;background:linear-gradient(to right,#3b82f6,#10b981);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:-0.02em;animation:slideUpSplash 0.8s cubic-bezier(0.34,1.56,0.64,1) 0.2s both;">TECHBYP - GPS Pro</h1>
 
           <!-- Loading text with animated dots -->
           <p style="color:#64748b;font-size:0.875rem;font-weight:500;animation:slideUpSplash 0.8s cubic-bezier(0.34,1.56,0.64,1) 0.4s both;">
@@ -134,6 +134,37 @@
       .dark-mode-splash p{color:#94a3b8}
     </style>
     
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module">
+      const swDevEnabled = '%VITE_ENABLE_SW_DEV%' === 'true';
+      const swCleanupKey = 'gps-app-dev-html-sw-cleanup-v1';
+      const workboxCacheNames = ['osm-tiles', 'esri-tiles', 'local-tiles'];
+
+      const boot = async () => {
+        if (!swDevEnabled && 'serviceWorker' in navigator && window.sessionStorage.getItem(swCleanupKey) !== 'done') {
+          try {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            const unregisterResults = await Promise.all(registrations.map((registration) => registration.unregister().catch(() => false)));
+            const cacheNames = 'caches' in window ? await window.caches.keys() : [];
+            const staleCacheNames = cacheNames.filter((cacheName) => (
+              cacheName.startsWith('workbox-') || workboxCacheNames.includes(cacheName)
+            ));
+
+            await Promise.all(staleCacheNames.map((cacheName) => window.caches.delete(cacheName).catch(() => false)));
+            window.sessionStorage.setItem(swCleanupKey, 'done');
+
+            if (navigator.serviceWorker.controller || unregisterResults.some(Boolean) || staleCacheNames.length > 0) {
+              window.location.replace(window.location.href);
+              return;
+            }
+          } catch (error) {
+            console.warn('[dev-sw-cleanup] Failed to clear stale service worker state:', error);
+          }
+        }
+
+        await import('/src/main.tsx');
+      };
+
+      void boot();
+    </script>
   </body>
 </html>

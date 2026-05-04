@@ -64,10 +64,24 @@ const getNminLayers = (config?: LufaImportConfig): LufaImportNminLayer[] => (
 const buildProbeSeeds = (draft: OrderDraft): ProbeSeed[] => {
   if (Array.isArray(draft.fields) && draft.fields.length > 0) {
     return draft.fields.map((field) => ({
-      fieldId: toStringValue(field.fieldId) || toStringValue(field.baseId) || 'field',
-      fieldName: toStringValue(field.fieldName) || toStringValue(field.baseName) || toStringValue(field.fieldId),
-      baseId: toStringValue(field.baseId) || toStringValue(field.fieldId) || 'field',
-      baseName: toStringValue(field.baseName) || toStringValue(field.fieldName) || toStringValue(field.fieldId)
+      fieldId: toStringValue(field.exportMapping?.sampleKey)
+        || toStringValue(field.fieldId)
+        || toStringValue(field.baseId)
+        || 'field',
+      fieldName: toStringValue(field.exportMapping?.sampleDisplayName)
+        || toStringValue(field.fieldName)
+        || toStringValue(field.baseName)
+        || toStringValue(field.fieldId),
+      baseId: toStringValue(field.exportMapping?.sourceBaseId)
+        || toStringValue(field.samplingCell?.parentBaseId)
+        || toStringValue(field.baseId)
+        || toStringValue(field.fieldId)
+        || 'field',
+      baseName: toStringValue(field.exportMapping?.sourceBaseName)
+        || toStringValue(field.samplingCell?.parentBaseName)
+        || toStringValue(field.baseName)
+        || toStringValue(field.fieldName)
+        || toStringValue(field.fieldId)
     }));
   }
 

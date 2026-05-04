@@ -9,6 +9,7 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Capacitor } from '@capacitor/core';
 import type { OfflineMapPack } from '../config/offlineMapPacks';
 import { getDefaultPack } from '../config/offlineMapPacks';
+import { getBundledGermanyPmtilesUrl } from '../utils/tileUtils';
 
 export interface DownloadProgress {
   current: number;
@@ -400,6 +401,6 @@ export class OfflineTileDownloader {
 // Singleton instance
 // TODO: Replace with your server URL after setting up tile hosting
 export const tileDownloader = new OfflineTileDownloader(
-  (import.meta.env.VITE_PMTILES_URL as string | undefined) || '/tiles/germany.pmtiles',
+  getBundledGermanyPmtilesUrl() || '',
   (import.meta.env.VITE_PMTILES_DOWNLOAD_URL as string | undefined) || ''
 );

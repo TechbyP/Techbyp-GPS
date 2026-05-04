@@ -1,6 +1,6 @@
 {
-  "name": "GPS Tracker",
-  "short_name": "GPS Tracker",
+  "name": "TECHBYP - GPS Pro",
+  "short_name": "TECHBYP - GPS Pro",
   "description": "Professional GPS tracking application for field work and navigation",
   "start_url": "/",
   "display": "standalone",

@@ -1,6 +1,6 @@
 {
   "appId": "io.gpsapp.tracker",
-  "appName": "GPS Tracker",
+  "appName": "TECHBYP - GPS Pro",
   "webDir": "dist",
   "bundledWebRuntime": false,
   "server": {

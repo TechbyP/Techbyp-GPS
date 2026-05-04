@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core';
 import { getTileCacheStats, clearTileCache } from '../../services/tileDownloadService';
 import { tileDownloader } from '../../services/offlineTileDownloader';
 import { OFFLINE_MAP_PACKS, OfflineMapPack } from '../../config/offlineMapPacks';
+import { getBundledGermanyPmtilesUrl } from '../../utils/tileUtils';
 import toast from 'react-hot-toast';
 import { useLanguage } from '../../hooks/useLanguage';
 
@@ -50,6 +51,8 @@ const DOWNLOADABLE_REGIONS: DownloadRegion[] = [
   }
 ];
 
+const offlineTilesDisabledByEnv = ((import.meta.env.VITE_DISABLE_OFFLINE_TILES as string | undefined) || '').toLowerCase() === 'true';
+
 export default function OfflineMapDownloader() {
   const { t } = useLanguage();
   const [cacheStats, setCacheStats] = useState({ count: 0, sizeEstimate: '0 MB' });
@@ -60,7 +63,11 @@ export default function OfflineMapDownloader() {
   const [pmtilesStatus, setPmtilesStatus] = useState('');
   const [pmtilesAvailable, setPmtilesAvailable] = useState(false);
   const [selectedPackId, setSelectedPackId] = useState<string>(() => OFFLINE_MAP_PACKS[0]?.id || '');
-  const offlinePmtilesUrl = (window as any).__VITE_PMTILES_URL__ || (import.meta.env.VITE_PMTILES_URL as string | undefined) || '/tiles/germany.pmtiles';
+  const offlinePmtilesUrl = getBundledGermanyPmtilesUrl();
+
+  if (offlineTilesDisabledByEnv) {
+    return null;
+  }
 
   useEffect(() => {
     loadCacheStats();
@@ -81,6 +88,11 @@ export default function OfflineMapDownloader() {
       if (Capacitor.isNativePlatform()) {
         const uri = await tileDownloader.getLocalTileUri();
         setPmtilesAvailable(!!uri);
+        return;
+      }
+
+      if (!offlinePmtilesUrl) {
+        setPmtilesAvailable(false);
         return;
       }
 

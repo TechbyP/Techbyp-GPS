@@ -9,6 +9,8 @@
  * - Country roads and agricultural paths
  */
 
+import { getBundledGermanyPmtilesUrl } from '../utils/tileUtils';
+
 export interface MapLayer {
   id: string;
   name: string;
@@ -28,6 +30,8 @@ export interface MapLayer {
   requiresOnline: boolean;
   disabled?: boolean; // If true, layer should not be available for selection
 }
+
+const germanyOfflineBaseUrl = getBundledGermanyPmtilesUrl();
 
 export const AGRICULTURAL_LAYERS: Record<string, MapLayer> = {
   // ===== TOPOGRAPHIC & TERRAIN =====
@@ -151,13 +155,14 @@ export const AGRICULTURAL_LAYERS: Record<string, MapLayer> = {
     id: 'germanyOfflineBase',
     name: 'Germany Offline Base Map',
     description: 'Offline PMTiles base map for Germany (vector, zoom 0-14)',
-    url: '/tiles/germany.pmtiles',
+    url: germanyOfflineBaseUrl || '',
     type: 'tile',
     attribution: 'Offline Maps',
     maxNativeZoom: 14,
     maxZoom: 18,
     regions: ['DE'],
     requiresOnline: false,
+    disabled: !germanyOfflineBaseUrl,
   },
 };
 

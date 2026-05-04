@@ -3,7 +3,59 @@ import { useEffect } from 'react'
 import { useLanguage } from '../hooks/useLanguage'
 import toast from 'react-hot-toast'
 
-export function ReloadPrompt() {
+const swDevEnabled = !import.meta.env.DEV || import.meta.env.VITE_ENABLE_SW_DEV === 'true'
+const swCleanupSessionKey = 'gps-app-sw-cleanup-v3'
+const workboxCacheNames = ['osm-tiles', 'esri-tiles', 'local-tiles']
+
+function DevServiceWorkerCleanup() {
+  useEffect(() => {
+    if (!import.meta.env.DEV) {
+      return
+    }
+
+    if (typeof window === 'undefined' || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
+      return
+    }
+
+    if (window.sessionStorage.getItem(swCleanupSessionKey) === 'done') {
+      return
+    }
+
+    let cancelled = false
+
+    const cleanupStaleServiceWorkers = async () => {
+      const registrations = await navigator.serviceWorker.getRegistrations()
+      const staleRegistrations = registrations.filter((registration) => {
+        const scriptUrl = registration.active?.scriptURL || registration.waiting?.scriptURL || registration.installing?.scriptURL || ''
+        return scriptUrl.endsWith('/sw.js')
+      })
+
+      const unregisterResults = await Promise.all(staleRegistrations.map((registration) => registration.unregister()))
+      const cacheNames = typeof caches !== 'undefined' ? await caches.keys() : []
+      const staleCacheNames = cacheNames.filter((cacheName) => (
+        cacheName.startsWith('workbox-') || workboxCacheNames.includes(cacheName)
+      ))
+      await Promise.all(staleCacheNames.map((cacheName) => caches.delete(cacheName)))
+
+      const changed = unregisterResults.some(Boolean) || staleCacheNames.length > 0
+      window.sessionStorage.setItem(swCleanupSessionKey, 'done')
+
+      if (!cancelled && changed) {
+        window.location.reload()
+      }
+    }
+
+    void cleanupStaleServiceWorkers()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  return null
+}
+
+function ActiveReloadPrompt() {
   const { t } = useLanguage()
   const {
     offlineReady: [offlineReady, setOfflineReady],
@@ -57,4 +109,12 @@ export function ReloadPrompt() {
   }, [needRefresh, setNeedRefresh, updateServiceWorker])
 
   return null
+}
+
+export function ReloadPrompt() {
+  if (!swDevEnabled) {
+    return <DevServiceWorkerCleanup />
+  }
+
+  return <ActiveReloadPrompt />
 }

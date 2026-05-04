@@ -41,6 +41,17 @@ export const getGermanyTileUrl = (_isCapacitor: boolean): string => {
   return '/tiles/germany/{z}/{x}/{y}.png';
 };
 
+export const getBundledGermanyPmtilesUrl = (): string | undefined => {
+  const runtimeUrl = typeof window !== 'undefined' ? (window as any).__VITE_PMTILES_URL__ : undefined;
+  const configuredUrl = runtimeUrl || (import.meta.env.VITE_PMTILES_URL as string | undefined);
+
+  if (configuredUrl) {
+    return configuredUrl;
+  }
+
+  return __GERMANY_PMTILES_AVAILABLE__ ? '/tiles/germany.pmtiles' : undefined;
+};
+
 /**
  * Get blank tile data URI for error/blocking scenarios
  */

@@ -28,21 +28,27 @@ const offlineTileUrl = fs.existsSync(offlineTilePath) ? "/assets/tiles/offline.m
 
 // Check for Germany offline tiles (legacy raster) + PMTiles
 const germanyTilesPath = path.resolve(__dirname, "public/tiles/germany");
-const germanyTilesAvailable = fs.existsSync(germanyTilesPath) && fs.existsSync(path.join(germanyTilesPath, "metadata.json"));
+const germanyTilesSourceAvailable = fs.existsSync(germanyTilesPath) && fs.existsSync(path.join(germanyTilesPath, "metadata.json"));
 const germanyPmtilesPath = path.resolve(__dirname, "public/tiles/germany.pmtiles");
-const germanyPmtilesAvailable = fs.existsSync(germanyPmtilesPath);
+const germanyPmtilesSourceAvailable = fs.existsSync(germanyPmtilesPath);
 
-console.log(germanyPmtilesAvailable ? "🇩🇪 Germany PMTiles available" : "🌐 Germany PMTiles not found");
-console.log(germanyTilesAvailable ? "🇩🇪 Germany raster tiles available" : "🌐 Germany raster tiles not found (will use online tiles)");
+console.log(germanyPmtilesSourceAvailable ? "🇩🇪 Germany PMTiles available" : "🌐 Germany PMTiles not found");
+console.log(germanyTilesSourceAvailable ? "🇩🇪 Germany raster tiles available" : "🌐 Germany raster tiles not found (will use online tiles)");
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const appTarget = env.VITE_APP_TARGET || "web";
   const htmlInput = appTarget === "tablet" ? "index.tablet.html" : "index.html";
   const isDev = mode === "development";
+  const bundleOfflineTiles = command !== "build" || env.VITE_BUNDLE_OFFLINE_TILES === "true";
+  const germanyTilesAvailable = bundleOfflineTiles && germanyTilesSourceAvailable;
+  const germanyPmtilesAvailable = bundleOfflineTiles && germanyPmtilesSourceAvailable;
 
   console.log(`🧭 App target: ${appTarget}`);
+  if (command === "build" && !bundleOfflineTiles) {
+    console.log("📦 Bundled offline tiles excluded from dist");
+  }
 
   return {
     plugins: [
@@ -56,8 +62,8 @@ export default defineConfig(({ mode }) => {
       },
       includeAssets: ["favicon.ico", "apple-touch-icon.png", "masked-icon.svg"],
       manifest: {
-        name: "GPS Tracker Pro",
-        short_name: "GPS Tracker",
+        name: "TECHBYP - GPS Pro",
+        short_name: "TECHBYP - GPS Pro",
         description: "Professional GPS Tracking & Field Mapping",
         theme_color: "#1e293b",
         background_color: "#1e293b",
@@ -82,6 +88,7 @@ export default defineConfig(({ mode }) => {
         ],
       },
       workbox: {
+        disableDevLogs: true,
         globPatterns: isDev ? [] : ["**/*.{js,css,html,ico,png,svg,woff2}"],
         // Include Germany offline tiles in service worker cache
         globDirectory: "dist",
@@ -110,29 +117,36 @@ export default defineConfig(({ mode }) => {
             options: {
               cacheName: "esri-tiles",
               expiration: {
-                maxEntries: 500,
+                maxEntries: 2000,
                 maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
+                purgeOnQuotaError: true,
               },
               cacheableResponse: {
                 statuses: [0, 200],
               },
             },
           },
-          // Cache local offline tiles indefinitely
-          {
-            urlPattern: /^\/tiles\/.*\.png$/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "local-tiles",
-              expiration: {
-                maxEntries: 5000,
-                maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
+          ...(germanyTilesAvailable
+            ? [
+                {
+                  // Use a match callback here because same-origin tile regexes can be dropped from the generated SW.
+                  urlPattern: ({ url, sameOrigin }: { url: URL; sameOrigin: boolean }) => (
+                    sameOrigin && /^\/tiles\/.*\.png$/i.test(url.pathname)
+                  ),
+                  handler: "CacheFirst" as const,
+                  options: {
+                    cacheName: "local-tiles",
+                    expiration: {
+                      maxEntries: 5000,
+                      maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
+                    },
+                    cacheableResponse: {
+                      statuses: [0, 200],
+                    },
+                  },
+                },
+              ]
+            : []),
         ],
       },
     }),
@@ -167,6 +181,20 @@ export default defineConfig(({ mode }) => {
           
           next();
         });
+      },
+    },
+    {
+      name: "exclude-bundled-offline-tiles",
+      closeBundle() {
+        if (command !== "build" || bundleOfflineTiles) {
+          return;
+        }
+
+        const distTilesPath = path.resolve(__dirname, "dist/tiles");
+        if (fs.existsSync(distTilesPath)) {
+          fs.rmSync(distTilesPath, { recursive: true, force: true });
+          console.log("🧹 Removed offline tiles from dist");
+        }
       },
     },
     enableCompression

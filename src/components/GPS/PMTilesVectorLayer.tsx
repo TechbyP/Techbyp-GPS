@@ -10,6 +10,11 @@ interface PMTilesVectorLayerProps {
   opacity?: number;
   theme?: 'light' | 'dark';
   schema?: 'protomaps' | 'openmaptiles';
+  disableLabels?: boolean;
+  keepBuffer?: number;
+  updateWhenIdle?: boolean;
+  updateWhenZooming?: boolean;
+  tileDelay?: number;
 }
 
 export default function PMTilesVectorLayer({
@@ -21,9 +26,18 @@ export default function PMTilesVectorLayer({
   opacity = 1,
   theme = 'light',
   schema = 'protomaps',
+  disableLabels = false,
+  keepBuffer,
+  updateWhenIdle,
+  updateWhenZooming,
+  tileDelay,
 }: PMTilesVectorLayerProps) {
   const map = useMap();
   const layerRef = useRef<any>(null);
+  const normalizedTileDelay =
+    typeof tileDelay === 'number'
+      ? (tileDelay <= 0 ? 0.01 : tileDelay)
+      : undefined;
 
   useEffect(() => {
     let cancelled = false;
@@ -536,6 +550,10 @@ export default function PMTilesVectorLayer({
         backgroundColor = selectedTheme?.background;
       }
 
+      if (disableLabels) {
+        label_rules = [];
+      }
+
       const layer = leafletLayer({
         url: resolvedUrl,
         maxZoom,
@@ -544,6 +562,10 @@ export default function PMTilesVectorLayer({
         paint_rules,
         label_rules,
         backgroundColor,
+        keepBuffer,
+        updateWhenIdle,
+        updateWhenZooming,
+        tileDelay: normalizedTileDelay,
       });
 
       if (layer.setOpacity) {
@@ -563,7 +585,22 @@ export default function PMTilesVectorLayer({
         layerRef.current = null;
       }
     };
-  }, [pmtilesUrl, url, map, attribution, maxZoom, maxDataZoom, opacity, theme, schema]);
+  }, [
+    pmtilesUrl,
+    url,
+    map,
+    attribution,
+    maxZoom,
+    maxDataZoom,
+    opacity,
+    theme,
+    schema,
+    disableLabels,
+    keepBuffer,
+    updateWhenIdle,
+    updateWhenZooming,
+    normalizedTileDelay,
+  ]);
 
   return null;
 }

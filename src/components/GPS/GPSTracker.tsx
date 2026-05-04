@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
+import area from '@turf/area';
 import { useDarkMode } from '../../hooks/useDarkMode';
 import { useLanguage } from '../../hooks/useLanguage';
 import toast from 'react-hot-toast';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
-import { Play, MapPin, Trash2, Upload, ChevronDown, ChevronRight, Map as MapIcon, Satellite, User, LogOut, Camera, Moon, Sun, Globe, Loader2, Move, ArrowRight, X, Layers, Hand } from 'lucide-react';
+import { Play, MapPin, Trash2, Upload, ChevronDown, ChevronRight, Satellite, User, LogOut, Camera, Moon, Sun, Globe, Loader2, Move, ArrowRight, X, Layers, Hand } from 'lucide-react';
 import { db } from '../../firebase';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { AnimatedLoader } from '../ui/AnimatedLoader';
@@ -629,6 +630,195 @@ export default function GPSTracker() {
 
     return counts;
   }, [effectiveFieldSamples]);
+
+  const boundaryAreaHaByField = useMemo(() => {
+    const parseNumber = (value: unknown): number | null => {
+      if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : null;
+      }
+
+      if (typeof value !== 'string') {
+        return null;
+      }
+
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+
+      let normalized = trimmed;
+      if (/^-?\d{1,3}(\.\d{3})+,\d+$/.test(normalized)) {
+        normalized = normalized.replace(/\./g, '').replace(',', '.');
+      } else {
+        normalized = normalized.replace(',', '.');
+      }
+
+      const parsed = Number(normalized);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const getAreaFromProperties = (properties?: Record<string, any>): number | null => {
+      if (!properties) return null;
+
+      const normalizedProperties = Object.entries(properties).reduce<Record<string, unknown>>((acc, [key, value]) => {
+        acc[key.toLowerCase()] = value;
+        return acc;
+      }, {});
+
+      const areaHaKeys = ['area_ha', 'ha', 'hectares', 'hectare', 'flaeche_ha', 'flache_ha', 'shape_area_ha'];
+      for (const key of areaHaKeys) {
+        const candidate = parseNumber(normalizedProperties[key]);
+        if (candidate != null && candidate > 0) {
+          return candidate;
+        }
+      }
+
+      const areaM2Keys = ['area_m2', 'shape_area', 'area'];
+      for (const key of areaM2Keys) {
+        const candidate = parseNumber(normalizedProperties[key]);
+        if (candidate != null && candidate > 0) {
+          return candidate / 10000;
+        }
+      }
+
+      return null;
+    };
+
+    const result = new Map<string, number>();
+
+    fieldBoundaries.forEach((boundary) => {
+      const boundaryId = String(boundary.id);
+      const fromProps = getAreaFromProperties(boundary.properties);
+
+      if (fromProps != null) {
+        result.set(boundaryId, fromProps);
+        return;
+      }
+
+      if (boundary.geometry_type !== 'Polygon' && boundary.geometry_type !== 'MultiPolygon') {
+        return;
+      }
+
+      try {
+        const rawArea = area({
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: boundary.geometry_type,
+            coordinates: boundary.coordinates as any,
+          },
+        });
+
+        const areaHa = rawArea / 10000;
+        if (Number.isFinite(areaHa) && areaHa > 0) {
+          result.set(boundaryId, areaHa);
+        }
+      } catch {
+        // Ignore malformed geometry and keep rendering remaining fields.
+      }
+    });
+
+    return result;
+  }, [fieldBoundaries]);
+
+  const boundaryInfoBadgesByField = useMemo(() => {
+    const normalizedServiceLabels: Record<string, string> = {
+      basic_nutrients: t('orders.wizard.serviceBasic') || 'Basic Nutrients',
+      nmin: t('orders.wizard.serviceNmin') || 'NMIN',
+      nematodes: t('orders.wizard.serviceNematodes') || 'Nematodes',
+    };
+
+    const parseList = (value: unknown): string[] => {
+      if (Array.isArray(value)) {
+        return value
+          .map((item) => String(item || '').trim())
+          .filter(Boolean);
+      }
+
+      if (typeof value === 'string') {
+        return value
+          .split(/[;,|]/)
+          .map((item) => item.trim())
+          .filter(Boolean);
+      }
+
+      if (value && typeof value === 'object' && 'services' in (value as Record<string, unknown>)) {
+        return parseList((value as Record<string, unknown>).services);
+      }
+
+      return [];
+    };
+
+    const isTruthy = (value: unknown): boolean => {
+      if (value === true || value === 1) return true;
+      if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        return normalized === 'true' || normalized === 'yes' || normalized === 'y' || normalized === '1' || normalized === 'x';
+      }
+      return false;
+    };
+
+    const result = new Map<string, string[]>();
+
+    fieldBoundaries.forEach((boundary) => {
+      const normalizedProperties = Object.entries(boundary.properties || {}).reduce<Record<string, unknown>>((acc, [key, value]) => {
+        acc[key.toLowerCase()] = value;
+        return acc;
+      }, {});
+
+      const badges: string[] = [];
+      const addBadge = (value: unknown) => {
+        if (value == null) return;
+        const label = String(value).trim();
+        if (!label) return;
+
+        const exists = badges.some((item) => item.toLowerCase() === label.toLowerCase());
+        if (!exists) {
+          badges.push(label);
+        }
+      };
+
+      const landUseValue = [
+        normalizedProperties.landuse,
+        normalizedProperties.land_use,
+        normalizedProperties.land_use_type,
+        normalizedProperties.landusetype,
+        normalizedProperties.landnutzung,
+        normalizedProperties.nutzungsart,
+        normalizedProperties.lu,
+      ].find((value) => (typeof value === 'string' || typeof value === 'number') && String(value).trim().length > 0);
+
+      if (landUseValue != null) {
+        const normalizedLandUse = String(landUseValue).trim();
+        addBadge(normalizedLandUse.toUpperCase().startsWith('LU ') ? normalizedLandUse : `LU ${normalizedLandUse}`);
+      }
+
+      const services = [
+        ...((boundary.services || []) as string[]),
+        ...parseList(normalizedProperties.services || normalizedProperties.service || normalizedProperties.service_selection || normalizedProperties.selected_services),
+      ];
+
+      services.forEach((service) => {
+        const normalized = String(service || '').toLowerCase().trim();
+        if (!normalized) return;
+        addBadge(normalizedServiceLabels[normalized] || service);
+      });
+
+      if (services.length === 0) {
+        if (isTruthy(normalizedProperties.nmin)) addBadge(normalizedServiceLabels.nmin);
+        if (isTruthy(normalizedProperties.nematodes)) addBadge(normalizedServiceLabels.nematodes);
+        if (isTruthy(normalizedProperties.basic_nutrients) || isTruthy(normalizedProperties.basicnutrients)) {
+          addBadge(normalizedServiceLabels.basic_nutrients);
+        }
+      }
+
+      parseList(normalizedProperties.badges || normalizedProperties.badge || normalizedProperties.tags).forEach(addBadge);
+
+      if (badges.length > 0) {
+        result.set(String(boundary.id), badges.slice(0, 8));
+      }
+    });
+
+    return result;
+  }, [fieldBoundaries, t]);
 
   const activeFieldSampleCount = useMemo(() => {
     const activeFieldId = focusedBoundary != null ? String(focusedBoundary) : null;
@@ -3017,11 +3207,11 @@ export default function GPSTracker() {
                             const directSamplesInField = directFieldSampleCountByField.get(String(boundary.id)) || 0;
                             const totalSamplesInField = effectiveFieldSampleCountByField.get(String(boundary.id)) || 0;
                             const canDeleteFieldSamples = directSamplesInField > 0 || (existingManualSampleCount || 0) > 0;
-                            
-                            // Keep sidebar field color in sync with map color logic:
-                            // if field has samples, show pink.
-                            const hasSamplesInField = totalSamplesInField > 0;
-                            const displayColor = hasSamplesInField ? '#FF1493' : (boundary.color || '#00FF00');
+                            const areaHa = boundaryAreaHaByField.get(String(boundary.id));
+                            const infoBadges = boundaryInfoBadgesByField.get(String(boundary.id)) || [];
+                            const areaDisplay = areaHa != null
+                              ? (areaHa >= 10 ? areaHa.toFixed(1) : areaHa.toFixed(2))
+                              : null;
                             
                             return (
                               <div key={boundary.id} className="mb-2 relative" data-field-id={boundary.id}>
@@ -3039,20 +3229,18 @@ export default function GPSTracker() {
                                     border-2
                                   `}
                                 >
-                                  {/* Top row: Color indicator, icon, name, and expand button */}
-                                  <div className="flex items-center gap-2">
-                                    {/* Color indicator - auto color based on track status */}
-                                    <div
-                                      className="w-5 h-5 md:w-6 md:h-6 rounded border-2 flex-shrink-0" 
-                                      style={{ 
-                                        borderColor: displayColor, 
-                                        backgroundColor: `${displayColor}40` 
-                                      }}
-                                    />
-                                    <MapIcon className="w-5 h-5 md:w-6 md:h-6 flex-shrink-0 text-gray-600 dark:text-gray-300" />
-                                    <span className={`flex-1 text-base md:text-lg truncate font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                      {getFieldNumber(boundary.name)}
-                                    </span>
+                                  {/* Top row: field name with area details and expand button */}
+                                  <div className="flex items-start gap-2">
+                                    <div className="flex-1 min-w-0">
+                                      <span className={`block text-base md:text-lg truncate font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                        {getFieldNumber(boundary.name)}
+                                      </span>
+                                      <div className={`mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs md:text-sm ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                                        {areaDisplay && (
+                                          <span>{`${areaDisplay} ha`}</span>
+                                        )}
+                                      </div>
+                                    </div>
                                     {isExpanded ? (
                                       <ChevronDown className="w-5 h-5 md:w-6 md:h-6 flex-shrink-0 text-gray-600 dark:text-gray-300" />
                                     ) : (
@@ -3072,13 +3260,27 @@ export default function GPSTracker() {
                                 {/* Tracks under this field */}
                                 {isExpanded && (
                                   <div className="ml-4 mt-0.5 space-y-1">
-                                    <div className="flex items-center gap-2 md:gap-3 pl-1">
-                                      <div className="flex items-center gap-3 md:gap-4 text-xs md:text-sm">
-                                        <div className={`flex items-center gap-1 md:gap-1.5 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                                          <MapPin className="w-4 h-4 md:w-5 md:h-5" />
-                                          <span className="font-medium">{totalSamplesInField}</span>
-                                          <span className="opacity-70">{totalSamplesInField === 1 ? (t('gps.sampleCount') || 'sample') : (t('gps.samplesCount') || 'samples')}</span>
+                                    <div className="flex items-start gap-2 md:gap-3 pl-1">
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-3 md:gap-4 text-xs md:text-sm">
+                                          <div className={`flex items-center gap-1 md:gap-1.5 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                                            <MapPin className="w-4 h-4 md:w-5 md:h-5" />
+                                            <span className="font-medium">{totalSamplesInField}</span>
+                                            <span className="opacity-70">{totalSamplesInField === 1 ? (t('gps.sampleCount') || 'sample') : (t('gps.samplesCount') || 'samples')}</span>
+                                          </div>
                                         </div>
+                                        {infoBadges.length > 0 && (
+                                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                            {infoBadges.map((badge) => (
+                                              <span
+                                                key={`${boundary.id}-${badge}`}
+                                                className={`px-2 py-0.5 rounded-full text-[10px] md:text-xs font-medium ${isDark ? 'bg-blue-900/40 text-blue-200 border border-blue-800/50' : 'bg-blue-100 text-blue-700 border border-blue-200'}`}
+                                              >
+                                                {badge}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        )}
                                       </div>
                                       <div className="ml-auto flex items-center gap-1.5">
                                         {isNativeApp && canDeleteFieldSamples && (

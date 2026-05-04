@@ -1,4 +1,4 @@
-import { getGermanyBounds } from '../utils/tileUtils';
+import { getBundledGermanyPmtilesUrl, getGermanyBounds } from '../utils/tileUtils';
 
 export interface OfflineMapPack {
   id: string;
@@ -15,13 +15,14 @@ const NIEDERSACHSEN_BOUNDS: [[number, number], [number, number]] = [
 ];
 
 const disableBundled = (import.meta.env.VITE_DISABLE_BUNDLED_PMTILES as string | undefined) === 'true';
+const bundledPmtilesUrl = disableBundled ? undefined : getBundledGermanyPmtilesUrl();
 
 export const OFFLINE_MAP_PACKS: OfflineMapPack[] = [
   {
     id: 'niedersachsen',
     name: 'Lower Saxony (Niedersachsen)',
     bounds: NIEDERSACHSEN_BOUNDS,
-    bundledUrl: disableBundled ? undefined : '/tiles/germany.pmtiles',
+    bundledUrl: bundledPmtilesUrl,
     downloadUrl: (import.meta.env.VITE_PMTILES_DOWNLOAD_URL as string | undefined) || '',
     fileName: 'germany.pmtiles'
   },

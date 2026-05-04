@@ -5,12 +5,13 @@ import { EditControl } from 'react-leaflet-draw';
 import L from 'leaflet';
 import 'leaflet-draw/dist/leaflet.draw.css';
 import { Capacitor } from '@capacitor/core';
-import { Navigation2, Satellite, Map, Search } from 'lucide-react';
+import { Map, Navigation2, Satellite, Search, X } from 'lucide-react';
 import { useDarkMode } from '../../../hooks/useDarkMode';
 import { useLanguage } from '../../../hooks/useLanguage';
 import i18n from '../../../i18n';
 import { GpsPosition, GpsTrackDetail, GpsPoint, GpsFieldBoundary } from '../../../types';
-import { getBlankTileUrl } from '../../../utils/tileUtils';
+import { getBlankTileUrl, getBundledGermanyPmtilesUrl } from '../../../utils/tileUtils';
+import { buildBalancedSamplingCells, type PolygonGeometry } from '../../../utils/fieldPartitioning';
 import { getDefaultPack, getPackForLocation, OFFLINE_MAP_PACKS } from '../../../config/offlineMapPacks';
 import PMTilesVectorLayer from '../../GPS/PMTilesVectorLayer';
 import { tileDownloader, DownloadProgress } from '../../../services/offlineTileDownloader';
@@ -26,7 +27,7 @@ console.warn = (...args: any[]) => {
 };
 
 const onlineTileUrl = (window as any).__VITE_ONLINE_TILE_URL__ || (import.meta.env.VITE_ONLINE_TILE_URL as string | undefined);
-const offlinePmtilesUrl = (window as any).__VITE_PMTILES_URL__ || (import.meta.env.VITE_PMTILES_URL as string | undefined) || '/tiles/germany.pmtiles';
+const offlinePmtilesUrl = getBundledGermanyPmtilesUrl();
 
 // Check for Germany offline tiles at runtime
 const checkGermanyTilesAvailable = (): boolean => {
@@ -127,6 +128,41 @@ const metersPerPixel = (zoom: number, latitude: number): number => {
 
 const pixelRadiusToMeters = (zoom: number, latitude: number, pixelRadius: number): number => {
   return pixelRadius * metersPerPixel(zoom, latitude);
+};
+
+type GridPreviewCell = {
+  id: string;
+  positions: [number, number][][];
+};
+
+const geometryToGridPreviewCells = (
+  idPrefix: string,
+  geometry: PolygonGeometry,
+  cellIndex: number
+): GridPreviewCell[] => {
+  const cells: GridPreviewCell[] = [];
+
+  const pushPolygon = (coordinates: number[][][], polygonIndex: number) => {
+    const positions = coordinates
+      .filter((ring) => Array.isArray(ring) && ring.length >= 4)
+      .map((ring) => ring.map((coord) => [coord[1], coord[0]] as [number, number]));
+    if (!positions.length) return;
+    cells.push({
+      id: `${idPrefix}-${cellIndex}-${polygonIndex}`,
+      positions,
+    });
+  };
+
+  if (geometry.type === 'Polygon') {
+    pushPolygon(geometry.coordinates as number[][][], 0);
+    return cells;
+  }
+
+  (geometry.coordinates as number[][][][]).forEach((polygon, polygonIndex) => {
+    pushPolygon(polygon, polygonIndex);
+  });
+
+  return cells;
 };
 
 const inactiveFieldColor = '#DC2626';
@@ -304,6 +340,9 @@ interface OrdersMapViewProps {
   tracks: GpsTrackDetail[];
   fieldBoundaries?: GpsFieldBoundary[];
   drawnFields?: Array<{ id: string; geometry: any; color?: string; baseName?: string; baseId?: string; areaHa?: number }>;
+  gridOverlayEnabled?: boolean;
+  gridOverlaySizeHa?: 3 | 5;
+  layoutSyncToken?: number;
   focusedBoundaryId?: number | null;
   focusedDrawnFieldId?: string | null;
   selectedBoundaryIds?: Array<number | string>;
@@ -631,10 +670,10 @@ const MapScaleUpdater = memo(function MapScaleUpdater({
     };
 
     calculateScale();
-    map.on('zoomend moveend', calculateScale);
+    map.on('moveend', calculateScale);
 
     return () => {
-      map.off('zoomend moveend', calculateScale);
+      map.off('moveend', calculateScale);
     };
   }, [map, onScaleChange, formatLabel]);
 
@@ -658,6 +697,29 @@ const ZoomTracker = memo(function ZoomTracker({ onZoomChange }: { onZoomChange: 
     };
   }, [map, onZoomChange]);
   
+  return null;
+});
+
+const ZoomActivityTracker = memo(function ZoomActivityTracker({
+  onZoomingChange
+}: {
+  onZoomingChange: (isZooming: boolean) => void;
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    const handleZoomStart = () => onZoomingChange(true);
+    const handleZoomEnd = () => onZoomingChange(false);
+
+    map.on('zoomstart', handleZoomStart);
+    map.on('zoomend', handleZoomEnd);
+
+    return () => {
+      map.off('zoomstart', handleZoomStart);
+      map.off('zoomend', handleZoomEnd);
+    };
+  }, [map, onZoomingChange]);
+
   return null;
 });
 
@@ -760,6 +822,9 @@ export default function OrdersMapView({
   tracks,
   fieldBoundaries = [],
   drawnFields = [],
+  gridOverlayEnabled = false,
+  gridOverlaySizeHa = 5,
+  layoutSyncToken = 0,
   focusedBoundaryId = null,
   focusedDrawnFieldId = null,
   selectedBoundaryIds = [],
@@ -846,11 +911,13 @@ export default function OrdersMapView({
   const [tileProbeCounter, setTileProbeCounter] = useState(0);
   const [tileProbeComplete, setTileProbeComplete] = useState(false);
   const [currentZoom, setCurrentZoom] = useState(13);
+  const [isZooming, setIsZooming] = useState(false);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverPopupActiveRef = useRef(false);
   const hideOnPopupLeaveRef = useRef(false);
   const popupHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverPopupRef = useRef<HTMLDivElement | null>(null);
+  const placeInputRef = useRef<HTMLInputElement | null>(null);
   const selectedFieldRef = useRef<{ fieldId: number | string; source: 'uploaded' | 'drawn' } | null>(null);
   const suppressNextMapClickRef = useRef(false);
   const hasInjectedPatternRef = useRef(false);
@@ -1428,14 +1495,12 @@ export default function OrdersMapView({
     };
 
     map.on('moveend', schedule);
-    map.on('zoomend', schedule);
 
     // initial prefetch
     schedule();
 
     return () => {
       map.off('moveend', schedule);
-      map.off('zoomend', schedule);
       if (prefetchTimeoutRef.current) clearTimeout(prefetchTimeoutRef.current);
     };
   }, [getActiveTileTemplate, prefetchTiles]);
@@ -1456,6 +1521,67 @@ export default function OrdersMapView({
       return true;
     });
   }, [fieldBoundaries]);
+
+  const baseGridOverlayCells = useMemo(() => {
+    if (!gridOverlayEnabled) return [] as GridPreviewCell[];
+
+    const cells: GridPreviewCell[] = [];
+    let remainingBudget = 1600;
+
+    const appendGeometryCells = (idPrefix: string, geometry: PolygonGeometry) => {
+      if (remainingBudget <= 0) return;
+
+      const perFieldBudget = Math.min(120, remainingBudget);
+      const balancedCells = buildBalancedSamplingCells(geometry, gridOverlaySizeHa, perFieldBudget);
+      if (!balancedCells.length) return;
+
+      balancedCells.forEach((cell) => {
+        if (remainingBudget <= 0) return;
+        const previewCells = geometryToGridPreviewCells(idPrefix, cell.geometry, cell.index);
+        previewCells.forEach((previewCell) => {
+          if (remainingBudget <= 0) return;
+          cells.push(previewCell);
+          remainingBudget -= 1;
+        });
+      });
+    };
+
+    uniqueFieldBoundaries.forEach((boundary) => {
+      if (remainingBudget <= 0) return;
+      if (boundary.properties?.isActive === false) return;
+
+      if (boundary.geometry_type === 'Polygon') {
+        appendGeometryCells(`uploaded-${boundary.id}`, {
+          type: 'Polygon',
+          coordinates: boundary.coordinates as number[][][],
+        });
+        return;
+      }
+
+      if (boundary.geometry_type === 'MultiPolygon') {
+        appendGeometryCells(`uploaded-${boundary.id}`, {
+          type: 'MultiPolygon',
+          coordinates: boundary.coordinates as number[][][][],
+        });
+      }
+    });
+
+    drawnFields.forEach((field) => {
+      if (remainingBudget <= 0) return;
+      const geometry = field.geometry as PolygonGeometry | undefined;
+      if (!geometry || (geometry.type !== 'Polygon' && geometry.type !== 'MultiPolygon')) return;
+      appendGeometryCells(`drawn-${field.id}`, geometry);
+    });
+
+    return cells;
+  }, [gridOverlayEnabled, gridOverlaySizeHa, uniqueFieldBoundaries, drawnFields]);
+
+  const gridOverlayCells = useMemo(() => {
+    if (!gridOverlayEnabled) return [] as GridPreviewCell[];
+    if (currentZoom < 12) return [] as GridPreviewCell[];
+    if (isZooming) return [] as GridPreviewCell[];
+    return baseGridOverlayCells;
+  }, [gridOverlayEnabled, currentZoom, isZooming, baseGridOverlayCells]);
 
   // Show tracks logic: if a field is selected, show only that field's tracks
   const tracksForSelectedField = useMemo(() => {
@@ -1536,8 +1662,8 @@ export default function OrdersMapView({
         if (!Capacitor.isNativePlatform()) {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 3000);
-          const bundledUrl = activePack.bundledUrl || offlinePmtilesUrl;
-          pmtilesAvailable = await verifyPmtiles(bundledUrl, controller.signal);
+          const bundledUrl = activePack.bundledUrl ?? offlinePmtilesUrl;
+          pmtilesAvailable = bundledUrl ? await verifyPmtiles(bundledUrl, controller.signal) : false;
           clearTimeout(timeoutId);
           if (!cancelled) {
             setOfflinePmtilesUri(pmtilesAvailable ? bundledUrl : null);
@@ -1555,18 +1681,18 @@ export default function OrdersMapView({
           }
           // Fallback to bundled PMTiles in app assets if no downloaded file yet
           if (!pmtilesAvailable) {
-            const bundledUrl = activePack.bundledUrl || offlinePmtilesUrl;
-            const copiedUrl = await tileDownloader.ensureBundledTiles(bundledUrl, activePack);
-            pmtilesAvailable = !!copiedUrl || !!bundledUrl;
+            const bundledUrl = activePack.bundledUrl ?? offlinePmtilesUrl;
+            const copiedUrl = bundledUrl ? await tileDownloader.ensureBundledTiles(bundledUrl, activePack) : null;
+            pmtilesAvailable = !!copiedUrl;
             if (!cancelled) {
-              setOfflinePmtilesUri(copiedUrl || bundledUrl || null);
+              setOfflinePmtilesUri(copiedUrl || null);
             }
           }
         } else {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 3000);
-          const bundledUrl = activePack.bundledUrl || offlinePmtilesUrl;
-          pmtilesAvailable = await verifyPmtiles(bundledUrl, controller.signal);
+          const bundledUrl = activePack.bundledUrl ?? offlinePmtilesUrl;
+          pmtilesAvailable = bundledUrl ? await verifyPmtiles(bundledUrl, controller.signal) : false;
           clearTimeout(timeoutId);
           if (!cancelled) {
             setOfflinePmtilesUri(pmtilesAvailable ? bundledUrl : null);
@@ -1762,6 +1888,12 @@ export default function OrdersMapView({
   const [isSearchingPlace, setIsSearchingPlace] = useState(false);
   const [placeSearchError, setPlaceSearchError] = useState<string | null>(null);
   const [showPlaceResults, setShowPlaceResults] = useState(false);
+  const [isCompactViewport, setIsCompactViewport] = useState(() => (
+    typeof window !== 'undefined' ? window.innerWidth < 1280 : false
+  ));
+  const [isSearchExpanded, setIsSearchExpanded] = useState(() => (
+    typeof window !== 'undefined' ? window.innerWidth >= 1280 : true
+  ));
   const pmtilesVersion = import.meta.env.VITE_PMTILES_VERSION || '20260122';
 
   const centerOnCurrentLocation = () => {
@@ -1873,11 +2005,100 @@ export default function OrdersMapView({
     });
   }, []);
 
+  const toggleMapMode = useCallback(() => {
+    if (isOffline) {
+      return;
+    }
+
+    setMapMode((prev) => prev === 'osm' ? 'satellite' : 'osm');
+  }, [isOffline]);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(MAP_MODE_STORAGE_KEY, mapMode);
     window.dispatchEvent(new CustomEvent('orders-map-mode-changed', { detail: { mode: mapMode } }));
   }, [mapMode]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const updateViewportState = () => {
+      const compact = window.innerWidth < 1280;
+      setIsCompactViewport((prev) => (prev === compact ? prev : compact));
+      if (!compact) {
+        setIsSearchExpanded(true);
+      }
+    };
+
+    updateViewportState();
+    window.addEventListener('resize', updateViewportState);
+
+    return () => {
+      window.removeEventListener('resize', updateViewportState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isCompactViewport) return;
+    if (placeQuery.trim() || isSearchingPlace || showPlaceResults) {
+      setIsSearchExpanded(true);
+    }
+  }, [isCompactViewport, placeQuery, isSearchingPlace, showPlaceResults]);
+
+  useEffect(() => {
+    if (!isCompactViewport || !isSearchExpanded) return;
+    placeInputRef.current?.focus();
+  }, [isCompactViewport, isSearchExpanded]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !mapRef.current) return undefined;
+
+    let frameId = 0;
+    const invalidateMap = () => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(() => {
+        mapRef.current?.invalidateSize?.(false);
+      });
+    };
+
+    const firstTimeoutId = window.setTimeout(invalidateMap, 120);
+    const secondTimeoutId = window.setTimeout(invalidateMap, 280);
+
+    invalidateMap();
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(firstTimeoutId);
+      window.clearTimeout(secondTimeoutId);
+    };
+  }, [layoutSyncToken]);
+
+  const handleCollapseSearchDock = useCallback(() => {
+    setIsSearchExpanded(false);
+    setShowPlaceResults(false);
+  }, []);
+
+  const handleExpandSearchDock = useCallback(() => {
+    setIsSearchExpanded(true);
+  }, []);
+
+  const mapModeToggleTitle = useSatellite
+    ? (t('orders.mapMode.switchToOpenMap') || 'Switch to OpenMap')
+    : (t('orders.mapMode.switchToSatellite') || 'Switch to Satellite');
+  const isSearchDockExpanded = !isCompactViewport || isSearchExpanded;
+  const navigationButtonPositionClass = isNavigationOpen
+    ? 'hidden md:flex md:right-[29rem] lg:right-[32rem]'
+    : isCompactViewport
+      ? `right-3 ${isSearchDockExpanded ? 'bottom-[5.15rem]' : 'bottom-3'}`
+      : 'right-3 bottom-[5.5rem] sm:bottom-4 sm:right-4';
+  const scaleBarPositionClass = isCompactViewport
+    ? (isSearchDockExpanded
+      ? 'absolute left-2 bottom-[4.65rem] z-[1500]'
+      : 'absolute left-1/2 -translate-x-1/2 bottom-2 z-[1500]')
+    : 'absolute left-4 bottom-16 z-[1500]';
+  const searchDockPositionClass = isCompactViewport
+    ? `absolute bottom-2 left-2 z-[1500] ${isSearchDockExpanded ? 'right-[4.5rem] max-w-[calc(100vw-5rem)] sm:right-[5rem] sm:max-w-[calc(100vw-5.75rem)]' : 'w-auto'}`
+    : 'absolute bottom-4 left-4 z-[1500] max-w-[22rem] md:max-w-[26rem] lg:max-w-[28rem]';
 
   // Restrict zoom only when we actually use offline Germany tiles
   const usingOfflineGermanyTiles = shouldUseOfflineTiles && !useSatellite && !useOSM;
@@ -2069,6 +2290,7 @@ export default function OrdersMapView({
           );
         })()}
         <ZoomTracker onZoomChange={handleZoomChange} />
+        <ZoomActivityTracker onZoomingChange={setIsZooming} />
         <MapController
           currentPosition={currentPosition}
           fieldBoundaries={uniqueFieldBoundaries}
@@ -2549,6 +2771,23 @@ export default function OrdersMapView({
           return null;
         })}
 
+        {/* Grid preview overlay (clipped to field geometry) */}
+        {gridOverlayEnabled && currentZoom >= 12 && !isZooming && gridOverlayCells.map((cell) => (
+          <Polygon
+            key={`grid-preview-${cell.id}`}
+            positions={cell.positions}
+            pathOptions={{
+              color: '#2563EB',
+              weight: 1.2,
+              opacity: 0.62,
+              fill: false,
+            }}
+            pane="field-vectors"
+            renderer={canvasRenderer}
+            interactive={false}
+          />
+        ))}
+
         {/* Render viewport-filtered tracks - memoized for performance */}
         {useMemo(() => {
           // Determine sample visibility based on zoom level
@@ -2682,10 +2921,7 @@ export default function OrdersMapView({
       {showNavigationButton && onNavigationClick && (
         <button
           onClick={onNavigationClick}
-          className={`absolute bottom-4 z-[1500] w-10 h-10 md:w-12 md:h-12 flex items-center justify-center text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-full shadow-lg transition-all duration-300 ${isNavigationOpen
-              ? 'hidden md:flex md:right-[29rem] lg:right-[32rem]'
-              : 'right-4'
-            }`}
+          className={`absolute z-[1500] w-11 h-11 md:w-12 md:h-12 flex items-center justify-center text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-full shadow-lg transition-all duration-300 ${navigationButtonPositionClass}`}
           title={t('common.navigation')}
         >
           <Navigation2 className="w-5 h-5 md:w-6 md:h-6" />
@@ -2693,63 +2929,109 @@ export default function OrdersMapView({
       )}
 
       {/* Dynamic scale bar - Bottom left */}
-      <div className="absolute bottom-16 left-4 z-[1500] flex items-center gap-2 px-2 py-1 text-[10px] md:text-xs text-black font-bold">
+      <div className={`${scaleBarPositionClass} inline-flex w-max max-w-[calc(100vw-1rem)] items-center gap-1.5 rounded-full bg-white/75 px-2 py-1 text-[9px] font-bold text-black shadow-lg backdrop-blur-md dark:bg-gray-900/70 dark:text-white sm:text-[10px] md:text-xs`}>
         <div className="flex items-center">
           <div className="mx-1 h-[2px] bg-current" style={{ width: `${scaleInfo.width}px` }} />
         </div>
         <span>{scaleInfo.label}</span>
       </div>
 
-      <div className="absolute bottom-4 left-4 z-[1500]">
+      <div className={searchDockPositionClass}>
         <div className="relative">
-          <div className={`h-10 md:h-11 w-64 md:w-72 rounded-xl border border-gray-200/60 dark:border-gray-700/60 bg-white/80 dark:bg-gray-900/80 shadow-xl backdrop-blur-xl flex items-center gap-2 px-2 ${isOffline ? 'opacity-70' : ''}`}>
-            <Search className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-            <input
-              value={placeQuery}
-              onChange={(event) => {
-                setPlaceQuery(event.target.value);
-                if (!event.target.value.trim()) {
-                  setPlaceResults([]);
-                  setPlaceSearchError(null);
-                  setShowPlaceResults(false);
-                }
-              }}
-              onFocus={() => {
-                if (placeResults.length || placeSearchError) {
-                  setShowPlaceResults(true);
-                }
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  void runPlaceSearch();
-                }
-                if (event.key === 'Escape') {
-                  setShowPlaceResults(false);
-                }
-              }}
-              placeholder={(() => {
-                const value = t('orders.map.searchPlacesPlaceholder');
-                return value && value !== 'orders.map.searchPlacesPlaceholder'
-                  ? value
-                  : 'Search place or city';
-              })()}
-              className="flex-1 bg-transparent text-sm text-gray-900 dark:text-white placeholder:text-gray-500 dark:placeholder:text-gray-400 outline-none"
-            />
+          {!isSearchDockExpanded ? (
             <button
               type="button"
-              onClick={() => {
-                void runPlaceSearch();
-              }}
-              disabled={isSearchingPlace || !placeQuery.trim()}
-              className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${isSearchingPlace || !placeQuery.trim() ? 'bg-gray-200 text-gray-500 dark:bg-gray-800 dark:text-gray-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+              onClick={handleExpandSearchDock}
+              aria-label={t('common.search') || 'Search'}
+              title={t('common.search') || 'Search'}
+              className="h-11 w-11 rounded-2xl border border-gray-200/60 dark:border-gray-700/60 bg-white/80 dark:bg-gray-900/80 shadow-xl backdrop-blur-xl flex items-center justify-center text-gray-700 dark:text-gray-200"
             >
-              {isSearchingPlace ? (t('common.loading')) : (t('common.search'))}
+              <Search className="w-5 h-5" />
             </button>
-          </div>
+          ) : (
+            <div className={`min-h-11 w-full rounded-2xl border border-gray-200/60 dark:border-gray-700/60 bg-white/80 dark:bg-gray-900/80 shadow-xl backdrop-blur-xl flex items-center gap-1.5 px-2 sm:px-2.5 ${isOffline ? 'opacity-70' : ''}`}>
+              <Search className="w-4 h-4 shrink-0 text-gray-500 dark:text-gray-400" />
+              <input
+                ref={placeInputRef}
+                value={placeQuery}
+                onChange={(event) => {
+                  setPlaceQuery(event.target.value);
+                  if (!event.target.value.trim()) {
+                    setPlaceResults([]);
+                    setPlaceSearchError(null);
+                    setShowPlaceResults(false);
+                  }
+                }}
+                onFocus={() => {
+                  if (placeResults.length || placeSearchError) {
+                    setShowPlaceResults(true);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void runPlaceSearch();
+                  }
+                  if (event.key === 'Escape') {
+                    setShowPlaceResults(false);
+                    if (isCompactViewport) {
+                      handleCollapseSearchDock();
+                    }
+                  }
+                }}
+                placeholder={(() => {
+                  const value = t('orders.map.searchPlacesPlaceholder');
+                  return value && value !== 'orders.map.searchPlacesPlaceholder'
+                    ? value
+                    : 'Search place or city';
+                })()}
+                className="min-w-0 flex-1 bg-transparent text-sm text-gray-900 dark:text-white placeholder:text-gray-500 dark:placeholder:text-gray-400 outline-none"
+              />
+              <button
+                type="button"
+                onClick={toggleMapMode}
+                disabled={isOffline}
+                aria-label={mapModeToggleTitle}
+                title={isOffline ? (t('orders.mapMode.offlineDisabled') || 'Map mode switch requires internet connection') : mapModeToggleTitle}
+                className={`h-8 w-8 sm:h-9 sm:w-9 shrink-0 rounded-xl border transition-colors flex items-center justify-center ${isOffline ? 'border-gray-200 text-gray-400 dark:border-gray-800 dark:text-gray-600 cursor-not-allowed' : 'border-gray-200/80 text-gray-600 hover:bg-gray-100/80 hover:text-gray-900 dark:border-gray-700/80 dark:text-gray-300 dark:hover:bg-gray-800/80 dark:hover:text-white'}`}
+              >
+                {useSatellite ? <Map className="w-4 h-4" /> : <Satellite className="w-4 h-4" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void runPlaceSearch();
+                }}
+                disabled={isSearchingPlace || !placeQuery.trim()}
+                aria-label={t('common.search') || 'Search'}
+                title={t('common.search') || 'Search'}
+                className={`h-8 sm:h-9 min-w-8 px-2.5 sm:px-3 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center ${isSearchingPlace || !placeQuery.trim() ? 'bg-gray-200 text-gray-500 dark:bg-gray-800 dark:text-gray-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+              >
+                {isSearchingPlace ? (
+                  <span>{t('common.loading')}</span>
+                ) : (
+                  <>
+                    <Search className="h-4 w-4 sm:hidden" />
+                    <span className="hidden sm:inline">{t('common.search')}</span>
+                  </>
+                )}
+              </button>
+              {isCompactViewport && (
+                <button
+                  type="button"
+                  onClick={handleCollapseSearchDock}
+                  aria-label={t('common.close') || 'Close'}
+                  title={t('common.close') || 'Close'}
+                  className="h-8 w-8 shrink-0 rounded-xl border border-gray-200/80 text-gray-600 hover:bg-gray-100/80 hover:text-gray-900 dark:border-gray-700/80 dark:text-gray-300 dark:hover:bg-gray-800/80 dark:hover:text-white flex items-center justify-center"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          )}
 
-          {showPlaceResults && (placeResults.length > 0 || placeSearchError) && (
-            <div className="absolute bottom-full mb-1 w-full rounded-xl border border-gray-200/70 dark:border-gray-700/70 bg-white/90 dark:bg-gray-900/90 shadow-2xl backdrop-blur-xl max-h-56 overflow-y-auto z-[4100]">
+          {isSearchDockExpanded && showPlaceResults && (placeResults.length > 0 || placeSearchError) && (
+            <div className="absolute bottom-full mb-2 w-full rounded-2xl border border-gray-200/70 dark:border-gray-700/70 bg-white/90 dark:bg-gray-900/90 shadow-2xl backdrop-blur-xl max-h-[45vh] sm:max-h-56 overflow-y-auto z-[4100]">
               {placeSearchError ? (
                 <div className="px-3 py-2 text-xs text-red-600 dark:text-red-300">{placeSearchError}</div>
               ) : (

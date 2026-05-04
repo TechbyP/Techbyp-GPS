@@ -17,6 +17,8 @@ import { orderExportService } from '../../../services/orderExportService';
 import { orderService } from '../../../services/orderService';
 import { firebaseGPS } from '../../../services/firebaseSync';
 import { userProfileService } from '../../../services/userProfileService';
+import { buildBalancedSamplingCells } from '../../../utils/fieldPartitioning';
+import type { UserProfile } from '../../../services/userProfileService';
 import type { DrawnField } from './types';
 
 
@@ -118,10 +120,26 @@ const normalizeDraftLabConfig = (value: OrderDraft): OrderDraft => {
     ...defaultSamplingDetails,
     ...(value.samplingDetails || {})
   };
+  const lufaImportEnabled = typeof value.lufaImportEnabled === 'boolean'
+    ? value.lufaImportEnabled
+    : LUFA_ADRNR_KEYS.some((key) => String(mergedLufaImport[key] || '').trim().length > 0);
+  const agrolabMetadataEnabled = typeof value.agrolabMetadataEnabled === 'boolean'
+    ? value.agrolabMetadataEnabled
+    : (
+      AGROLAB_REQUIRED_LAB_META_KEYS.some((key) => String(value.labMeta?.[key] || '').trim().length > 0)
+      || AGROLAB_REQUIRED_SAMPLING_KEYS.some((key) => String(value.samplingDetails?.[key] || '').trim().length > 0)
+      || Boolean((value.fields || []).some((field) => (
+        String(field.transportTracking || '').trim().length > 0
+        || String(field.soilType || '').trim().length > 0
+        || String(field.humusClass || '').trim().length > 0
+      )))
+    );
 
   return {
     ...value,
     labProvider,
+    agrolabMetadataEnabled,
+    lufaImportEnabled,
     labMeta: mergedLabMeta,
     samplingDetails: mergedSamplingDetails,
     lufaImport: mergedLufaImport
@@ -191,6 +209,87 @@ const normalizeCrops = (crops?: Array<{ crop?: string; yield?: string }>) => (
   }))
 );
 
+const areOrderedValuesEqual = <T,>(left: T[], right: T[]) => (
+  left.length === right.length && left.every((value, index) => value === right[index])
+);
+
+const buildSamplingCellSourceFields = (
+  sourceFields: NonNullable<OrderDraft['sourceFields']>,
+  gridSizeHa: 3 | 5,
+  maxTotalCells: number = 5000
+): NonNullable<OrderDraft['sourceFields']> => {
+  const generatedAt = new Date().toISOString();
+  let remainingCellBudget = maxTotalCells;
+
+  const nextFields: NonNullable<OrderDraft['sourceFields']> = [];
+
+  sourceFields.forEach((source) => {
+    if (source.samplingCell) {
+      nextFields.push(source);
+      return;
+    }
+
+    const geometry = source.geometry;
+    if (!geometry || (geometry.type !== 'Polygon' && geometry.type !== 'MultiPolygon')) {
+      nextFields.push(source);
+      return;
+    }
+
+    if (remainingCellBudget <= 0) {
+      nextFields.push(source);
+      return;
+    }
+
+    const parentBaseId = source.samplingCell?.parentBaseId || source.baseId;
+    const parentBaseName = source.samplingCell?.parentBaseName || source.baseName;
+
+    const balancedCells = buildBalancedSamplingCells(
+      geometry,
+      gridSizeHa,
+      Math.min(remainingCellBudget, 120)
+    );
+
+    if (!balancedCells.length) {
+      nextFields.push(source);
+      return;
+    }
+
+    balancedCells.forEach((cell) => {
+      if (remainingCellBudget <= 0) return;
+      remainingCellBudget -= 1;
+
+      const cellBaseId = `${parentBaseId}.${cell.index}`;
+      const cellBaseName = `${parentBaseName}.${cell.index}`;
+      const samplingCell = {
+        parentBaseId,
+        parentBaseName,
+        cellIndex: cell.index,
+        row: cell.row,
+        column: cell.column,
+        gridSizeHa,
+        generatedAt,
+      };
+
+      nextFields.push({
+        baseId: cellBaseId,
+        baseName: cellBaseName,
+        areaHa: Number(cell.areaHa.toFixed(2)),
+        geometry: cell.geometry,
+        labAttributes: source.labAttributes,
+        samplingCell,
+        exportMapping: {
+          sampleKey: cellBaseId,
+          sampleDisplayName: cellBaseName,
+          sourceBaseId: parentBaseId,
+          sourceBaseName: parentBaseName,
+        },
+      });
+    });
+  });
+
+  return nextFields;
+};
+
 const newDraft = (ownerId: string, id: string, name?: string): OrderDraft => {
   const now = new Date().toISOString();
   return {
@@ -206,10 +305,105 @@ const newDraft = (ownerId: string, id: string, name?: string): OrderDraft => {
     cropYield: { crops: [...defaultCrops] },
     labMeta: createDefaultLabMeta(),
     samplingDetails: createDefaultSamplingDetails(),
+    agrolabMetadataEnabled: false,
+    lufaImportEnabled: false,
     lufaImport: createDefaultLufaImport('DED'),
     gridSizeHa: 5,
     sourceFields: [],
     fields: []
+  };
+};
+
+const hasNonEmptyText = (value?: string): boolean => (
+  typeof value === 'string' && value.trim().length > 0
+);
+
+const CUSTOMER_PROFILE_KEYS: Array<keyof NonNullable<OrderDraft['customerProfile']>> = [
+  'customerNumber',
+  'firstName',
+  'lastName',
+  'company',
+  'street',
+  'postalCode',
+  'city',
+  'phone',
+  'email',
+  'country',
+  'federalState'
+];
+
+const BILLING_RECIPIENT_TEXT_KEYS: Array<'name' | 'firstName' | 'street' | 'postalCode' | 'city' | 'country' | 'federalState'> = [
+  'name',
+  'firstName',
+  'street',
+  'postalCode',
+  'city',
+  'country',
+  'federalState'
+];
+
+const withUserProfileDefaults = (
+  source: OrderDraft,
+  userProfile: UserProfile | null,
+  fallbackEmail?: string
+): OrderDraft => {
+  const customerDefaults: Partial<NonNullable<OrderDraft['customerProfile']>> = {
+    customerNumber: userProfile?.customerNumber,
+    firstName: userProfile?.firstName,
+    lastName: userProfile?.lastName,
+    company: userProfile?.company,
+    street: userProfile?.street,
+    postalCode: userProfile?.postalCode,
+    city: userProfile?.city,
+    phone: userProfile?.phone,
+    email: userProfile?.email || fallbackEmail,
+    country: userProfile?.country,
+    federalState: userProfile?.federalState
+  };
+
+  const billingDefaults: Partial<NonNullable<OrderDraft['billingRecipient']>> = {
+    name: userProfile?.company || userProfile?.lastName,
+    firstName: userProfile?.firstName,
+    street: userProfile?.street,
+    postalCode: userProfile?.postalCode,
+    city: userProfile?.city,
+    country: userProfile?.country,
+    federalState: userProfile?.federalState
+  };
+
+  const nextCustomer: NonNullable<OrderDraft['customerProfile']> = {
+    ...(source.customerProfile || {})
+  };
+  let customerChanged = false;
+  for (const key of CUSTOMER_PROFILE_KEYS) {
+    const currentValue = nextCustomer[key];
+    const defaultValue = customerDefaults[key];
+    if (hasNonEmptyText(currentValue) || !hasNonEmptyText(defaultValue)) continue;
+    nextCustomer[key] = defaultValue.trim();
+    customerChanged = true;
+  }
+
+  const nextBilling: NonNullable<OrderDraft['billingRecipient']> = {
+    isDifferent: source.billingRecipient?.isDifferent || false,
+    ...(source.billingRecipient || {})
+  };
+  let billingChanged = false;
+  for (const key of BILLING_RECIPIENT_TEXT_KEYS) {
+    const currentValue = nextBilling[key];
+    const defaultValue = billingDefaults[key];
+    if (hasNonEmptyText(currentValue) || !hasNonEmptyText(defaultValue)) continue;
+    nextBilling[key] = defaultValue.trim();
+    billingChanged = true;
+  }
+
+  if (!customerChanged && !billingChanged) {
+    return source;
+  }
+
+  return {
+    ...source,
+    ...(customerChanged ? { customerProfile: nextCustomer } : {}),
+    ...(billingChanged ? { billingRecipient: nextBilling } : {})
   };
 };
 
@@ -226,6 +420,7 @@ export default function OrderWizard({
   onStepChange,
   mapSelectionEvent,
   onFieldFocusRequest,
+  onClearSelectionRequest,
   onFieldSummariesChange,
   draftId,
   draftName,
@@ -233,12 +428,13 @@ export default function OrderWizard({
   ownerIdOverride,
   onSubmitHandlerChange,
   onSubmitStateChange,
-  onStepReadinessChange
+  onStepReadinessChange,
+  onGridPreviewChange
 }: { 
   initialStep?: number;
   singleStepMode?: boolean;
   onComplete?: () => void;
-  onFieldsLoaded?: (fields: Array<{baseId: string; baseName: string; areaHa: number; geometry: any}>) => void;
+  onFieldsLoaded?: (fields: NonNullable<OrderDraft['sourceFields']>) => void;
   externalDrawnFields?: DrawnField[];
   onExternalDrawnFieldsChange?: (fields: DrawnField[]) => void;
   externalSourceFields?: NonNullable<OrderDraft['sourceFields']>;
@@ -247,6 +443,7 @@ export default function OrderWizard({
   onStepChange?: (step: number) => void;
   mapSelectionEvent?: { baseId: string; ctrlKey: boolean; timestamp: number } | null;
   onFieldFocusRequest?: (baseId: string) => void;
+  onClearSelectionRequest?: () => void;
   onFieldSummariesChange?: (summaries: Record<string, { status: 'pending' | 'completed' | 'skipped' | 'mixed'; badges: string[]; services: string[] }>) => void;
   draftId?: string;
   draftName?: string;
@@ -261,6 +458,10 @@ export default function OrderWizard({
     step4Ready: boolean;
     step5Ready: boolean;
     step6Ready: boolean;
+  }) => void;
+  onGridPreviewChange?: (state: {
+    enabled: boolean;
+    sizeHa: 3 | 5;
   }) => void;
 }) {
   const { user } = useAuth();
@@ -280,6 +481,8 @@ export default function OrderWizard({
   const [uploadedArchives, setUploadedArchives] = useState<Array<{ id: string; name: string; fields: NonNullable<OrderDraft['sourceFields']> }>>([]);
   const [isLoadingShapefile, setIsLoadingShapefile] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isConvertingSamplingCells, setIsConvertingSamplingCells] = useState(false);
+  const [showGridPreview, setShowGridPreview] = useState(true);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const lastStepReadinessRef = useRef<{
     step1Ready: boolean;
@@ -290,10 +493,26 @@ export default function OrderWizard({
     step6Ready: boolean;
   } | null>(null);
   const lastFieldSummariesSignatureRef = useRef<string>('');
+  const lastProcessedMapSelectionTsRef = useRef<number | null>(null);
+  const onStepChangeRef = useRef(onStepChange);
+  const onFieldSummariesChangeRef = useRef(onFieldSummariesChange);
+  const onSubmitHandlerChangeRef = useRef(onSubmitHandlerChange);
+  const onSubmitStateChangeRef = useRef(onSubmitStateChange);
+  const onStepReadinessChangeRef = useRef(onStepReadinessChange);
+  const onGridPreviewChangeRef = useRef(onGridPreviewChange);
+
+  useEffect(() => {
+    onStepChangeRef.current = onStepChange;
+    onFieldSummariesChangeRef.current = onFieldSummariesChange;
+    onSubmitHandlerChangeRef.current = onSubmitHandlerChange;
+    onSubmitStateChangeRef.current = onSubmitStateChange;
+    onStepReadinessChangeRef.current = onStepReadinessChange;
+    onGridPreviewChangeRef.current = onGridPreviewChange;
+  }, [onFieldSummariesChange, onGridPreviewChange, onStepChange, onStepReadinessChange, onSubmitHandlerChange, onSubmitStateChange]);
 
   const goToStep = (step: number) => {
     setCurrentStep(step);
-    onStepChange?.(step);
+    onStepChangeRef.current?.(step);
   };
 
   const steps = [
@@ -404,7 +623,10 @@ export default function OrderWizard({
       baseId: field.baseId,
       baseName: field.baseName,
       areaHa: field.areaHa,
-      geometry: null
+      geometry: null,
+      labAttributes: field.labAttributes,
+      samplingCell: field.samplingCell,
+      exportMapping: field.exportMapping
     }));
     const compactFields = (value.fields || []).map((field) => ({
       fieldId: field.fieldId,
@@ -416,7 +638,10 @@ export default function OrderWizard({
       samplingDepthCm: field.samplingDepthCm,
       services: field.services,
       parameters: field.parameters,
-      cropYield: field.cropYield
+      cropYield: field.cropYield,
+      labAttributes: field.labAttributes,
+      samplingCell: field.samplingCell,
+      exportMapping: field.exportMapping
     }));
     return JSON.stringify({
       ...value,
@@ -428,7 +653,7 @@ export default function OrderWizard({
   // Update current step when initialStep prop changes
   useEffect(() => {
     setCurrentStep(initialStep);
-    onStepChange?.(initialStep);
+    onStepChangeRef.current?.(initialStep);
   }, [initialStep]);
 
   useEffect(() => {
@@ -505,47 +730,48 @@ export default function OrderWizard({
         setUploadedSourceFields(normalizedRemote.sourceFields || []);
       } else {
         const fresh = normalizeDraftLabConfig(newDraft(resolvedOwnerId, resolvedDraftId, draftName));
-        
-        // Auto-populate customer profile from user profile
-        try {
-          const userProfile = await userProfileService.getProfile(resolvedOwnerId);
-          if (userProfile) {
-            fresh.customerProfile = {
-              customerNumber: userProfile.customerNumber,
-              firstName: userProfile.firstName,
-              lastName: userProfile.lastName,
-              company: userProfile.company,
-              street: userProfile.street,
-              postalCode: userProfile.postalCode,
-              city: userProfile.city,
-              phone: userProfile.phone,
-              email: userProfile.email || user?.email || undefined,
-              country: userProfile.country,
-              federalState: userProfile.federalState
-            };
-          } else {
-            // Fallback: at least populate email
-            fresh.customerProfile = {
-              email: user?.email || undefined
-            };
-          }
-        } catch (error) {
-          console.error(t('orders.wizard.logs.profileLoadFailed'), error);
-          // Fallback: at least populate email
-          fresh.customerProfile = {
-            email: user?.email || undefined
-          };
-        }
-        
+
         setDraft(fresh);
         persistDraftCache(storageKey, serializeDraftForStorage(fresh));
       }
     }
-  }, [storageKey, sessionStorageKey, resolvedOwnerId, resolvedDraftId, user?.email, t, serializeDraftForStorage, persistDraftCache]);
+  }, [storageKey, sessionStorageKey, resolvedOwnerId, resolvedDraftId, draftName, serializeDraftForStorage, persistDraftCache]);
 
   useEffect(() => {
     loadDraft();
   }, [loadDraft]);
+
+  useEffect(() => {
+    if (!draft || !resolvedOwnerId) return;
+
+    let cancelled = false;
+    const currentDraftId = draft.id;
+
+    const hydrateProfileDefaults = async () => {
+      const fallbackEmail = resolvedOwnerId === user?.uid ? (user?.email || undefined) : undefined;
+      try {
+        const userProfile = await userProfileService.getProfile(resolvedOwnerId);
+        if (cancelled) return;
+        setDraft(prev => {
+          if (!prev || prev.id !== currentDraftId) return prev;
+          return withUserProfileDefaults(prev, userProfile, fallbackEmail);
+        });
+      } catch (error) {
+        console.error(t('orders.wizard.logs.profileLoadFailed'), error);
+        if (cancelled || !fallbackEmail) return;
+        setDraft(prev => {
+          if (!prev || prev.id !== currentDraftId) return prev;
+          return withUserProfileDefaults(prev, null, fallbackEmail);
+        });
+      }
+    };
+
+    hydrateProfileDefaults();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [draft?.id, resolvedOwnerId, user?.uid, user?.email, t]);
 
   useEffect(() => {
     setUploadedArchives([]);
@@ -566,13 +792,22 @@ export default function OrderWizard({
 
   useEffect(() => {
     if (!draft?.fields?.length) return;
+    if (applyToAll) {
+      if (selectedFieldIds.length) {
+        setSelectedFieldIds([]);
+      }
+      if (activeFieldId) {
+        setActiveFieldId(null);
+      }
+      return;
+    }
     if (!activeFieldId) {
       setActiveFieldId(draft.fields[0].fieldId);
     }
     if (!selectedFieldIds.length) {
       setSelectedFieldIds([draft.fields[0].fieldId]);
     }
-  }, [draft && draft.fields, activeFieldId, selectedFieldIds.length]);
+  }, [draft?.fields, activeFieldId, selectedFieldIds.length, applyToAll]);
 
   // Auto-apply parameters to all fields when "Apply to all" is checked
   useEffect(() => {
@@ -604,14 +839,19 @@ export default function OrderWizard({
 
   const fieldsReady = Boolean(draft?.fields?.length);
   const allFieldsCompleted = Boolean(draft?.fields?.length && draft.fields.every(field => field.status === 'completed'));
-  const parametersReady = Boolean(draft?.parameters?.landUseType);
+  const parametersReady = Boolean(
+    draft?.fields?.length
+    && draft.fields.every((field) => String(field.parameters?.landUseType || draft.parameters?.landUseType || '').trim().length > 0)
+  );
   const isLufaLab = draft?.labProvider === 'lufa_nrw';
+  const agrolabMetadataEnabled = Boolean(draft?.agrolabMetadataEnabled);
+  const lufaImportEnabled = Boolean(draft?.lufaImportEnabled);
   const lufaConfig = useMemo(() => (
     draft?.lufaImport || createDefaultLufaImport('DED')
   ), [draft?.lufaImport]);
 
   const lufaAdrnrValidation = useMemo(() => {
-    if (!isLufaLab) {
+    if (!isLufaLab || !lufaImportEnabled) {
       return { ready: true, invalidKeys: [] as string[] };
     }
 
@@ -628,10 +868,10 @@ export default function OrderWizard({
       ready: invalidKeys.length === 0,
       invalidKeys
     };
-  }, [isLufaLab, lufaConfig.kundeAdrnr, lufaConfig.auftraggeberAdrnr, lufaConfig.kostentraegerAdrnr, lufaConfig.durchschriftenempfaengerAdrnr]);
+  }, [isLufaLab, lufaImportEnabled, lufaConfig.kundeAdrnr, lufaConfig.auftraggeberAdrnr, lufaConfig.kostentraegerAdrnr, lufaConfig.durchschriftenempfaengerAdrnr]);
 
   const lufaNminLayerValidation = useMemo(() => {
-    if (!isLufaLab || lufaConfig.standarduntersuchungsumfang !== 'Nmin') {
+    if (!isLufaLab || !lufaImportEnabled || lufaConfig.standarduntersuchungsumfang !== 'Nmin') {
       return { ready: true, reason: '' };
     }
 
@@ -656,7 +896,7 @@ export default function OrderWizard({
     }
 
     return { ready: true, reason: '' };
-  }, [isLufaLab, lufaConfig.standarduntersuchungsumfang, lufaConfig.nminLayers]);
+  }, [isLufaLab, lufaImportEnabled, lufaConfig.standarduntersuchungsumfang, lufaConfig.nminLayers]);
 
   const evaluateAgrolabReadiness = useCallback((value: OrderDraft | null | undefined) => {
     const labMeta = {
@@ -688,11 +928,19 @@ export default function OrderWizard({
   }, []);
 
   const agrolabReadiness = useMemo(() => (
-    evaluateAgrolabReadiness(draft)
-  ), [draft, evaluateAgrolabReadiness]);
+    agrolabMetadataEnabled
+      ? evaluateAgrolabReadiness(draft)
+      : {
+        labMetaReady: true,
+        samplingReady: true,
+        fieldMetaReady: true,
+        ready: true
+      }
+  ), [draft, evaluateAgrolabReadiness, agrolabMetadataEnabled]);
 
+  // LUFA import config is optional in the current flow.
   const labConfigReady = isLufaLab
-    ? (lufaAdrnrValidation.ready && lufaNminLayerValidation.ready)
+    ? true
     : agrolabReadiness.ready;
   const submitReady = canContinue && fieldsReady && parametersReady && allFieldsCompleted && labConfigReady;
 
@@ -716,6 +964,26 @@ export default function OrderWizard({
           ...current,
           ...patch
         }
+      };
+    });
+  }, []);
+
+  const setLufaImportConfigEnabled = useCallback((enabled: boolean) => {
+    setDraft(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        lufaImportEnabled: enabled
+      };
+    });
+  }, []);
+
+  const setAgrolabMetadataConfigEnabled = useCallback((enabled: boolean) => {
+    setDraft(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        agrolabMetadataEnabled: enabled
       };
     });
   }, []);
@@ -790,7 +1058,8 @@ export default function OrderWizard({
     if (!draftForExport) return;
 
     const agrolabCheck = evaluateAgrolabReadiness(draftForExport);
-    if (!agrolabCheck.ready) {
+    const shouldValidateAgrolabMetadata = Boolean(draftForExport.agrolabMetadataEnabled);
+    if (shouldValidateAgrolabMetadata && !agrolabCheck.ready) {
       await showConfirmation(
         t('orders.wizard.agrolabValidationTitle'),
         t('orders.wizard.agrolabValidationBeforeExport'),
@@ -829,7 +1098,7 @@ export default function OrderWizard({
 
     const labIsLufa = draftForExport.labProvider === 'lufa_nrw';
     const config = draftForExport.lufaImport || createDefaultLufaImport('DED');
-    if (labIsLufa) {
+    if (labIsLufa && draftForExport.lufaImportEnabled) {
       const requiredAdrnrValues = [
         config.kundeAdrnr,
         config.auftraggeberAdrnr,
@@ -965,8 +1234,9 @@ export default function OrderWizard({
     setDraft(prev => {
       if (!prev || !prev.fields?.length) return prev;
       const targetIds = new Set(getSelectedFieldIds());
-      if (!targetIds.size) {
-        prev.fields.forEach(field => targetIds.add(field.fieldId));
+      const shouldApplyAll = applyToAll;
+      if (!shouldApplyAll && targetIds.size === 0) {
+        return prev;
       }
       const nextParameters = buildParametersForServices(services, prev.parameters);
       const depthOptions = getDepthOptionsForServices(services);
@@ -975,7 +1245,7 @@ export default function OrderWizard({
         : depthOptions[0];
       let hasChanged = false;
       const nextFields = prev.fields.map(field => {
-        const shouldUpdate = applyToAll || targetIds.has(field.fieldId);
+        const shouldUpdate = shouldApplyAll || targetIds.has(field.fieldId);
         if (!shouldUpdate) return field;
         const nextField = {
           ...field,
@@ -990,13 +1260,13 @@ export default function OrderWizard({
         return nextField;
       });
 
-      if (!hasChanged && JSON.stringify(prev.parameters || {}) === JSON.stringify(nextParameters)) {
+      if (!hasChanged && (!shouldApplyAll || JSON.stringify(prev.parameters || {}) === JSON.stringify(nextParameters))) {
         return prev;
       }
 
       return {
         ...prev,
-        parameters: nextParameters,
+        ...(shouldApplyAll ? { parameters: nextParameters } : {}),
         fields: nextFields
       };
     });
@@ -1114,11 +1384,9 @@ export default function OrderWizard({
       }
 
       if (parsedArchives.length) {
-        setUploadedArchives(prev => {
-          const next = [...prev, ...parsedArchives];
-          applyUploadedArchives(next);
-          return next;
-        });
+        const nextArchives = [...uploadedArchives, ...parsedArchives];
+        setUploadedArchives(nextArchives);
+        applyUploadedArchives(nextArchives);
         setUploadCollapsed(false);
       } else {
         alert(t('orders.wizard.shapefileNoData'));
@@ -1137,11 +1405,9 @@ export default function OrderWizard({
   };
 
   const removeUploadedArchive = (archiveId: string) => {
-    setUploadedArchives(prev => {
-      const next = prev.filter(archive => archive.id !== archiveId);
-      applyUploadedArchives(next);
-      return next;
-    });
+    const nextArchives = uploadedArchives.filter((archive) => archive.id !== archiveId);
+    setUploadedArchives(nextArchives);
+    applyUploadedArchives(nextArchives);
   };
 
   const clearUploadedArchives = () => {
@@ -1200,16 +1466,39 @@ export default function OrderWizard({
 
   const buildFieldsFromSource = (sourceFields: NonNullable<OrderDraft['sourceFields']>, gridSize: 3 | 5) => {
     return sourceFields.flatMap(source => {
+      if (source.samplingCell) {
+        return [{
+          fieldId: source.baseId,
+          fieldName: source.baseName,
+          status: 'pending' as const,
+          areaHa: Number(source.areaHa || 0),
+          baseId: source.baseId,
+          baseName: source.baseName,
+          labAttributes: source.labAttributes,
+          samplingCell: source.samplingCell,
+          exportMapping: source.exportMapping,
+        }];
+      }
+
       const splitCount = Math.max(1, Math.ceil(source.areaHa / gridSize));
       return Array.from({ length: splitCount }, (_, index) => {
         const suffix = index + 1;
+        const fieldId = `${source.baseId}.${suffix}`;
+        const fieldName = `${source.baseName}.${suffix}`;
         return {
-          fieldId: `${source.baseId}.${suffix}`,
-          fieldName: `${source.baseName}.${suffix}`,
+          fieldId,
+          fieldName,
           status: 'pending' as const,
           areaHa: Number((source.areaHa / splitCount).toFixed(2)),
           baseId: source.baseId,
-          baseName: source.baseName
+          baseName: source.baseName,
+          labAttributes: source.labAttributes,
+          exportMapping: {
+            sampleKey: fieldId,
+            sampleDisplayName: fieldName,
+            sourceBaseId: source.baseId,
+            sourceBaseName: source.baseName,
+          },
         };
       });
     });
@@ -1353,15 +1642,24 @@ export default function OrderWizard({
     [...resolvedUploadedFields, ...mapDrawnFields(resolvedDrawnFields)]
   ), [resolvedUploadedFields, resolvedDrawnFields]);
 
-  const rebuildFieldsFromSource = useCallback((sourceFields: NonNullable<OrderDraft['sourceFields']>) => {
-    const gridSize = draft?.gridSizeHa || 5;
+  const mergeFieldsFromSource = useCallback((
+    sourceFields: NonNullable<OrderDraft['sourceFields']>,
+    existingFields: NonNullable<OrderDraft['fields']> | undefined,
+    gridSize: 3 | 5
+  ) => {
     const nextFields = buildFieldsFromSource(sourceFields, gridSize);
-    if (!draft?.fields?.length) return nextFields;
-    return nextFields.map(field => {
-      const existing = draft.fields?.find(item => item.fieldId === field.fieldId);
+    if (!existingFields?.length) return nextFields;
+
+    const existingFieldMap = new Map(existingFields.map((field) => [field.fieldId, field]));
+    return nextFields.map((field) => {
+      const existing = existingFieldMap.get(field.fieldId);
       return existing ? { ...field, ...existing } : field;
     });
-  }, [draft?.fields, draft?.gridSizeHa]);
+  }, []);
+
+  const rebuildFieldsFromSource = useCallback((sourceFields: NonNullable<OrderDraft['sourceFields']>) => {
+    return mergeFieldsFromSource(sourceFields, draft?.fields, draft?.gridSizeHa || 5);
+  }, [draft?.fields, draft?.gridSizeHa, mergeFieldsFromSource]);
 
   const getResolvedFields = useCallback(() => (
     draft?.fields?.length
@@ -1420,7 +1718,7 @@ export default function OrderWizard({
         return;
       }
       lastFieldSummariesSignatureRef.current = '{}';
-      onFieldSummariesChange?.({});
+      onFieldSummariesChangeRef.current?.({});
       return;
     }
 
@@ -1461,12 +1759,11 @@ export default function OrderWizard({
       return;
     }
     lastFieldSummariesSignatureRef.current = summarySignature;
-    onFieldSummariesChange?.(summaries);
+    onFieldSummariesChangeRef.current?.(summaries);
   }, [
     draft?.fields,
     draft?.parameters,
     draft?.serviceSelection?.services,
-    onFieldSummariesChange,
     resolveParameterBadges,
     resolveServiceLabels
   ]);
@@ -1492,27 +1789,31 @@ export default function OrderWizard({
 
   useEffect(() => {
     if (!draft) return;
+    let nextFieldServiceSelection: OrderServiceType[];
+
     if (applyToAll) {
-      setFieldServiceSelection(draft.serviceSelection.services || []);
-      return;
-    }
-    if ((!activeFieldId && selectedFieldIds.length) || !draft.fields?.length) {
+      nextFieldServiceSelection = draft.serviceSelection.services || [];
+    } else if (selectedFieldIds.length === 0) {
+      nextFieldServiceSelection = [];
+    } else if ((!activeFieldId && selectedFieldIds.length) || !draft.fields?.length) {
       const fallbackId = selectedFieldIds[0];
       const fallbackField = draft.fields?.find(field => field.fieldId === fallbackId);
       if (fallbackField?.services?.length) {
-        setFieldServiceSelection(fallbackField.services);
-        return;
+        nextFieldServiceSelection = fallbackField.services;
+      } else {
+        nextFieldServiceSelection = draft.serviceSelection.services || [];
       }
-      setFieldServiceSelection(draft.serviceSelection.services || []);
-      return;
+    } else {
+      const activeField = draft.fields.find(field => field.fieldId === activeFieldId);
+      nextFieldServiceSelection = activeField?.services?.length
+        ? activeField.services
+        : (draft.serviceSelection.services || []);
     }
-    const activeField = draft.fields.find(field => field.fieldId === activeFieldId);
-    if (activeField?.services?.length) {
-      setFieldServiceSelection(activeField.services);
-      return;
-    }
-    setFieldServiceSelection(draft.serviceSelection.services || []);
-  }, [activeFieldId, applyToAll, draft?.fields, draft?.serviceSelection?.services]);
+
+    setFieldServiceSelection((prev) => (
+      areOrderedValuesEqual(prev, nextFieldServiceSelection) ? prev : nextFieldServiceSelection
+    ));
+  }, [activeFieldId, applyToAll, draft?.fields, draft?.serviceSelection?.services, selectedFieldIds]);
 
   useEffect(() => {
     if (!selectedFieldIds.length) return;
@@ -1520,6 +1821,13 @@ export default function OrderWizard({
       setActiveFieldId(selectedFieldIds[0]);
     }
   }, [selectedFieldIds, activeFieldId]);
+
+  useEffect(() => {
+    onGridPreviewChangeRef.current?.({
+      enabled: showGridPreview,
+      sizeHa: draft?.gridSizeHa || 5,
+    });
+  }, [showGridPreview, draft?.gridSizeHa]);
 
   const step1Ready = Boolean(draft?.serviceSelection?.services?.length);
   const step2Ready = Boolean(
@@ -1530,6 +1838,11 @@ export default function OrderWizard({
   const step3Ready = Boolean(resolvedSourceFields.length || uploadedSourceFields.length || draft?.sourceFields?.length);
   const step4Ready = Boolean(draft?.gridSizeHa);
   const step5Ready = fieldsReady && parametersReady && allFieldsCompleted;
+  const samplingCellCount = useMemo(() => (
+    (draft?.sourceFields || []).filter((field) => Boolean(field.samplingCell)).length
+  ), [draft?.sourceFields]);
+  const compactStepSectionClass = singleStepMode ? 'space-y-2.5 p-1.5 sm:p-2.5' : 'space-y-3 p-3 sm:p-4';
+  const compactStepSectionLooseClass = singleStepMode ? 'space-y-3 p-1.5 sm:p-2.5' : 'space-y-6 p-3 sm:p-4';
 
   useEffect(() => {
     const nextReadiness = {
@@ -1555,34 +1868,55 @@ export default function OrderWizard({
     }
 
     lastStepReadinessRef.current = nextReadiness;
-    onStepReadinessChange?.(nextReadiness);
-  }, [onStepReadinessChange, step1Ready, step2Ready, step3Ready, step4Ready, step5Ready, submitReady]);
+    onStepReadinessChangeRef.current?.(nextReadiness);
+  }, [step1Ready, step2Ready, step3Ready, step4Ready, step5Ready, submitReady]);
 
   const getSelectedFieldIds = useCallback(() => {
+    const resolvedIds = getResolvedFields().map((field) => field.fieldId);
+    const resolvedIdSet = new Set(resolvedIds);
     if (applyToAll) {
-      return getResolvedFields().map(field => field.fieldId);
+      return resolvedIds;
     }
-    return selectedFieldIds;
+    return selectedFieldIds.filter((id) => resolvedIdSet.has(id));
   }, [applyToAll, getResolvedFields, selectedFieldIds]);
+
+  const switchToAllScope = useCallback(() => {
+    setApplyToAll(true);
+    setSelectedFieldIds([]);
+    setActiveFieldId(null);
+    onClearSelectionRequest?.();
+  }, [onClearSelectionRequest]);
+
+  const switchToSelectedScope = useCallback(() => {
+    const resolvedIds = getResolvedFields().map(field => field.fieldId);
+    const preservedSelection = selectedFieldIds.filter((id) => resolvedIds.includes(id));
+    const fallbackId = (activeFieldId && resolvedIds.includes(activeFieldId))
+      ? activeFieldId
+      : (selectedFieldIds.find(id => resolvedIds.includes(id)) || resolvedIds[0] || null);
+
+    setApplyToAll(false);
+    if (!fallbackId) {
+      setSelectedFieldIds([]);
+      setActiveFieldId(null);
+      return;
+    }
+
+    setSelectedFieldIds(preservedSelection.length ? preservedSelection : [fallbackId]);
+    setActiveFieldId(fallbackId);
+  }, [activeFieldId, selectedFieldIds, getResolvedFields]);
 
   useEffect(() => {
     if (!applyToAll) return;
-    const fields = getResolvedFields();
-    if (!fields.length) return;
-    const nextIds = fields.map(field => field.fieldId);
-    setSelectedFieldIds(prev => (
-      prev.length === nextIds.length && prev.every((id, index) => id === nextIds[index])
-        ? prev
-        : nextIds
-    ));
-    setActiveFieldId(prev => (
-      prev && nextIds.includes(prev)
-        ? prev
-        : (nextIds[0] || null)
-    ));
-  }, [applyToAll, getResolvedFields]);
+    if (selectedFieldIds.length) {
+      setSelectedFieldIds([]);
+    }
+    if (activeFieldId) {
+      setActiveFieldId(null);
+    }
+  }, [applyToAll, selectedFieldIds.length, activeFieldId]);
 
   useEffect(() => {
+    if (applyToAll) return;
     if (currentStep !== 5) return;
     const fields = getResolvedFields();
     if (!fields.length) return;
@@ -1592,10 +1926,19 @@ export default function OrderWizard({
     if (!activeFieldId || !fields.some(field => field.fieldId === activeFieldId)) {
       setActiveFieldId(fields[0].fieldId);
     }
-  }, [currentStep, getResolvedFields, selectedFieldIds.length, activeFieldId]);
+  }, [currentStep, getResolvedFields, selectedFieldIds.length, activeFieldId, applyToAll]);
 
   useEffect(() => {
     if (!mapSelectionEvent || !draft?.fields?.length) return;
+    if (currentStep !== 4 && currentStep !== 5) return;
+
+    // Process each map selection event exactly once. Without this guard,
+    // field updates can re-trigger this effect and toggle the selection back/forth.
+    if (lastProcessedMapSelectionTsRef.current === mapSelectionEvent.timestamp) {
+      return;
+    }
+    lastProcessedMapSelectionTsRef.current = mapSelectionEvent.timestamp;
+
     const normalizeKey = (value: unknown) => String(value ?? '').trim().toLowerCase();
     const target = normalizeKey(mapSelectionEvent.baseId);
     const matchingIds = draft.fields
@@ -1606,12 +1949,14 @@ export default function OrderWizard({
       ))
       .map(field => field.fieldId);
     if (!matchingIds.length) return;
+    const wasApplyToAll = applyToAll;
     if (applyToAll) {
       setApplyToAll(false);
     }
     setSelectedFieldIds(prev => {
+      const baseSelection = wasApplyToAll ? [] : prev;
       if (mapSelectionEvent.ctrlKey) {
-        const next = new Set(prev);
+        const next = new Set(baseSelection);
         const allSelected = matchingIds.every(id => next.has(id));
         if (allSelected) {
           matchingIds.forEach(id => next.delete(id));
@@ -1684,7 +2029,7 @@ export default function OrderWizard({
       });
     }
 
-    if (nextFields.length && serviceDepthOptions.length && (applyToAll || selectedFieldIds.length === 0)) {
+    if (nextFields.length && serviceDepthOptions.length && !applyToAll && selectedFieldIds.length === 0) {
       const matchingIds = nextFields
         .filter(field => {
           if (!field.samplingDepthCm) return false;
@@ -1713,22 +2058,35 @@ export default function OrderWizard({
     drawn: DrawnField[],
     patch?: Partial<OrderDraft>
   ) {
+    if (!draft) return;
+
+    const combined = [...(uploaded || []), ...mapDrawnFields(drawn)];
+    const fields = combined.length ? rebuildFieldsFromSource(combined) : [];
+    const currentSourceSignature = buildSourceSignature(draft.sourceFields || []);
+    const nextSourceSignature = buildSourceSignature(combined);
+    const currentFieldSignature = buildFieldSignature(draft.fields || []);
+    const nextFieldSignature = buildFieldSignature(fields);
+    const patchChanged = Boolean(patch) && Object.entries(patch as Record<string, unknown>).some(([key, value]) => {
+      const previousValue = (draft as Record<string, unknown>)[key];
+      return JSON.stringify(previousValue) !== JSON.stringify(value);
+    });
+
+    if (!patchChanged && currentSourceSignature === nextSourceSignature && currentFieldSignature === nextFieldSignature) {
+      return;
+    }
+
     setDraft(prev => {
       if (!prev) return prev;
-      const combined = [...(uploaded || []), ...mapDrawnFields(drawn)];
-      const fields = combined.length ? rebuildFieldsFromSource(combined) : [];
-
-      const currentSourceSignature = buildSourceSignature(prev.sourceFields || []);
-      const nextSourceSignature = buildSourceSignature(combined);
-      const currentFieldSignature = buildFieldSignature(prev.fields || []);
-      const nextFieldSignature = buildFieldSignature(fields);
-
-      const patchChanged = Boolean(patch) && Object.entries(patch as Record<string, unknown>).some(([key, value]) => {
+      const mergedFields = combined.length ? mergeFieldsFromSource(combined, prev.fields, prev.gridSizeHa || 5) : [];
+      const previousSourceSignature = buildSourceSignature(prev.sourceFields || []);
+      const previousFieldSignature = buildFieldSignature(prev.fields || []);
+      const mergedFieldSignature = buildFieldSignature(mergedFields);
+      const previousPatchChanged = Boolean(patch) && Object.entries(patch as Record<string, unknown>).some(([key, value]) => {
         const previousValue = (prev as Record<string, unknown>)[key];
         return JSON.stringify(previousValue) !== JSON.stringify(value);
       });
 
-      if (!patchChanged && currentSourceSignature === nextSourceSignature && currentFieldSignature === nextFieldSignature) {
+      if (!previousPatchChanged && previousSourceSignature === nextSourceSignature && previousFieldSignature === mergedFieldSignature) {
         return prev;
       }
 
@@ -1736,7 +2094,7 @@ export default function OrderWizard({
         ...prev,
         ...(patch || {}),
         sourceFields: combined,
-        fields
+        fields: mergedFields
       };
     });
   }
@@ -1745,7 +2103,7 @@ export default function OrderWizard({
     if (!resolvedSourceFields.length) return;
     setDraft(prev => {
       if (!prev) return prev;
-      const nextFields = rebuildFieldsFromSource(resolvedSourceFields);
+      const nextFields = mergeFieldsFromSource(resolvedSourceFields, prev.fields, prev.gridSizeHa || 5);
       const currentSourceSignature = buildSourceSignature(prev.sourceFields || []);
       const nextSourceSignature = buildSourceSignature(resolvedSourceFields);
       const currentFieldSignature = buildFieldSignature(prev.fields || []);
@@ -1761,7 +2119,7 @@ export default function OrderWizard({
         fields: nextFields
       };
     });
-  }, [resolvedSourceFields, rebuildFieldsFromSource, buildSourceSignature, buildFieldSignature]);
+  }, [resolvedSourceFields, mergeFieldsFromSource, buildSourceSignature, buildFieldSignature]);
 
   const updateDrawnFields = (next: DrawnField[]) => {
     if (externalDrawnFields && onExternalDrawnFieldsChange) {
@@ -1794,6 +2152,85 @@ export default function OrderWizard({
     });
   };
 
+  const convertToSamplingCells = useCallback(async () => {
+    if (!draft) return;
+
+    const sourceFields = draft.sourceFields || [];
+    if (!sourceFields.length) {
+      await showConfirmation(
+        t('orders.wizard.convertCellsMissingSourceTitle') || 'No source fields available',
+        t('orders.wizard.convertCellsMissingSourceMessage') || 'Please upload or draw fields first.',
+        {
+          type: 'warning',
+          confirmText: t('common.ok'),
+          hideCancel: true,
+        }
+      );
+      return;
+    }
+
+    const targetGridSize = draft.gridSizeHa || 5;
+    setIsConvertingSamplingCells(true);
+    try {
+      const convertedSourceFields = buildSamplingCellSourceFields(sourceFields, targetGridSize);
+      if (!convertedSourceFields.length) {
+        return;
+      }
+
+      const previousFields = draft.fields || [];
+      const convertedFields = buildFieldsFromSource(convertedSourceFields, targetGridSize).map((field) => {
+        const parentBaseId = field.samplingCell?.parentBaseId;
+        if (!parentBaseId) return field;
+
+        const templateField = previousFields.find((existing) => (
+          existing.baseId === parentBaseId
+          || existing.fieldId === parentBaseId
+          || existing.fieldId.startsWith(`${parentBaseId}.`)
+        ));
+
+        if (!templateField) return field;
+
+        return {
+          ...field,
+          services: templateField.services || field.services,
+          parameters: templateField.parameters || field.parameters,
+          samplingDepthCm: templateField.samplingDepthCm || field.samplingDepthCm,
+          cropYield: templateField.cropYield || field.cropYield,
+          status: templateField.status === 'skipped' ? 'skipped' : field.status,
+        };
+      });
+
+      setUploadedSourceFields(convertedSourceFields);
+      onFieldsLoaded?.(convertedSourceFields);
+      setDraft((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          updatedAt: new Date().toISOString(),
+          sourceFields: convertedSourceFields,
+          fields: convertedFields,
+        };
+      });
+
+      setApplyToAll(true);
+      setSelectedFieldIds([]);
+      setActiveFieldId(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('common.unknownError');
+      await showConfirmation(
+        t('orders.wizard.convertCellsErrorTitle') || 'Could not convert to sampling cells',
+        t('orders.wizard.convertCellsErrorMessage', { message }) || `Could not convert to sampling cells: ${message}`,
+        {
+          type: 'warning',
+          confirmText: t('common.ok'),
+          hideCancel: true,
+        }
+      );
+    } finally {
+      setIsConvertingSamplingCells(false);
+    }
+  }, [draft, buildFieldsFromSource, onFieldsLoaded, showConfirmation, t]);
+
   const updateParameters = (key: keyof NonNullable<OrderDraft['parameters']>, value: boolean | string) => {
     setDraft(prev => {
       if (!prev) return prev;
@@ -1809,7 +2246,10 @@ export default function OrderWizard({
         };
       }
       const targetIds = new Set(getSelectedFieldIds());
-      const shouldApplyAll = applyToAll || targetIds.size === 0;
+      const shouldApplyAll = applyToAll;
+      if (!shouldApplyAll && targetIds.size === 0) {
+        return prev;
+      }
       const updatedFields = prev.fields.map(field => (
         shouldApplyAll || targetIds.has(field.fieldId)
           ? {
@@ -1821,13 +2261,16 @@ export default function OrderWizard({
       ));
       return {
         ...prev,
-        parameters: nextParameters,
+        ...(shouldApplyAll ? { parameters: nextParameters } : {}),
         fields: updatedFields
       };
     });
   };
 
   const toggleFieldServiceSelection = (service: OrderServiceType) => {
+    if (!applyToAll && selectedFieldIds.length === 0) {
+      return;
+    }
     setFieldServiceSelection(prev => {
       const next = prev.includes(service)
         ? prev.filter(item => item !== service)
@@ -1841,17 +2284,64 @@ export default function OrderWizard({
     buildParametersForServices(fieldServiceSelection, draft?.parameters)
   ), [fieldServiceSelection, draft?.parameters, buildParametersForServices]);
 
-  const editableParametersForSelection = useMemo(() => {
-    const targetField = (!applyToAll && activeFieldId && draft?.fields?.length)
-      ? draft.fields.find(field => field.fieldId === activeFieldId)
-      : null;
+  const parameterSelectionKeys = useMemo<Array<Exclude<keyof NonNullable<OrderDraft['parameters']>, 'standardPackage'>>>(() => ([
+    'landUseType',
+    'cropResiduesRemoved',
+    'traceElements',
+    'organicMatter',
+    'cnRatio',
+    'potassiumFixation',
+    'calcium',
+    'cecEffective',
+    'cecPotential',
+    'particleSizeDistribution',
+    'phosphorusReleaseRate'
+  ]), []);
 
-    return (
-      targetField?.parameters
-      || draft?.parameters
-      || derivedParametersForSelection
-    );
-  }, [applyToAll, activeFieldId, draft?.fields, draft?.parameters, derivedParametersForSelection]);
+  const editableParametersForSelection = useMemo(() => {
+    const fallbackParameters: NonNullable<OrderDraft['parameters']> = {
+      standardPackage: true,
+      ...(draft?.parameters || derivedParametersForSelection || { standardPackage: true })
+    };
+
+    if (applyToAll) {
+      return fallbackParameters;
+    }
+
+    const selectedIdSet = new Set(selectedFieldIds);
+    let scopedFields = (draft?.fields || []).filter((field) => selectedIdSet.has(field.fieldId));
+
+    if (!scopedFields.length && activeFieldId && draft?.fields?.length) {
+      const activeField = draft.fields.find((field) => field.fieldId === activeFieldId);
+      if (activeField) {
+        scopedFields = [activeField];
+      }
+    }
+
+    if (!scopedFields.length) {
+      return fallbackParameters;
+    }
+
+    const merged: NonNullable<OrderDraft['parameters']> = {
+      ...fallbackParameters,
+      standardPackage: true
+    };
+
+    parameterSelectionKeys.forEach((key) => {
+      const values = scopedFields.map((field) => (
+        field.parameters?.[key] ?? fallbackParameters[key]
+      ));
+      const firstValue = values[0];
+      const allSame = values.every((value) => value === firstValue);
+      if (allSame) {
+        (merged as Record<string, unknown>)[key] = firstValue;
+      } else {
+        delete (merged as Record<string, unknown>)[key];
+      }
+    });
+
+    return merged;
+  }, [applyToAll, activeFieldId, draft?.fields, draft?.parameters, derivedParametersForSelection, parameterSelectionKeys, selectedFieldIds]);
 
   const parameterOptions = useMemo(() => ([
     ['traceElements', t('orders.wizard.paramTraceElements')],
@@ -1877,40 +2367,32 @@ export default function OrderWizard({
         <div className="text-xs text-gray-600 dark:text-gray-400">
           {t('orders.wizard.fieldServicesHint')}
         </div>
-        <div className="inline-flex rounded-full border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/70 p-1 shadow-sm">
+        <div className="inline-flex max-w-full rounded-full border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/70 p-1 shadow-sm overflow-hidden">
           <button
             type="button"
-            onClick={() => {
-              setApplyToAll(true);
-              const allIds = getResolvedFields().map(field => field.fieldId);
-              setSelectedFieldIds(allIds);
-              if (!activeFieldId && allIds.length) {
-                setActiveFieldId(allIds[0]);
-              }
-            }}
-            className={`px-4 py-2 text-xs font-semibold transition-all rounded-full ${
+            onClick={switchToAllScope}
+            className={`min-h-10 min-w-0 flex-1 px-3 sm:px-4 text-xs font-semibold transition-all rounded-full flex items-center justify-center ${
               applyToAll
                 ? 'bg-blue-600 text-white shadow-md'
                 : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100/70 dark:hover:bg-gray-800/70'
             }`}
+            title={t('orders.wizard.applyAllFields')}
+            aria-label={t('orders.wizard.applyAllFields')}
           >
-            {t('orders.wizard.applyAllFields')}
+            <span>{t('orders.wizard.applyAllFields')}</span>
           </button>
           <button
             type="button"
-            onClick={() => {
-              setApplyToAll(false);
-              if (activeFieldId) {
-                setSelectedFieldIds([activeFieldId]);
-              }
-            }}
-            className={`px-4 py-2 text-xs font-semibold transition-all rounded-full ${
+            onClick={switchToSelectedScope}
+            className={`min-h-10 min-w-0 flex-1 px-3 sm:px-4 text-xs font-semibold transition-all rounded-full flex items-center justify-center ${
               !applyToAll
                 ? 'bg-blue-600 text-white shadow-md'
                 : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100/70 dark:hover:bg-gray-800/70'
             }`}
+            title={t('orders.wizard.applySelectedFields')}
+            aria-label={t('orders.wizard.applySelectedFields')}
           >
-            {t('orders.wizard.applySelectedFields')}
+            <span>{t('orders.wizard.applySelectedFields')}</span>
           </button>
         </div>
         {(applyToAll || selectedFieldIds.length > 0) && draft?.fields?.length ? (
@@ -1934,11 +2416,12 @@ export default function OrderWizard({
         )}
         <div className="grid gap-2">
           {(['basic_nutrients', 'nmin', 'nematodes'] as OrderServiceType[]).map(service => (
-            <label key={service} className="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-200">
+            <label key={service} className={`flex items-center gap-3 text-sm ${!applyToAll && selectedFieldIds.length === 0 ? 'text-gray-400 dark:text-gray-500' : 'text-gray-700 dark:text-gray-200'}`}>
               <input
                 type="checkbox"
                 checked={fieldServiceSelection.includes(service)}
                 onChange={() => toggleFieldServiceSelection(service)}
+                disabled={!applyToAll && selectedFieldIds.length === 0}
               />
               <span>
                 {service === 'basic_nutrients' && (t('orders.wizard.serviceBasic'))}
@@ -2070,10 +2553,6 @@ export default function OrderWizard({
         await orderService.upsertDraft(updated, resolvedOwnerId);
         console.log('[OrderWizard] Draft upserted successfully');
 
-        if (updated.labProvider === 'lufa_nrw') {
-          await downloadLufaXml(updated);
-        }
-
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('orders:draftUpserted', {
             detail: {
@@ -2160,16 +2639,17 @@ export default function OrderWizard({
   };
 
   useEffect(() => {
-    if (!onSubmitHandlerChange) return;
-    onSubmitHandlerChange(() => {
+    const submitHandlerChange = onSubmitHandlerChangeRef.current;
+    if (!submitHandlerChange) return;
+    submitHandlerChange(() => {
       void submitOrder();
     });
-    return () => onSubmitHandlerChange(null);
-  }, [onSubmitHandlerChange, submitOrder]);
+    return () => submitHandlerChange(null);
+  }, [submitOrder]);
 
   useEffect(() => {
-    onSubmitStateChange?.(isSubmitting);
-  }, [isSubmitting, onSubmitStateChange]);
+    onSubmitStateChangeRef.current?.(isSubmitting);
+  }, [isSubmitting]);
 
 
   if (!draft) {
@@ -2228,8 +2708,8 @@ export default function OrderWizard({
         <section className="flex-1" aria-busy={isSubmitting}>
           <div className={isSubmitting ? 'pointer-events-none opacity-70' : ''}>
             {currentStep === 1 && (
-              <div className="space-y-3 p-3 sm:p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+              <div className={compactStepSectionClass}>
+                <div className={singleStepMode ? 'hidden' : 'flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end'}>
                   {!singleStepMode && (
                     <button
                       onClick={() => goToStep(2)}
@@ -2304,13 +2784,13 @@ export default function OrderWizard({
                   </div>
                 </div>
 
-                <div />
+                {!singleStepMode && <div />}
               </div>
             )}
 
             {currentStep === 2 && (
-              <div className="space-y-3 p-3 sm:p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+              <div className={compactStepSectionClass}>
+                <div className={singleStepMode ? 'hidden' : 'flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end'}>
                   {!singleStepMode && (
                     <button
                       onClick={() => goToStep(3)}
@@ -2447,12 +2927,14 @@ export default function OrderWizard({
                   )}
                 </div>
 
-                <div />
+                {!singleStepMode && <div />}
               </div>
             )}
 
             {currentStep === 3 && (
-              <div className={(step3Collapsed ?? internalStep3Collapsed) ? 'flex p-3 sm:p-4' : 'space-y-2 p-3 sm:p-4'}>
+              <div className={(step3Collapsed ?? internalStep3Collapsed)
+                ? `flex ${singleStepMode ? 'p-1.5 sm:p-2.5' : 'p-3 sm:p-4'}`
+                : `${singleStepMode ? 'space-y-1.5 p-1.5 sm:p-2.5' : 'space-y-2 p-3 sm:p-4'}`}>
                 {(step3Collapsed ?? internalStep3Collapsed) ? (
                   <div className="flex flex-wrap items-center gap-3">
                     <button
@@ -2483,32 +2965,38 @@ export default function OrderWizard({
                       <button
                         onClick={() => goToStep(4)}
                         disabled={!step3Ready}
-                        className={`h-10 px-4 rounded-full text-sm font-semibold transition-all ${
+                        className={`h-10 w-10 lg:w-auto lg:px-4 rounded-full text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
                           step3Ready
                             ? 'bg-blue-600 text-white hover:bg-blue-700'
                             : 'bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500'
                         }`}
+                        title={t('orders.wizard.continueToStep4')}
+                        aria-label={t('orders.wizard.continueToStep4')}
                       >
-                        {t('orders.wizard.continueToStep4')}
+                        <ChevronRight className="w-4 h-4 lg:hidden" />
+                        <span className="hidden lg:inline">{t('orders.wizard.continueToStep4')}</span>
                       </button>
                     )}
                   </div>
                 ) : (
                   <>
                     {/* Compact header with navigation */}
-                    <div className="flex items-center justify-end gap-2 pb-2 border-b border-gray-200 dark:border-gray-700">
+                    <div className={singleStepMode ? 'hidden' : 'flex items-center justify-end gap-2 pb-2 border-b border-gray-200 dark:border-gray-700'}>
                       <div className="flex gap-2 flex-shrink-0">
                         {!singleStepMode && (
                           <button
                             onClick={() => goToStep(4)}
                             disabled={!step3Ready}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                            className={`h-9 w-9 lg:w-auto lg:px-3 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-2 ${
                               step3Ready
                                 ? 'bg-blue-600 text-white hover:bg-blue-700'
                                 : 'bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500'
                             }`}
+                            title={t('orders.wizard.continueToStep4')}
+                            aria-label={t('orders.wizard.continueToStep4')}
                           >
-                            {t('orders.wizard.continueToStep4')}
+                            <ChevronRight className="w-4 h-4 lg:hidden" />
+                            <span className="hidden lg:inline">{t('orders.wizard.continueToStep4')}</span>
                           </button>
                         )}
                       </div>
@@ -2555,10 +3043,12 @@ export default function OrderWizard({
                         />
                         <label
                           htmlFor="shapefile-upload"
-                          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-colors"
+                          className="inline-flex items-center gap-2 h-9 w-9 lg:w-auto lg:px-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-colors justify-center"
+                          title={t('orders.wizard.chooseFile')}
+                          aria-label={t('orders.wizard.chooseFile')}
                         >
                           <Upload className="w-3.5 h-3.5" />
-                          {t('orders.wizard.chooseFile')}
+                          <span className="hidden lg:inline">{t('orders.wizard.chooseFile')}</span>
                         </label>
                         <span className="ml-3 text-xs text-gray-500 dark:text-gray-400">
                           {selectedFiles.length
@@ -2585,15 +3075,21 @@ export default function OrderWizard({
                             <button
                               onClick={loadSelectedFiles}
                               disabled={isLoadingShapefile}
-                              className="px-5 py-2 rounded-lg bg-green-600 text-white text-sm font-semibold hover:bg-green-700 disabled:opacity-50"
+                              className="h-10 w-10 lg:w-auto lg:px-5 rounded-lg bg-green-600 text-white text-sm font-semibold hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                              title={isLoadingShapefile ? (t('common.loading')) : (t('orders.wizard.loadSelected'))}
+                              aria-label={isLoadingShapefile ? (t('common.loading')) : (t('orders.wizard.loadSelected'))}
                             >
-                              {isLoadingShapefile ? (t('common.loading')) : (t('orders.wizard.loadSelected'))}
+                              <Upload className="w-4 h-4 lg:hidden" />
+                              <span className="hidden lg:inline">{isLoadingShapefile ? (t('common.loading')) : (t('orders.wizard.loadSelected'))}</span>
                             </button>
                             <button
                               onClick={() => setSelectedFiles([])}
-                              className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+                              className="h-10 w-10 lg:w-auto lg:px-3 rounded-lg border border-gray-300 dark:border-gray-700 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center"
+                              title={t('orders.wizard.clearSelectedFiles')}
+                              aria-label={t('orders.wizard.clearSelectedFiles')}
                             >
-                              {t('orders.wizard.clearSelectedFiles')}
+                              <span className="text-base leading-none lg:hidden">×</span>
+                              <span className="hidden lg:inline">{t('orders.wizard.clearSelectedFiles')}</span>
                             </button>
                           </div>
                         </div>
@@ -2604,10 +3100,11 @@ export default function OrderWizard({
                           <button
                             onClick={() => setUploadCollapsed(false)}
                             className="flex-1 min-w-[220px] px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white/50 dark:bg-gray-800/50 hover:bg-white dark:hover:bg-gray-800 transition-colors flex items-center justify-between"
+                            title={t('orders.wizard.uploadShapefile')}
                           >
                             <div className="flex items-center gap-2">
                               <Upload className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                              <span className="hidden lg:inline text-xs font-medium text-gray-700 dark:text-gray-300">
                                 {t('orders.wizard.uploadShapefile')}
                               </span>
                               {uploadedSourceFields.length > 0 && (
@@ -2621,9 +3118,12 @@ export default function OrderWizard({
                           {(uploadedArchives.length > 0 || uploadedSourceFields.length > 0) && (
                             <button
                               onClick={clearUploadedArchives}
-                              className="h-9 px-3 rounded-full border border-gray-300 dark:border-gray-700 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+                              className="h-9 w-9 lg:w-auto lg:px-3 rounded-full border border-gray-300 dark:border-gray-700 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center"
+                              title={t('orders.wizard.removeUploadedFiles')}
+                              aria-label={t('orders.wizard.removeUploadedFiles')}
                             >
-                              {t('orders.wizard.removeUploadedFiles')}
+                              <span className="text-base leading-none lg:hidden">×</span>
+                              <span className="hidden lg:inline">{t('orders.wizard.removeUploadedFiles')}</span>
                             </button>
                           )}
                         </div>
@@ -2651,9 +3151,12 @@ export default function OrderWizard({
                           </div>
                           <button
                             onClick={clearUploadedArchives}
-                            className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+                            className="h-10 w-10 lg:w-auto lg:px-3 rounded-lg border border-gray-300 dark:border-gray-700 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center"
+                            title={t('orders.wizard.removeUploadedFiles')}
+                            aria-label={t('orders.wizard.removeUploadedFiles')}
                           >
-                            {t('orders.wizard.removeUploadedFiles')}
+                            <span className="text-base leading-none lg:hidden">×</span>
+                            <span className="hidden lg:inline">{t('orders.wizard.removeUploadedFiles')}</span>
                           </button>
                         </div>
                       )}
@@ -2700,19 +3203,22 @@ export default function OrderWizard({
             )}
 
             {currentStep === 4 && (
-              <div className="space-y-3 p-3 sm:p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+              <div className={compactStepSectionClass}>
+                <div className={singleStepMode ? 'hidden' : 'flex flex-col items-end gap-3 sm:flex-row sm:items-center sm:justify-end'}>
                   {!singleStepMode && (
                     <button
                       onClick={() => goToStep(5)}
                       disabled={!step4Ready}
-                      className={`w-full sm:w-auto text-center px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
+                      className={`h-10 w-10 lg:w-auto lg:px-5 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
                         step4Ready
                           ? 'bg-blue-600 text-white hover:bg-blue-700'
                           : 'bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500'
                       }`}
+                      title={t('orders.wizard.continueToStep5')}
+                      aria-label={t('orders.wizard.continueToStep5')}
                     >
-                      {t('orders.wizard.continueToStep5')}
+                      <ChevronRight className="w-4 h-4 lg:hidden" />
+                      <span className="hidden lg:inline">{t('orders.wizard.continueToStep5')}</span>
                     </button>
                   )}
                 </div>
@@ -2728,7 +3234,7 @@ export default function OrderWizard({
                         <div className="text-xs font-semibold text-gray-600 dark:text-gray-300">{t('orders.wizard.landUseType')}</div>
                         <select
                           className="mt-2 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
-                          value={draft.parameters?.landUseType || ''}
+                          value={editableParametersForSelection?.landUseType || ''}
                           onChange={(e) => updateParameters('landUseType', e.target.value)}
                         >
                           <option value="">{t('orders.wizard.selectLandUse')}</option>
@@ -2746,48 +3252,40 @@ export default function OrderWizard({
                       <label className="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-200">
                         <input
                           type="checkbox"
-                          checked={draft.parameters?.cropResiduesRemoved || false}
-                          onChange={() => updateParameters('cropResiduesRemoved', !(draft.parameters?.cropResiduesRemoved || false))}
+                          checked={editableParametersForSelection?.cropResiduesRemoved || false}
+                          onChange={() => updateParameters('cropResiduesRemoved', !(editableParametersForSelection?.cropResiduesRemoved || false))}
                         />
                         {t('orders.wizard.cropResiduesRemoved')}
                       </label>
 
                       <div>
                         <div className="text-xs font-semibold text-gray-600 dark:text-gray-300">{t('orders.wizard.applyScopeTitle')}</div>
-                        <div className="mt-2 inline-flex rounded-full border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/70 p-1 shadow-sm">
+                        <div className="mt-2 inline-flex max-w-full rounded-full border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/70 p-1 shadow-sm overflow-hidden">
                           <button
                             type="button"
-                            onClick={() => {
-                              setApplyToAll(true);
-                              const allIds = getResolvedFields().map(field => field.fieldId);
-                              setSelectedFieldIds(allIds);
-                              if (!activeFieldId && allIds.length) {
-                                setActiveFieldId(allIds[0]);
-                              }
-                            }}
-                            className={`px-4 py-2 text-xs font-semibold transition-all rounded-full ${
+                            onClick={switchToAllScope}
+                            className={`min-h-10 min-w-0 flex-1 px-3 sm:px-4 text-xs font-semibold transition-all rounded-full flex items-center justify-center ${
                               applyToAll
                                 ? 'bg-blue-600 text-white shadow-md'
                                 : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100/70 dark:hover:bg-gray-800/70'
                             }`}
+                            title={t('orders.wizard.applyAllFields')}
+                            aria-label={t('orders.wizard.applyAllFields')}
                           >
-                            {t('orders.wizard.applyAllFields')}
+                            <span>{t('orders.wizard.applyAllFields')}</span>
                           </button>
                           <button
                             type="button"
-                            onClick={() => {
-                              setApplyToAll(false);
-                              if (activeFieldId) {
-                                setSelectedFieldIds([activeFieldId]);
-                              }
-                            }}
-                            className={`px-4 py-2 text-xs font-semibold transition-all rounded-full ${
+                            onClick={switchToSelectedScope}
+                            className={`min-h-10 min-w-0 flex-1 px-3 sm:px-4 text-xs font-semibold transition-all rounded-full flex items-center justify-center ${
                               !applyToAll
                                 ? 'bg-blue-600 text-white shadow-md'
                                 : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100/70 dark:hover:bg-gray-800/70'
                             }`}
+                            title={t('orders.wizard.applySelectedFields')}
+                            aria-label={t('orders.wizard.applySelectedFields')}
                           >
-                            {t('orders.wizard.applySelectedFields')}
+                            <span>{t('orders.wizard.applySelectedFields')}</span>
                           </button>
                         </div>
                       </div>
@@ -2837,6 +3335,44 @@ export default function OrderWizard({
                         </button>
                       ))}
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void convertToSamplingCells();
+                      }}
+                      disabled={isConvertingSamplingCells || !(draft.sourceFields || []).length}
+                      className={`h-10 w-10 lg:w-auto lg:min-w-[2.5rem] lg:px-4 rounded-lg border text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+                        isConvertingSamplingCells || !(draft.sourceFields || []).length
+                          ? 'border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed bg-gray-50/60 dark:bg-gray-900/40'
+                          : 'border-blue-200 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20'
+                      }`}
+                      title={isConvertingSamplingCells
+                        ? (t('orders.wizard.convertingSamplingCells') || 'Converting to sampling cells...')
+                        : (t('orders.wizard.convertToSamplingCells') || 'Convert to sampling cells (optional)')}
+                      aria-label={isConvertingSamplingCells
+                        ? (t('orders.wizard.convertingSamplingCells') || 'Converting to sampling cells...')
+                        : (t('orders.wizard.convertToSamplingCells') || 'Convert to sampling cells (optional)')}
+                    >
+                      <ChevronRight className="w-4 h-4 lg:hidden" />
+                      <span className="hidden lg:inline">
+                        {isConvertingSamplingCells
+                          ? (t('orders.wizard.convertingSamplingCells') || 'Converting to sampling cells...')
+                          : (t('orders.wizard.convertToSamplingCells') || 'Convert to sampling cells (optional)')}
+                      </span>
+                    </button>
+                    {samplingCellCount > 0 && (
+                      <div className="text-xs text-green-700 dark:text-green-300">
+                        {t('orders.wizard.samplingCellsReady', { count: samplingCellCount }) || `${samplingCellCount} sampling cells generated.`}
+                      </div>
+                    )}
+                    <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-200">
+                      <input
+                        type="checkbox"
+                        checked={showGridPreview}
+                        onChange={() => setShowGridPreview((prev) => !prev)}
+                      />
+                      {t('orders.wizard.gridPreviewToggle') || 'Show grid overlay preview on map'}
+                    </label>
                     <div className="text-xs text-gray-600 dark:text-gray-400">
                       {draft.sourceFields?.length
                         ? (t('orders.wizard.baseFieldsLoaded', { count: draft.sourceFields.length }) || `${draft.sourceFields.length} base fields loaded from shapefile.`)
@@ -2846,24 +3382,27 @@ export default function OrderWizard({
 
                 </div>
 
-                <div />
+                {!singleStepMode && <div />}
               </div>
             )}
 
             {currentStep === 5 && (
-              <div className="space-y-6 p-3 sm:p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+              <div className={compactStepSectionLooseClass}>
+                <div className={singleStepMode ? 'hidden' : 'flex flex-col items-end gap-3 sm:flex-row sm:items-center sm:justify-end'}>
                   {!singleStepMode && (
                     <button
                       onClick={() => goToStep(6)}
                       disabled={!step5Ready}
-                      className={`w-full sm:w-auto text-center px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
+                      className={`h-10 w-10 lg:w-auto lg:px-5 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
                         step5Ready
                           ? 'bg-blue-600 text-white hover:bg-blue-700'
                           : 'bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500'
                       }`}
+                      title={t('orders.wizard.continueToStep6')}
+                      aria-label={t('orders.wizard.continueToStep6')}
                     >
-                      {t('orders.wizard.continueToStep6')}
+                      <ChevronRight className="w-4 h-4 lg:hidden" />
+                      <span className="hidden lg:inline">{t('orders.wizard.continueToStep6')}</span>
                     </button>
                   )}
                 </div>
@@ -2873,48 +3412,30 @@ export default function OrderWizard({
             )}
 
             {currentStep === 6 && (
-              <div className="space-y-3 p-3 sm:p-4">
-                <div />
+              <div className={compactStepSectionClass}>
+                {!singleStepMode && <div />}
 
                 <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">
                   <div className="space-y-4">
-                    <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-3">
-                      <div className="text-sm font-semibold text-gray-900 dark:text-white">
-                        {t('orders.wizard.labExportTitle')}
-                      </div>
-                      <div className="text-xs text-gray-600 dark:text-gray-400">
-                        {isLufaLab
-                          ? t('orders.labOptionLufaNrw')
-                          : t('orders.labOptionAgrolab')}
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {isLufaLab ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void downloadLufaXml();
-                            }}
-                            className="px-3 py-2 rounded-lg border border-blue-200 dark:border-blue-700 text-sm font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-                          >
-                            {t('orders.wizard.downloadLufaXml')}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void downloadAgrolabCsv();
-                            }}
-                            className="px-3 py-2 rounded-lg border border-blue-200 dark:border-blue-700 text-sm font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-                          >
-                            {t('orders.wizard.downloadCsv')}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
                     {!isLufaLab && (
-                      <>
-                        <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-3">
+                      <div className="space-y-3">
+                        <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-2">
+                          <label className="flex items-center gap-3 text-sm font-semibold text-gray-900 dark:text-white">
+                            <input
+                              type="checkbox"
+                              checked={agrolabMetadataEnabled}
+                              onChange={(event) => setAgrolabMetadataConfigEnabled(event.target.checked)}
+                            />
+                            {t('orders.wizard.agrolabMetadataOptionalToggle', { defaultValue: 'Enable Agrolab metadata configuration (optional)' })}
+                          </label>
+                          <div className="text-xs text-gray-600 dark:text-gray-400">
+                            {t('orders.wizard.agrolabMetadataOptionalHint', { defaultValue: 'When disabled, lab metadata, sampling details, and field metadata are optional.' })}
+                          </div>
+                        </div>
+
+                        {agrolabMetadataEnabled && (
+                          <>
+                            <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-3">
                           <div className="text-sm font-semibold text-gray-900 dark:text-white">
                             {t('orders.wizard.labMetaTitle')}
                           </div>
@@ -3157,14 +3678,32 @@ export default function OrderWizard({
                             ))}
                           </div>
                         </div>
-                      </>
+                          </>
+                        )}
+                      </div>
                     )}
 
                     {isLufaLab && (
-                      <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-4">
-                        <div className="text-sm font-semibold text-gray-900 dark:text-white">
-                          {t('orders.wizard.lufaImportConfigTitle')}
+                      <div className="space-y-3">
+                        <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-2">
+                          <label className="flex items-center gap-3 text-sm font-semibold text-gray-900 dark:text-white">
+                            <input
+                              type="checkbox"
+                              checked={lufaImportEnabled}
+                              onChange={(event) => setLufaImportConfigEnabled(event.target.checked)}
+                            />
+                            {t('orders.wizard.lufaImportConfigOptionalToggle', { defaultValue: 'Enable LUFA import configuration (optional)' })}
+                          </label>
+                          <div className="text-xs text-gray-600 dark:text-gray-400">
+                            {t('orders.wizard.lufaImportConfigOptionalHint', { defaultValue: 'When disabled, LUFA ADRNR and label values are ignored.' })}
+                          </div>
                         </div>
+
+                        {lufaImportEnabled && (
+                          <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-4">
+                            <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                              {t('orders.wizard.lufaImportConfigTitle')}
+                            </div>
 
                         <div className="grid gap-3 md:grid-cols-2">
                           <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
@@ -3267,9 +3806,12 @@ export default function OrderWizard({
                               <button
                                 type="button"
                                 onClick={addLufaNminLayer}
-                                className="px-2 py-1 rounded border border-gray-300 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                className="h-8 w-8 sm:w-auto sm:px-2 rounded border border-gray-300 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center"
+                                title={t('orders.wizard.lufaAddLayer')}
+                                aria-label={t('orders.wizard.lufaAddLayer')}
                               >
-                                {t('orders.wizard.lufaAddLayer')}
+                                <span className="text-sm leading-none sm:hidden">+</span>
+                                <span className="hidden sm:inline">{t('orders.wizard.lufaAddLayer')}</span>
                               </button>
                             </div>
                             <div className="space-y-2">
@@ -3294,9 +3836,12 @@ export default function OrderWizard({
                                   <button
                                     type="button"
                                     onClick={() => removeLufaNminLayer(index)}
-                                    className="px-2 py-1 rounded border border-gray-300 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                    className="h-8 w-8 sm:w-auto sm:px-2 rounded border border-gray-300 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center"
+                                    title={t('orders.wizard.lufaRemoveLayer')}
+                                    aria-label={t('orders.wizard.lufaRemoveLayer')}
                                   >
-                                    {t('orders.wizard.lufaRemoveLayer')}
+                                    <span className="text-sm leading-none sm:hidden">×</span>
+                                    <span className="hidden sm:inline">{t('orders.wizard.lufaRemoveLayer')}</span>
                                   </button>
                                 </div>
                               ))}
@@ -3312,6 +3857,8 @@ export default function OrderWizard({
                         {!lufaNminLayerValidation.ready && (
                           <div className="rounded-lg border border-red-200 dark:border-red-700 bg-red-50/70 dark:bg-red-900/20 p-2 text-xs text-red-700 dark:text-red-300">
                             {t('orders.wizard.lufaValidationLayers')}
+                          </div>
+                        )}
                           </div>
                         )}
                       </div>
@@ -3377,7 +3924,7 @@ export default function OrderWizard({
                         <span>{parametersReady ? '✅' : '⚠️'}</span>
                         <span>{t('orders.wizard.landUseSelected')}</span>
                       </div>
-                      {!isLufaLab && (
+                      {!isLufaLab && agrolabMetadataEnabled && (
                         <>
                           <div className="flex items-center gap-2">
                             <span>{agrolabReadiness.labMetaReady ? '✅' : '⚠️'}</span>
@@ -3392,6 +3939,12 @@ export default function OrderWizard({
                             <span>{t('orders.wizard.fieldMetaComplete')}</span>
                           </div>
                         </>
+                      )}
+                      {!isLufaLab && !agrolabMetadataEnabled && (
+                        <div className="flex items-center gap-2">
+                          <span>✅</span>
+                          <span>{t('orders.wizard.agrolabMetadataOptionalDisabled', { defaultValue: 'Agrolab metadata optional (disabled)' })}</span>
+                        </div>
                       )}
                       <div className="flex items-center gap-2">
                         <span>{labConfigReady ? '✅' : '⚠️'}</span>
