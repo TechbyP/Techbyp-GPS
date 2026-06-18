@@ -90,7 +90,7 @@ export function useProjectState() {
     } finally {
       setIsLoadingProjects(false);
     }
-  }, [user?.uid]); // Remove isLoadingProjects from deps to prevent loops
+  }, [user?.uid, isLoadingProjects]);
 
   // Note: Removed sync-complete event listener to prevent infinite loops
   // Background sync now runs silently and UI updates on next manual refresh

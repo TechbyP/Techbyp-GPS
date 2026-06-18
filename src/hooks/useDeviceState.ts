@@ -10,6 +10,7 @@ interface DeviceStateOptions {
 }
 
 export function useDeviceState(options: DeviceStateOptions = {}) {
+  const { onPositionUpdate, onConnectionStatusChange, onError } = options;
   const [connectedDevice, setConnectedDevice] = useState<GpsDevice | null>(null);
   const [externalGpsPosition, setExternalGpsPosition] = useState<GpsPosition | null>(null);
   const [isExternalGpsConnected, setIsExternalGpsConnected] = useState(false);
@@ -20,8 +21,8 @@ export function useDeviceState(options: DeviceStateOptions = {}) {
     setExternalGpsPosition(position);
     setLastTelemetryAt(position.timestamp || Date.now());
     setIsExternalGpsConnected(true);
-    options.onPositionUpdate?.(position);
-  }, [options.onPositionUpdate]);
+    onPositionUpdate?.(position);
+  }, [onPositionUpdate]);
 
   const handleConnect = useCallback((device?: GpsDevice) => {
     if (!isExternalGpsConnected) {
@@ -29,9 +30,9 @@ export function useDeviceState(options: DeviceStateOptions = {}) {
       if (device) {
         setConnectedDevice(device);
       }
-      options.onConnectionStatusChange?.(true, device);
+      onConnectionStatusChange?.(true, device);
     }
-  }, [isExternalGpsConnected, options.onConnectionStatusChange]);
+  }, [isExternalGpsConnected, onConnectionStatusChange]);
 
   const handleDisconnect = useCallback((device?: GpsDevice) => {
     setIsExternalGpsConnected(false);
@@ -41,8 +42,8 @@ export function useDeviceState(options: DeviceStateOptions = {}) {
       setExternalGpsPosition(null);
     }
     
-    options.onConnectionStatusChange?.(false, device);
-  }, [connectedDevice?.id, options.onConnectionStatusChange]);
+    onConnectionStatusChange?.(false, device);
+  }, [connectedDevice?.id, onConnectionStatusChange]);
 
   const handleError = useCallback((error: string) => {
     console.error('GPS Device Error:', error);
@@ -58,8 +59,8 @@ export function useDeviceState(options: DeviceStateOptions = {}) {
       setExternalGpsPosition(null);
     }
     
-    options.onError?.(error);
-  }, [options.onError]);
+    onError?.(error);
+  }, [onError]);
 
   // Bluetooth GPS hook
   const bluetoothGPS = useBluetoothGPS({
@@ -79,17 +80,19 @@ export function useDeviceState(options: DeviceStateOptions = {}) {
 
   // Guard against stale connections
   useEffect(() => {
+    const lastTimestamp = externalGpsPosition?.timestamp;
+
     if (stalenessTimer.current) {
       clearTimeout(stalenessTimer.current);
     }
 
-    if (!externalGpsPosition || !externalGpsPosition.timestamp) {
+    if (!lastTimestamp) {
       setIsExternalGpsConnected(false);
       return;
     }
 
     const checkStaleness = () => {
-      const ageMs = Date.now() - externalGpsPosition.timestamp;
+      const ageMs = Date.now() - lastTimestamp;
       if (ageMs > 15000) {
         setIsExternalGpsConnected(false);
         if (ageMs > 45000) {
@@ -107,7 +110,7 @@ export function useDeviceState(options: DeviceStateOptions = {}) {
         stalenessTimer.current = null;
       }
     };
-  }, [externalGpsPosition?.timestamp]);
+  }, [externalGpsPosition]);
 
   const connectDevice = useCallback(async (device: GpsDevice) => {
     try {

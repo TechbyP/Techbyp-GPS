@@ -105,8 +105,7 @@ export const gpsAPI = {
       }
       
       // Parse to GeoJSON - shpjs returns GeoJSON directly
-      // @ts-ignore - shpjs types might be slightly off
-      const geojson = await shp(shapefileObject) as any;
+      const geojson = await shp(shapefileObject as Record<string, unknown>) as any;
       
       console.log('Parsed shapefile to GeoJSON:', geojson);
       

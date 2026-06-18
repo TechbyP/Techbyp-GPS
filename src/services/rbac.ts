@@ -238,7 +238,6 @@ export async function canCreateProjects(): Promise<boolean> {
  */
 export function getRolePermissions(role: UserRole): Permission[] {
   const permissions: Permission[] = [];
-  const rolePerms = ROLE_PERMISSIONS[role] || [];
   
   // Parse permissions into structured format
   const resources = ['users', 'projects', 'samples', 'exports', 'organizations', 'settings'];

@@ -7,17 +7,16 @@ import { firebaseGPS } from './firebaseSync';
 import { auth } from '../firebase';
 import { indexedDBService } from './indexedDBService';
 import { environmentConfig } from '../config/environment';
-import { isCapacitorApp } from '../utils/platform';
 import { normalizeBoundary, normalizeBoundaries } from '../utils/boundaries';
-import { normalizeGeometry, isValidGeoJSONGeometry } from '../utils/geometryUtils';
+import { normalizeGeometry } from '../utils/geometryUtils';
 import { buildBoundaryRenderMeta } from '../utils/boundaryRenderMeta';
-import { TIMEOUTS, withTimeout } from '../config/timeouts';
+import { TIMEOUTS } from '../config/timeouts';
 import { ErrorHandler } from '../utils/errors';
 import { DatabaseStateMachine, DatabaseState } from './databaseStateMachine';
 import { ConflictResolver } from './conflictResolver';
-import { categorizeError, logCategorizedError, isRetriableError } from '../utils/errorCategories';
+import { categorizeError, logCategorizedError } from '../utils/errorCategories';
 import { dbLogger } from './logger';
-import { SYNC_QUEUE, CACHE_CONFIG, ID_PREFIXES, generateLocalId } from '../config/constants';
+import { SYNC_QUEUE } from '../config/constants';
 import { isOnline as checkOnlineStatus } from '../utils/networkStatus';
 import type { GpsFieldBoundary, GpsFieldSample } from '../types';
 
@@ -118,6 +117,8 @@ class HybridDatabaseService {
   private ongoingBoundarySync: Map<string, Promise<void>> = new Map();
   private ongoingBoundaryRenderMetaBackfill: Map<string, Promise<void>> = new Map();
   private ongoingTrackSync: Map<string, Promise<void>> = new Map();
+  private trackIdAliases: Map<string, string> = new Map();
+  private projectTrackCacheUpdatedAt: Map<string, number> = new Map();
   private readonly boundaryRenderMetaBackfillVersion: number = 1;
   
   // User-scoped storage keys
@@ -144,6 +145,115 @@ class HybridDatabaseService {
         attempts: item.attempts,
         nextAttemptAt: item.nextAttemptAt
       }));
+  }
+
+  private getPendingDeleteIds(type: SyncQueueItem['type']): Set<string> {
+    return new Set(
+      this.syncQueue
+        .filter(item => item.type === type && item.action === 'delete')
+        .map(item => {
+          const rawId = item.data?.id;
+          if (typeof rawId === 'string') {
+            return rawId.trim();
+          }
+
+          return String(rawId || '').trim();
+        })
+        .filter(id => Boolean(id) && id !== '[object Object]')
+    );
+  }
+
+  private filterPendingDeletes<T extends { id: string | number }>(items: T[], type: SyncQueueItem['type']): T[] {
+    const pendingDeleteIds = this.getPendingDeleteIds(type);
+    if (pendingDeleteIds.size === 0) {
+      return items;
+    }
+
+    return items.filter(item => !pendingDeleteIds.has(String(item.id)));
+  }
+
+  private resolveTrackIdAlias(trackId: string): string {
+    let resolvedTrackId = String(trackId || '').trim();
+    if (!resolvedTrackId) {
+      return resolvedTrackId;
+    }
+
+    const visited = new Set<string>();
+    while (this.trackIdAliases.has(resolvedTrackId) && !visited.has(resolvedTrackId)) {
+      visited.add(resolvedTrackId);
+      resolvedTrackId = String(this.trackIdAliases.get(resolvedTrackId) || '').trim();
+      if (!resolvedTrackId) {
+        break;
+      }
+    }
+
+    return resolvedTrackId;
+  }
+
+  private registerTrackIdAlias(oldTrackId: string, newTrackId: string): void {
+    const normalizedOldTrackId = String(oldTrackId || '').trim();
+    const normalizedNewTrackId = String(newTrackId || '').trim();
+
+    if (!normalizedOldTrackId || !normalizedNewTrackId || normalizedOldTrackId === normalizedNewTrackId) {
+      return;
+    }
+
+    this.trackIdAliases.set(normalizedOldTrackId, normalizedNewTrackId);
+
+    for (const [key, value] of this.trackIdAliases.entries()) {
+      if (value === normalizedOldTrackId) {
+        this.trackIdAliases.set(key, normalizedNewTrackId);
+      }
+    }
+  }
+
+  private markProjectTrackCacheUpdated(projectId: string | number | null | undefined): void {
+    const normalizedProjectId = String(projectId || '').trim();
+    if (!normalizedProjectId) {
+      return;
+    }
+
+    this.projectTrackCacheUpdatedAt.set(normalizedProjectId, Date.now());
+  }
+
+  private mergeTrackChildrenForCache(firebaseTrack: any, cachedTrack?: any): any {
+    const pendingSampleDeleteIds = this.getPendingDeleteIds('sample');
+    const pendingPointDeleteIds = this.getPendingDeleteIds('point');
+
+    const normalizeChildren = (items: any[] | undefined, pendingDeleteIds: Set<string>) => (
+      Array.isArray(items)
+        ? items.filter(Boolean).filter(item => !pendingDeleteIds.has(String(item.id)))
+        : []
+    );
+
+    const firebaseSamples = normalizeChildren(firebaseTrack?.samples, pendingSampleDeleteIds);
+    const cachedSamples = normalizeChildren(cachedTrack?.samples, pendingSampleDeleteIds);
+    const firebasePoints = normalizeChildren(firebaseTrack?.gps_points, pendingPointDeleteIds);
+    const cachedPoints = normalizeChildren(cachedTrack?.gps_points, pendingPointDeleteIds);
+
+    const mergedSamples = new Map<string, any>();
+    firebaseSamples.forEach(sample => {
+      mergedSamples.set(String(sample.id), sample);
+    });
+    cachedSamples.forEach(sample => {
+      mergedSamples.set(String(sample.id), sample);
+    });
+
+    const mergedPoints = new Map<string, any>();
+    firebasePoints.forEach(point => {
+      mergedPoints.set(String(point.id), point);
+    });
+    cachedPoints.forEach(point => {
+      mergedPoints.set(String(point.id), point);
+    });
+
+    return {
+      ...firebaseTrack,
+      field_boundary_id: firebaseTrack?.field_boundary_id ?? cachedTrack?.field_boundary_id ?? null,
+      color: firebaseTrack?.color ?? cachedTrack?.color,
+      gps_points: Array.from(mergedPoints.values()),
+      samples: Array.from(mergedSamples.values())
+    };
   }
   
   constructor(uid?: string) {
@@ -596,8 +706,6 @@ class HybridDatabaseService {
   }
 
   private async startHealthChecks() {
-    const isCapacitor = isCapacitorApp();
-
     // Clear any existing timer before scheduling
       if (this.connectivityCheckTimer) {
         clearInterval(this.connectivityCheckTimer);
@@ -1589,7 +1697,7 @@ class HybridDatabaseService {
     try {
       // CRITICAL FIX: Guard against undefined values in sample data
       if (item.type === 'sample' && item.action === 'create') {
-        const hasUndefined = Object.entries(item.data).some(([key, value]) => value === undefined);
+        const hasUndefined = Object.entries(item.data).some(([, value]) => value === undefined);
         if (hasUndefined) {
           console.error(`[SYNC] ❌ Sample ${item.id} contains undefined values:`, 
             Object.entries(item.data)
@@ -1651,6 +1759,7 @@ class HybridDatabaseService {
           // This ensures GPS points and samples can find the track in Firebase
           if (trackResult && trackResult !== item.id) {
             console.log(`[SYNC] Track ID changed: ${item.id} -> ${trackResult}, updating local cache and sync queue`);
+            this.registerTrackIdAlias(String(item.id), String(trackResult));
             
             // Get current track from cache
             const localTrack = await this.getLocalHydrated('track', item.id);
@@ -2374,6 +2483,7 @@ class HybridDatabaseService {
     await this.saveLocal('track', localId, localTrack);
     const cached = await this.getLocalHydrated('tracks', `project_${projectId}`) || [];
     await this.saveLocal('tracks', `project_${projectId}`, [...cached, localTrack]);
+    this.markProjectTrackCacheUpdated(projectId);
 
     // CRITICAL FIX: Include complete track data with ID in sync queue
     this.addToSyncQueue({
@@ -2397,7 +2507,8 @@ class HybridDatabaseService {
   async getTracks(projectId: string) {
     let cached: any[] = [];
     try {
-      cached = await this.getLocalHydrated('tracks', `project_${projectId}`) || [];
+      const cachedTracks = await this.getLocalHydrated('tracks', `project_${projectId}`) || [];
+      cached = this.filterPendingDeletes(cachedTracks, 'track');
     } catch (cacheError: any) {
       console.warn('[HybridDB] Track cache access failed:', cacheError.message);
       cached = [];
@@ -2408,7 +2519,7 @@ class HybridDatabaseService {
       // Only attempt sync if actually online
       if (this.isBackendAvailable && navigator.onLine) {
         // Use debounced background sync - this will now merge instead of overwrite
-        this.syncTracksInBackground(projectId).catch(err => {
+        this.syncTracksInBackground(projectId).catch(() => {
           // Silently handle errors - cache is already available
         });
       }
@@ -2435,14 +2546,15 @@ class HybridDatabaseService {
           firebaseGPS.getTracks(this.uid, projectId),
           timeoutPromise
         ]) as any[];
+        const filteredTracks = this.filterPendingDeletes(tracks, 'track');
         const duration = Date.now() - startTime;
         
         // Store in IndexedDB cache
         // No need to merge here since cache was empty
-        this.saveLocal('tracks', `project_${projectId}`, tracks);
+        this.saveLocal('tracks', `project_${projectId}`, filteredTracks);
         
-        console.log('[HybridDB] Firebase getTracks successful:', tracks.length, 'tracks in', duration + 'ms');
-        return tracks;
+        console.log('[HybridDB] Firebase getTracks successful:', filteredTracks.length, 'tracks in', duration + 'ms');
+        return filteredTracks;
       } catch (error: any) {
         const isTimeout = error.message?.includes('timeout');
         console.warn('[HybridDB] Firebase getTracks failed:', {
@@ -2459,8 +2571,9 @@ class HybridDatabaseService {
           // Best-effort background retry so cache can fill when network recovers
           void firebaseGPS.getTracks(this.uid, projectId)
             .then((tracks) => {
-              this.saveLocal('tracks', `project_${projectId}`, tracks);
-              console.log('[HybridDB] Background tracks fetch succeeded after timeout:', tracks.length);
+              const filteredTracks = this.filterPendingDeletes(tracks, 'track');
+              this.saveLocal('tracks', `project_${projectId}`, filteredTracks);
+              console.log('[HybridDB] Background tracks fetch succeeded after timeout:', filteredTracks.length);
             })
             .catch(() => {/* ignore */});
         }
@@ -2473,16 +2586,20 @@ class HybridDatabaseService {
 
   async getTrack(trackId: string) {
     // Get track details with GPS points and samples
+    const normalizedTrackId = this.resolveTrackIdAlias(String(trackId || '').trim());
+    if (!normalizedTrackId || this.getPendingDeleteIds('track').has(normalizedTrackId)) {
+      return null;
+    }
 
     // Try online first to keep samples/points fresh
     const canAttemptOnline = this.isBackendAvailable || (navigator.onLine && !this.isDefinitelyOffline);
     if (canAttemptOnline) {
         try {
-          const track = await firebaseGPS.getTrackById(this.uid, trackId);
+          const track = await firebaseGPS.getTrackById(this.uid, normalizedTrackId);
           if (track) {
             const [points, samples] = await Promise.all([
-              this.getGpsPoints(trackId),
-              this.getSamples(trackId)
+              this.getGpsPoints(normalizedTrackId),
+              this.getSamples(normalizedTrackId)
             ]);
 
             const detail = {
@@ -2492,7 +2609,7 @@ class HybridDatabaseService {
               field_boundary_id: track.field_boundary_id
             };
 
-            await this.saveLocal('track', trackId, detail);
+            await this.saveLocal('track', normalizedTrackId, detail);
             return detail;
           }
           console.log('[HybridDB] Track not found in Firebase');
@@ -2502,12 +2619,12 @@ class HybridDatabaseService {
     }
 
     // Try cached detail with hydration of points/samples from local storage
-    const cached = await this.getLocalHydrated('track', trackId);
+    const cached = await this.getLocalHydrated('track', normalizedTrackId);
     if (cached) {
       // CRITICAL FIX: Always load fresh points and samples from local cache
       // Even if track is cached, points/samples may have been added since cache was saved
-      const freshPoints = await this.getGpsPoints(trackId);
-      const freshSamples = await this.getSamples(trackId);
+      const freshPoints = await this.getGpsPoints(normalizedTrackId);
+      const freshSamples = await this.getSamples(normalizedTrackId);
       
       const detail = {
         ...cached,
@@ -2516,7 +2633,7 @@ class HybridDatabaseService {
       };
       
       console.log('[HybridDB] Track found in cache, hydrated with fresh points/samples:', {
-        trackId,
+              trackId: normalizedTrackId,
         hasCache: !!cached,
         cachedPoints: cached.gps_points?.length || 0,
         freshPoints: freshPoints?.length || 0,
@@ -2532,52 +2649,62 @@ class HybridDatabaseService {
   }
 
   async deleteTrack(trackId: string) {
-    console.log('[HybridDB] Deleting track with cascade:', trackId);
+    const normalizedTrackId = this.resolveTrackIdAlias(String(trackId || '').trim());
+    if (!normalizedTrackId) {
+      return;
+    }
+
+    console.log('[HybridDB] Deleting track with cascade:', normalizedTrackId);
 
     // Step 1: Delete child GPS points and samples FIRST (cascade)
     let projectId: string | null = null;
+    let cachedTrackForDeletion: any = await this.getLocalHydrated<any>('track', normalizedTrackId);
     try {
-      // Get track to find associated data
-      const allProjects = await this.getProjects();
-      let trackFound = false;
+      if (cachedTrackForDeletion?.project_id != null) {
+        projectId = String(cachedTrackForDeletion.project_id);
+      }
 
-      for (const project of allProjects) {
-        if (project.tracks) {
-          const track = project.tracks.find((t: any) => t.id.toString() === trackId.toString());
-          if (track) {
-            trackFound = true;
-            projectId = project.id; // Store for cache update
-            const pointCount = track.gps_points?.length || 0;
-            const sampleCount = track.samples?.length || 0;
-            console.log(`[HybridDB] Cascade deleting ${pointCount} GPS points and ${sampleCount} samples`);
-            
-            // Delete GPS points
-            if (track.gps_points && track.gps_points.length > 0) {
-              for (const point of track.gps_points) {
-                try {
-                  await this.removeLocal('gps_point', point.id);
-                } catch (err) {
-                  console.warn('[HybridDB] Failed to delete GPS point:', point.id, err);
-                }
-              }
-            }
+      if (!projectId) {
+        const allProjects = await this.getProjects();
+        for (const project of allProjects) {
+          const cachedProjectTracks = await this.getLocalHydrated<any[]>('tracks', `project_${project.id}`) || [];
+          const matchingTrack = cachedProjectTracks.find((track: any) => (
+            String(this.resolveTrackIdAlias(String(track?.id || '').trim())) === normalizedTrackId
+          ));
 
-            // Delete samples
-            if (track.samples && track.samples.length > 0) {
-              for (const sample of track.samples) {
-                try {
-                  await this.removeLocal('sample', sample.id);
-                } catch (err) {
-                  console.warn('[HybridDB] Failed to delete sample:', sample.id, err);
-                }
-              }
-            }
+          if (matchingTrack) {
+            cachedTrackForDeletion = cachedTrackForDeletion || matchingTrack;
+            projectId = String(project.id);
             break;
           }
         }
       }
 
-      if (!trackFound) {
+      if (cachedTrackForDeletion) {
+        const pointCount = cachedTrackForDeletion.gps_points?.length || 0;
+        const sampleCount = cachedTrackForDeletion.samples?.length || 0;
+        console.log(`[HybridDB] Cascade deleting ${pointCount} GPS points and ${sampleCount} samples`);
+
+        if (cachedTrackForDeletion.gps_points && cachedTrackForDeletion.gps_points.length > 0) {
+          for (const point of cachedTrackForDeletion.gps_points) {
+            try {
+              await this.removeLocal('point', String(point.id));
+            } catch (err) {
+              console.warn('[HybridDB] Failed to delete GPS point:', point.id, err);
+            }
+          }
+        }
+
+        if (cachedTrackForDeletion.samples && cachedTrackForDeletion.samples.length > 0) {
+          for (const sample of cachedTrackForDeletion.samples) {
+            try {
+              await this.removeLocal('sample', String(sample.id));
+            } catch (err) {
+              console.warn('[HybridDB] Failed to delete sample:', sample.id, err);
+            }
+          }
+        }
+      } else {
         console.warn('[HybridDB] Track not found in projects, proceeding with deletion');
       }
     } catch (error) {
@@ -2590,13 +2717,19 @@ class HybridDatabaseService {
       console.log('[HybridDB] Definitely offline - deleting locally and queuing');
       
       // Delete from IndexedDB for immediate UI update
-      await this.removeLocal('track', trackId);
+      await this.removeLocal('track', normalizedTrackId);
+      await this.removeLocal('points', `track_${normalizedTrackId}`);
+      await this.removeLocal('samples', `track_${normalizedTrackId}`);
       
       // CRITICAL FIX: Remove from project tracks cache
       if (projectId) {
         const projectTracks = await this.getLocalHydrated<any[]>('tracks', `project_${projectId}`) || [];
-        const updatedTracks = projectTracks.filter(t => t.id?.toString() !== trackId.toString());
+        const updatedTracks = projectTracks.filter(t => {
+          const currentTrackId = this.resolveTrackIdAlias(String(t?.id || '').trim());
+          return currentTrackId !== normalizedTrackId;
+        });
         await this.saveLocal('tracks', `project_${projectId}`, updatedTracks);
+        this.markProjectTrackCacheUpdated(projectId);
         console.log(`[HybridDB] Track removed from project ${projectId} cache`);
       }
       
@@ -2604,19 +2737,25 @@ class HybridDatabaseService {
         id: `delete_${Date.now()}`,
         type: 'track',
         action: 'delete',
-        data: { id: trackId }
+        data: { id: normalizedTrackId }
       });
       return;
     }
     
     // Step 3: Always delete from IndexedDB first for immediate UI update
-    await this.removeLocal('track', trackId);
+    await this.removeLocal('track', normalizedTrackId);
+    await this.removeLocal('points', `track_${normalizedTrackId}`);
+    await this.removeLocal('samples', `track_${normalizedTrackId}`);
     
     // CRITICAL FIX: Remove from project tracks cache immediately
     if (projectId) {
       const projectTracks = await this.getLocalHydrated<any[]>('tracks', `project_${projectId}`) || [];
-      const updatedTracks = projectTracks.filter(t => t.id?.toString() !== trackId.toString());
+      const updatedTracks = projectTracks.filter(t => {
+        const currentTrackId = this.resolveTrackIdAlias(String(t?.id || '').trim());
+        return currentTrackId !== normalizedTrackId;
+      });
       await this.saveLocal('tracks', `project_${projectId}`, updatedTracks);
+      this.markProjectTrackCacheUpdated(projectId);
       console.log(`[HybridDB] Track removed from project ${projectId} cache`);
     }
     
@@ -2627,7 +2766,7 @@ class HybridDatabaseService {
           setTimeout(() => reject(new Error('Delete timeout')), TIMEOUTS.DELETE_OPERATION)
         );
         await Promise.race([
-          firebaseGPS.deleteTrack(this.uid, trackId),
+          firebaseGPS.deleteTrack(this.uid, normalizedTrackId),
           timeoutPromise
         ]);
         console.log('[HybridDB] Track and children deleted from Firebase');
@@ -2648,21 +2787,26 @@ class HybridDatabaseService {
       id: `delete_${Date.now()}`,
       type: 'track',
       action: 'delete',
-      data: { id: trackId }
+      data: { id: normalizedTrackId }
     });
   }
 
   async updateTrack(trackId: string, updates: { name?: string; field_boundary_id?: string | null; color?: string }) {
+    const normalizedTrackId = this.resolveTrackIdAlias(String(trackId || '').trim());
+    if (!normalizedTrackId) {
+      return;
+    }
+
     // Update IndexedDB cache first for immediate UI update
-    const cached = await this.getLocalHydrated('track', trackId);
+    const cached = await this.getLocalHydrated('track', normalizedTrackId);
     if (cached) {
       const updatedTrack = { ...cached, ...updates };
-      await this.saveLocal('track', trackId, updatedTrack);
+      await this.saveLocal('track', normalizedTrackId, updatedTrack);
     }
     
     if (this.isOnline) {
       try {
-        await firebaseGPS.updateTrack(this.uid, trackId, updates);
+        await firebaseGPS.updateTrack(this.uid, normalizedTrackId, updates);
         return;
       } catch (error) {
         console.warn('Firebase unavailable, queuing update:', error);
@@ -2674,7 +2818,7 @@ class HybridDatabaseService {
       id: `update_${Date.now()}`,
       type: 'track',
       action: 'update',
-      data: { id: trackId, ...updates }
+      data: { id: normalizedTrackId, ...updates }
     });
   }
 
@@ -2697,9 +2841,14 @@ class HybridDatabaseService {
     }
   ) {
     return this.withTransaction(async () => {
+      const normalizedTrackId = this.resolveTrackIdAlias(String(trackId || '').trim());
+      if (!normalizedTrackId) {
+        throw new Error('Invalid track_id for point');
+      }
+
       const timestamp = new Date().toISOString();
-      const pointId = `pt_${trackId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      const pointData: any = { id: pointId, track_id: trackId, latitude, longitude, timestamp };
+      const pointId = `pt_${normalizedTrackId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const pointData: any = { id: pointId, track_id: normalizedTrackId, latitude, longitude, timestamp };
       if (typeof altitude === 'number') pointData.altitude = altitude;
       if (typeof accuracy === 'number') pointData.accuracy = accuracy;
       if (metadata) {
@@ -2714,7 +2863,7 @@ class HybridDatabaseService {
       await this.saveLocal('point', pointId, pointData);
       
       // Update cache atomically
-      await this.updatePointCaches(trackId, pointData, options?.skipProjectCacheUpdate);
+      await this.updatePointCaches(normalizedTrackId, pointData, options?.skipProjectCacheUpdate);
 
       // Queue for background sync - never wait for Firebase
       this.addToSyncQueue({
@@ -2770,6 +2919,7 @@ class HybridDatabaseService {
     );
     
     await this.saveLocal('tracks', projectTracksKey, updatedProjectTracks);
+    this.markProjectTrackCacheUpdated(projectId);
   }
   
   /**
@@ -2791,18 +2941,23 @@ class HybridDatabaseService {
   }
 
   async getGpsPoints(trackId: string) {
+    const normalizedTrackId = this.resolveTrackIdAlias(String(trackId || '').trim());
+    if (!normalizedTrackId) {
+      return [] as any[];
+    }
+
     // CRITICAL: Always return local cache first to preserve unsync'd points
     // Don't fetch from Firebase during tracking - let sync queue handle it
     // This prevents local points from being overwritten with stale Firebase data
-    const cached: any[] = await this.getLocalHydrated('points', `track_${trackId}`) || [];
+    const cached: any[] = await this.getLocalHydrated('points', `track_${normalizedTrackId}`) || [];
     
     // Only attempt Firebase for historical data if cache is empty AND online
     if (cached.length === 0 && this.isOnline && this.isBackendAvailable) {
       try {
         // Attempting Firebase for track points (cache empty)
-        const points = await firebaseGPS.getGpsPoints(this.uid, trackId);
+        const points = await firebaseGPS.getGpsPoints(this.uid, normalizedTrackId);
         if (points && points.length > 0) {
-          await this.saveLocal('points', `track_${trackId}`, points);
+          await this.saveLocal('points', `track_${normalizedTrackId}`, points);
           return points;
         }
       } catch (error) {
@@ -2886,11 +3041,12 @@ class HybridDatabaseService {
   ) {
     return this.withTransaction(async () => {
       const rawTrackId = trackId as unknown;
-      const normalizedTrackId = typeof rawTrackId === 'string'
+      const inputTrackId = typeof rawTrackId === 'string'
         ? rawTrackId.trim()
         : (rawTrackId && typeof rawTrackId === 'object' && 'id' in (rawTrackId as any))
           ? String((rawTrackId as any).id || '').trim()
           : String(rawTrackId || '').trim();
+      const normalizedTrackId = this.resolveTrackIdAlias(inputTrackId);
 
       if (!normalizedTrackId || normalizedTrackId === '[object Object]') {
         throw new Error('Invalid track_id for sample');
@@ -2949,23 +3105,30 @@ class HybridDatabaseService {
   }
 
   async getSamples(trackId: string) {
+    const normalizedTrackId = this.resolveTrackIdAlias(String(trackId || '').trim());
+    if (!normalizedTrackId) {
+      return [] as any[];
+    }
+
     // Get local cached samples first
-    const cached = await this.getLocalHydrated('samples', `track_${trackId}`) || [];
+    const cachedSamples = await this.getLocalHydrated('samples', `track_${normalizedTrackId}`) || [];
+    const cached = this.filterPendingDeletes(cachedSamples, 'sample');
     
     // CRITICAL FIX: If backend available, fetch from Firebase and merge with local
     // This ensures PC sees samples synced from tablet
     if (this.isOnline && this.isBackendAvailable) {
       try {
-        const firebaseSamples = await firebaseGPS.getSamples(this.uid, trackId);
+        const firebaseSamples = await firebaseGPS.getSamples(this.uid, normalizedTrackId);
         
         if (firebaseSamples && firebaseSamples.length > 0) {
+          const filteredFirebaseSamples = this.filterPendingDeletes(firebaseSamples, 'sample');
           // Merge: deduplicate by ID, prefer Firebase versions (authoritative)
-          const firebaseIds = new Set(firebaseSamples.map((s: any) => s.id));
+          const firebaseIds = new Set(filteredFirebaseSamples.map((s: any) => s.id));
           const localOnly = cached.filter((s: any) => !firebaseIds.has(s.id));
-          const merged = [...firebaseSamples, ...localOnly];
+          const merged = [...filteredFirebaseSamples, ...localOnly];
           
           // Update cache with merged data
-          await this.saveLocal('samples', `track_${trackId}`, merged);
+          await this.saveLocal('samples', `track_${normalizedTrackId}`, merged);
           return merged;
         }
       } catch (error) {
@@ -2978,21 +3141,55 @@ class HybridDatabaseService {
   }
 
   async deleteSample(sampleId: string) {
-    if (this.isOnline) {
-      try {
-        await firebaseGPS.deleteSample(this.uid, sampleId);
+    return this.withTransaction(async () => {
+      const normalizedSampleId = String(sampleId || '').trim();
+      if (!normalizedSampleId) {
         return;
-      } catch (error) {
-        console.warn('Firebase unavailable, queuing delete:', error);
-        // this.isOnline = false; // Removed: isOnline is now a getter
       }
-    }
-    
-    this.addToSyncQueue({
-      id: `delete_${Date.now()}`,
-      type: 'sample',
-      action: 'delete',
-      data: { id: sampleId }
+
+      const cachedSample = await this.getLocalHydrated<any>('sample', normalizedSampleId);
+      const normalizedTrackId = String(cachedSample?.track_id || '').trim();
+
+      if (normalizedTrackId) {
+        const listKey = `track_${normalizedTrackId}`;
+        const cachedTrackSamples = await this.getLocalHydrated<any[]>('samples', listKey) || [];
+        const filteredSamples = cachedTrackSamples.filter(sample => String(sample.id) !== normalizedSampleId);
+        await this.saveLocal('samples', listKey, filteredSamples);
+
+        const cachedTrack = await this.getLocalHydrated<any>('track', normalizedTrackId);
+        if (cachedTrack) {
+          const updatedTrack = {
+            ...cachedTrack,
+            samples: (cachedTrack.samples || []).filter((sample: any) => String(sample.id) !== normalizedSampleId)
+          };
+          await this.saveLocal('track', normalizedTrackId, updatedTrack);
+
+          if (cachedTrack.project_id != null) {
+            await this.updateProjectTracksCache(String(cachedTrack.project_id), normalizedTrackId, updatedTrack);
+          }
+        }
+      }
+
+      await this.removeLocal('sample', normalizedSampleId);
+
+      if (this.isOnline) {
+        try {
+          await firebaseGPS.deleteSample(this.uid, normalizedSampleId);
+          return;
+        } catch (error) {
+          console.warn('Firebase unavailable, queuing delete:', error);
+          // this.isOnline = false; // Removed: isOnline is now a getter
+        }
+      }
+      
+      this.addToSyncQueue({
+        id: `delete_${Date.now()}`,
+        type: 'sample',
+        action: 'delete',
+        data: { id: normalizedSampleId }
+      });
+
+      void this.syncToFirebaseNonBlocking?.();
     });
   }
 
@@ -3073,7 +3270,8 @@ class HybridDatabaseService {
     }
 
     const listKey = `project_${normalizedProjectId}`;
-    const cached = await this.getLocalHydrated<GpsFieldSample[]>('field_samples', listKey) || [];
+    const cachedFieldSamples = await this.getLocalHydrated<GpsFieldSample[]>('field_samples', listKey) || [];
+    const cached = this.filterPendingDeletes(cachedFieldSamples, 'field_sample');
 
     let merged = cached;
 
@@ -3081,9 +3279,10 @@ class HybridDatabaseService {
       try {
         const firebaseSamples = await firebaseGPS.getFieldSamples(this.uid, normalizedProjectId);
         if (Array.isArray(firebaseSamples) && firebaseSamples.length > 0) {
-          const firebaseIds = new Set(firebaseSamples.map((sample: any) => String(sample.id)));
+          const filteredFirebaseSamples = this.filterPendingDeletes(firebaseSamples, 'field_sample');
+          const firebaseIds = new Set(filteredFirebaseSamples.map((sample: any) => String(sample.id)));
           const localOnly = cached.filter((sample) => !firebaseIds.has(String(sample.id)));
-          merged = [...firebaseSamples as GpsFieldSample[], ...localOnly];
+          merged = [...filteredFirebaseSamples as GpsFieldSample[], ...localOnly];
           await this.saveLocal('field_samples', listKey, merged);
         }
       } catch (error) {
@@ -3100,28 +3299,30 @@ class HybridDatabaseService {
   }
 
   async deleteFieldSample(sampleId: string, projectId?: string) {
-    const normalizedSampleId = String(sampleId || '').trim();
-    if (!normalizedSampleId) {
-      return;
-    }
+    return this.withTransaction(async () => {
+      const normalizedSampleId = String(sampleId || '').trim();
+      if (!normalizedSampleId) {
+        return;
+      }
 
-    if (projectId) {
-      const listKey = `project_${projectId}`;
-      const cached = await this.getLocalHydrated<GpsFieldSample[]>('field_samples', listKey) || [];
-      const filtered = cached.filter(sample => String(sample.id) !== normalizedSampleId);
-      await this.saveLocal('field_samples', listKey, filtered);
-    }
+      if (projectId) {
+        const listKey = `project_${projectId}`;
+        const cached = await this.getLocalHydrated<GpsFieldSample[]>('field_samples', listKey) || [];
+        const filtered = cached.filter(sample => String(sample.id) !== normalizedSampleId);
+        await this.saveLocal('field_samples', listKey, filtered);
+      }
 
-    await this.removeLocal('field_sample', normalizedSampleId);
+      await this.removeLocal('field_sample', normalizedSampleId);
 
-    this.addToSyncQueue({
-      id: `delete_${Date.now()}`,
-      type: 'field_sample',
-      action: 'delete',
-      data: { id: normalizedSampleId }
+      this.addToSyncQueue({
+        id: `delete_${Date.now()}`,
+        type: 'field_sample',
+        action: 'delete',
+        data: { id: normalizedSampleId }
+      });
+
+      void this.syncToFirebaseNonBlocking?.();
     });
-
-    void this.syncToFirebaseNonBlocking?.();
   }
 
   // Field Boundaries
@@ -3373,7 +3574,7 @@ class HybridDatabaseService {
 
   async getFieldBoundaries(projectId: string) {
     const cachedRaw = await this.getLocalHydrated<any[]>('boundaries', `project_${projectId}`);
-    let cached = normalizeBoundaries(cachedRaw || []);
+    const cached = normalizeBoundaries(cachedRaw || []);
 
     // CRITICAL: Return cached data REGARDLESS of network status
     if (cached.length > 0) {
@@ -3463,9 +3664,15 @@ class HybridDatabaseService {
     
     const syncPromise = (async () => {
       try {
-        // CRITICAL FIX: Get cached tracks first to merge with Firebase data
-        const cachedTracks = await this.getLocalHydrated('tracks', `project_${projectId}`) || [];
-        const firebaseTracks = await firebaseGPS.getTracks(this.uid, projectId);
+        const syncStartedAt = Date.now();
+        const firebaseTrackList = await firebaseGPS.getTracks(this.uid, projectId);
+        const firebaseTracks = this.filterPendingDeletes(firebaseTrackList, 'track');
+        const cachedTrackList = await this.getLocalHydrated('tracks', `project_${projectId}`) || [];
+        const cachedTracks = this.filterPendingDeletes(cachedTrackList, 'track');
+        const cachedTracksById = new Map(
+          cachedTracks.map((track: any) => [String(this.resolveTrackIdAlias(String(track.id))), track])
+        );
+        const mutationDuringFetch = (this.projectTrackCacheUpdatedAt.get(String(projectId)) || 0) > syncStartedAt;
         
         // CRITICAL FIX: Merge cached tracks with Firebase tracks to preserve local-only tracks
         // This prevents overwriting local tracks that haven't synced yet
@@ -3486,6 +3693,10 @@ class HybridDatabaseService {
           const isPending = pendingCreation.includes(t.id);
           return isPending && !firebaseTrackIds.has(t.id);
         });
+
+        const mergedRemoteTracks = firebaseTracks
+          .filter((track: any) => !mutationDuringFetch || cachedTracksById.has(String(track.id)))
+          .map((track: any) => this.mergeTrackChildrenForCache(track, cachedTracksById.get(String(track.id))));
         
         // CRITICAL FIX: Clean up deleted tracks from individual caches
         for (const deletedId of deletedTrackIds) {
@@ -3497,8 +3708,8 @@ class HybridDatabaseService {
           }
         }
         
-        // Merge: Firebase tracks (authoritative) + local-only pending tracks
-        const mergedTracks = [...firebaseTracks, ...localOnlyTracks];
+        // Merge: remote tracks + local-only pending tracks, but never overwrite fresher local children.
+        const mergedTracks = this.filterPendingDeletes([...mergedRemoteTracks, ...localOnlyTracks], 'track');
         
         await this.saveLocal('tracks', `project_${projectId}`, mergedTracks);
         
@@ -3667,7 +3878,7 @@ class HybridDatabaseService {
   // Devices
   async getDevices() {
     // Get cached devices
-    let cached = await this.getLocalHydrated('devices', 'all') || [];
+    const cached = await this.getLocalHydrated('devices', 'all') || [];
 
     // If we already have cache, return it and refresh in background
     if (cached.length > 0) {

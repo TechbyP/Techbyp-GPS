@@ -1,18 +1,19 @@
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import type { MutableRefObject } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, Polygon, Circle, CircleMarker, useMap, useMapEvents, FeatureGroup, GeoJSON } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Polygon, Circle, useMap, useMapEvents, FeatureGroup } from 'react-leaflet';
 import { EditControl } from 'react-leaflet-draw';
 import L from 'leaflet';
 import 'leaflet-draw/dist/leaflet.draw.css';
 import { Capacitor } from '@capacitor/core';
-import { Map, Navigation2, Satellite, Search, X } from 'lucide-react';
+import { Map as MapIcon, Navigation2, Satellite, Search, X } from 'lucide-react';
 import { useDarkMode } from '../../../hooks/useDarkMode';
 import { useLanguage } from '../../../hooks/useLanguage';
 import i18n from '../../../i18n';
-import { GpsPosition, GpsTrackDetail, GpsPoint, GpsFieldBoundary } from '../../../types';
-import { getBlankTileUrl, getBundledGermanyPmtilesUrl } from '../../../utils/tileUtils';
+import { GpsPosition, GpsTrackDetail, GpsPoint, GpsFieldBoundary, GpsFieldSample } from '../../../types';
+import { getBlankTileUrl, getBundledGermanyPmtilesUrl, getTileLayerCrossOrigin } from '../../../utils/tileUtils';
 import { buildBalancedSamplingCells, type PolygonGeometry } from '../../../utils/fieldPartitioning';
 import { getDefaultPack, getPackForLocation, OFFLINE_MAP_PACKS } from '../../../config/offlineMapPacks';
+import { deriveBoundarySamplingStatus } from '../../../utils/fieldSamplingState';
 import PMTilesVectorLayer from '../../GPS/PMTilesVectorLayer';
 import { tileDownloader, DownloadProgress } from '../../../services/offlineTileDownloader';
 import 'leaflet/dist/leaflet.css';
@@ -43,6 +44,7 @@ const checkGermanyTilesAvailable = (): boolean => {
 
 // Runtime availability check to avoid assuming tiles exist when they do not
 const initialGermanyTilesAvailable = checkGermanyTilesAvailable();
+const LEAFLET_WORLD_BOUNDS: L.LatLngBoundsExpression = [[-85.05112878, -180], [85.05112878, 180]];
 
 // Calculate centroid of a polygon
 function calculateCentroid(coordinates: number[][][] | undefined | null): [number, number] | null {
@@ -166,7 +168,6 @@ const geometryToGridPreviewCells = (
 };
 
 const inactiveFieldColor = '#DC2626';
-const inactivePatternId = 'inactive-field-hatch';
 
 // Advanced GPS Point Smoothing Algorithm
 // Creates smooth curved paths, ignores circling and small movements
@@ -338,7 +339,10 @@ const BLANK_TILE_URL = getBlankTileUrl();
 interface OrdersMapViewProps {
   currentPosition: GpsPosition | null;
   tracks: GpsTrackDetail[];
+  fieldSamples?: GpsFieldSample[];
   fieldBoundaries?: GpsFieldBoundary[];
+  boundaryAutoFitKey?: string;
+  preferActiveBoundaryFit?: boolean;
   drawnFields?: Array<{ id: string; geometry: any; color?: string; baseName?: string; baseId?: string; areaHa?: number }>;
   gridOverlayEnabled?: boolean;
   gridOverlaySizeHa?: 3 | 5;
@@ -377,6 +381,8 @@ type PlaceSearchResult = {
 const MapController = memo(function MapController({
   currentPosition,
   fieldBoundaries,
+  boundaryAutoFitKey,
+  preferActiveBoundaryFit,
   focusedBoundaryId,
   focusedDrawnFieldId,
   drawnFields,
@@ -388,6 +394,8 @@ const MapController = memo(function MapController({
 }: {
   currentPosition: GpsPosition | null;
   fieldBoundaries: GpsFieldBoundary[];
+  boundaryAutoFitKey?: string;
+  preferActiveBoundaryFit?: boolean;
   focusedBoundaryId?: number | null;
   focusedDrawnFieldId?: string | null;
   drawnFields: Array<{ id: string; geometry: any }>;
@@ -439,6 +447,15 @@ const MapController = memo(function MapController({
     return bounds.isValid() ? bounds : null;
   }, []);
 
+  const getBoundsFromBoundary = useCallback((boundary: GpsFieldBoundary | undefined) => {
+    if (!boundary) return null;
+
+    return getBoundsFromGeometry({
+      type: boundary.geometry_type,
+      coordinates: boundary.coordinates,
+    });
+  }, [getBoundsFromGeometry]);
+
   const flyToBoundsAnimated = useCallback((bounds: L.LatLngBoundsExpression, padding: [number, number] = [80, 80], maxZoom: number = 18, force: boolean = false) => {
     if (!map) return;
 
@@ -485,7 +502,7 @@ const MapController = memo(function MapController({
       });
       trackingCenterDoneRef.current = true;
     }
-  }, [currentPosition, isTracking, map]);
+  }, [currentPosition, isTracking, map, trackingCenterDoneRef]);
 
   // Focus on specific boundary when clicked
   useEffect(() => {
@@ -504,23 +521,8 @@ const MapController = memo(function MapController({
       const boundary = fieldBoundaries.find(b => String(b.id) === String(focusedBoundaryId));
       if (boundary) {
         try {
-          const bounds = L.latLngBounds([]);
-
-          if (boundary.geometry_type === 'Polygon') {
-            const coords = boundary.coordinates as number[][][];
-            coords[0].forEach(coord => {
-              bounds.extend([coord[1], coord[0]]);
-            });
-          } else if (boundary.geometry_type === 'MultiPolygon') {
-            const coords = boundary.coordinates as number[][][][];
-            coords.forEach(polygon => {
-              polygon[0].forEach(coord => {
-                bounds.extend([coord[1], coord[0]]);
-              });
-            });
-          }
-
-          if (bounds.isValid()) {
+          const bounds = getBoundsFromBoundary(boundary);
+          if (bounds) {
             flyToBoundsAnimated(bounds, [90, 90], 18, true);
             boundaryFocusDoneRef.current = true;
             lastFocusedBoundaryIdRef.current = focusedBoundaryId;
@@ -530,7 +532,11 @@ const MapController = memo(function MapController({
         }
       }
     }
-  }, [focusedBoundaryId, fieldBoundaries, map, flyToBoundsAnimated, disableSelectionFocus]);
+  }, [focusedBoundaryId, fieldBoundaries, map, flyToBoundsAnimated, disableSelectionFocus, getBoundsFromBoundary, boundaryFocusDoneRef, lastFocusedBoundaryIdRef]);
+
+  useEffect(() => {
+    hasZoomedToBoundariesRef.current = false;
+  }, [boundaryAutoFitKey, hasZoomedToBoundariesRef]);
 
   // Focus on specific drawn field when clicked
   useEffect(() => {
@@ -581,7 +587,7 @@ const MapController = memo(function MapController({
         }
       }
     }
-  }, [focusedTrackId, tracks, map, flyToBoundsAnimated]);
+  }, [focusedTrackId, tracks, map, flyToBoundsAnimated, trackFocusDoneRef, lastFocusedTrackIdRef]);
 
   // Auto-zoom to field boundaries when they're loaded (with delay to ensure rendering)
   useEffect(() => {
@@ -590,21 +596,22 @@ const MapController = memo(function MapController({
       const timer = setTimeout(() => {
         try {
           const bounds = L.latLngBounds([]);
+          const activeBoundaries = fieldBoundaries.filter((boundary) => boundary.properties?.isActive !== false);
+          const boundariesToFit = activeBoundaries.length > 0
+            ? activeBoundaries
+            : (preferActiveBoundaryFit ? [] : fieldBoundaries);
 
-          fieldBoundaries.forEach(boundary => {
-            if (boundary.geometry_type === 'Polygon') {
-              const coords = boundary.coordinates as number[][][];
-              coords[0].forEach(coord => {
-                bounds.extend([coord[1], coord[0]]);
-              });
-            } else if (boundary.geometry_type === 'MultiPolygon') {
-              const coords = boundary.coordinates as number[][][][];
-              coords.forEach(polygon => {
-                polygon[0].forEach(coord => {
-                  bounds.extend([coord[1], coord[0]]);
-                });
-              });
+          if (!boundariesToFit.length) {
+            return;
+          }
+
+          boundariesToFit.forEach((boundary) => {
+            const boundaryBounds = getBoundsFromBoundary(boundary);
+            if (!boundaryBounds) {
+              return;
             }
+
+            bounds.extend(boundaryBounds);
           });
 
           if (bounds.isValid()) {
@@ -618,7 +625,7 @@ const MapController = memo(function MapController({
 
       return () => clearTimeout(timer);
     }
-  }, [fieldBoundaries, map, flyToBoundsAnimated]);
+  }, [fieldBoundaries, map, flyToBoundsAnimated, getBoundsFromBoundary, preferActiveBoundaryFit, hasZoomedToBoundariesRef]);
 
   // Zoom to current position if no boundaries
   useEffect(() => {
@@ -626,7 +633,7 @@ const MapController = memo(function MapController({
       map.setView([currentPosition.latitude, currentPosition.longitude], 18);
       hasZoomedRef.current = true;
     }
-  }, [currentPosition, fieldBoundaries, map]);
+  }, [currentPosition, fieldBoundaries, map, hasZoomedRef]);
 
   // Cleanup animation timeout on unmount
   useEffect(() => {
@@ -681,22 +688,58 @@ const MapScaleUpdater = memo(function MapScaleUpdater({
 });
 
 // Zoom level tracker for performance optimization
-const ZoomTracker = memo(function ZoomTracker({ onZoomChange }: { onZoomChange: (zoom: number) => void }) {
+const ZoomTracker = memo(function ZoomTracker({
+  onZoomChange,
+  continuous = true,
+  emitOnZoomEnd = true,
+}: {
+  onZoomChange: (zoom: number) => void;
+  continuous?: boolean;
+  emitOnZoomEnd?: boolean;
+}) {
   const map = useMap();
-  
+  const lastZoomRef = useRef<number | null>(null);
+
   useEffect(() => {
+    let frameId: number | null = null;
+
     const handleZoom = () => {
-      onZoomChange(map.getZoom());
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+      }
+
+      frameId = requestAnimationFrame(() => {
+        const nextZoom = map.getZoom();
+        if (lastZoomRef.current != null && Math.abs(lastZoomRef.current - nextZoom) < 0.001) {
+          return;
+        }
+
+        lastZoomRef.current = nextZoom;
+        onZoomChange(nextZoom);
+      });
     };
-    
-    map.on('zoomend', handleZoom);
-    onZoomChange(map.getZoom()); // Set initial zoom
-    
+
+    if (continuous) {
+      map.on('zoom', handleZoom);
+    }
+    if (emitOnZoomEnd) {
+      map.on('zoomend', handleZoom);
+    }
+    handleZoom();
+
     return () => {
-      map.off('zoomend', handleZoom);
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+      }
+      if (continuous) {
+        map.off('zoom', handleZoom);
+      }
+      if (emitOnZoomEnd) {
+        map.off('zoomend', handleZoom);
+      }
     };
-  }, [map, onZoomChange]);
-  
+  }, [map, onZoomChange, continuous, emitOnZoomEnd]);
+
   return null;
 });
 
@@ -801,7 +844,224 @@ const FieldVectorPaneSetup = memo(function FieldVectorPaneSetup() {
   return null;
 });
 
-type DeferredTileLayerProps = {
+const TileHandoffController = memo(function TileHandoffController({
+  enabled,
+  fadeOutMs = 160,
+  maxVisibleMs = 2200,
+}: {
+  enabled: boolean;
+  fadeOutMs?: number;
+  maxVisibleMs?: number;
+}) {
+  const map = useMap();
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const isLoadingRef = useRef(false);
+  const hideTimerRef = useRef<number | null>(null);
+  const settleTimerRef = useRef<number | null>(null);
+
+  const clearTimer = useCallback((timerRef: MutableRefObject<number | null>) => {
+    if (timerRef.current != null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const ensureOverlay = useCallback(() => {
+    const container = map.getContainer();
+    const existing = overlayRef.current ?? document.createElement('div');
+    const isNewOverlay = overlayRef.current == null;
+    overlayRef.current = existing;
+
+    if (isNewOverlay) {
+      existing.className = 'tile-handoff-overlay';
+      existing.style.position = 'absolute';
+      existing.style.left = '0';
+      existing.style.top = '0';
+      existing.style.width = '100%';
+      existing.style.height = '100%';
+      existing.style.pointerEvents = 'none';
+      existing.style.zIndex = '350';
+      existing.style.opacity = '0';
+      existing.style.willChange = 'opacity';
+      existing.style.overflow = 'hidden';
+    }
+
+    if (!container.contains(existing)) {
+      container.appendChild(existing);
+    }
+
+    return existing;
+  }, [map]);
+
+  const captureCurrentTiles = useCallback((): boolean => {
+    if (!enabled) return false;
+
+    const overlay = ensureOverlay();
+    const tilePane = map.getPanes().tilePane;
+    if (!tilePane) return false;
+
+    const snapshot = tilePane.cloneNode(true) as HTMLElement;
+
+    snapshot.querySelectorAll('img.leaflet-tile:not(.leaflet-tile-loaded)').forEach((tile) => tile.remove());
+    snapshot.querySelectorAll<HTMLCanvasElement>('canvas').forEach((canvas) => {
+      if (canvas.width <= 0 || canvas.height <= 0) {
+        canvas.remove();
+      }
+    });
+
+    const drawableCount = snapshot.querySelectorAll('img.leaflet-tile-loaded, canvas').length;
+    if (drawableCount === 0) {
+      return false;
+    }
+
+    snapshot.style.pointerEvents = 'none';
+    overlay.innerHTML = '';
+    overlay.appendChild(snapshot);
+    return true;
+  }, [enabled, ensureOverlay, map]);
+
+  const hasPendingTiles = useCallback((): boolean => {
+    const tilePane = map.getPanes().tilePane;
+    if (!tilePane) return false;
+
+    const pendingCount = tilePane.querySelectorAll('img.leaflet-tile:not(.leaflet-tile-loaded)').length;
+    const drawableCount = tilePane.querySelectorAll('img.leaflet-tile-loaded, canvas').length;
+    const mapLoading = (map as any)._loading === true || isLoadingRef.current;
+
+    if (pendingCount > 0) {
+      return true;
+    }
+
+    if (mapLoading && drawableCount === 0) {
+      return true;
+    }
+
+    return false;
+  }, [map]);
+
+  const showSnapshot = useCallback(() => {
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+
+    clearTimer(hideTimerRef);
+    overlay.style.transition = 'none';
+    overlay.style.opacity = '1';
+  }, [clearTimer]);
+
+  const hideSnapshot = useCallback((delayMs: number = 0) => {
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+
+    clearTimer(hideTimerRef);
+    clearTimer(settleTimerRef);
+    hideTimerRef.current = window.setTimeout(() => {
+      overlay.style.transition = `opacity ${fadeOutMs}ms ease`;
+      overlay.style.opacity = '0';
+      hideTimerRef.current = null;
+    }, delayMs);
+  }, [clearTimer, fadeOutMs]);
+
+  const waitForTilesToSettle = useCallback(() => {
+    clearTimer(settleTimerRef);
+
+    const startedAt = performance.now();
+    const minimumStableMs = 140;
+    let settledAt: number | null = null;
+
+    const tick = () => {
+      if (!enabled) {
+        hideSnapshot(0);
+        return;
+      }
+
+      const elapsed = performance.now() - startedAt;
+      if (hasPendingTiles()) {
+        settledAt = null;
+      } else {
+        if (settledAt === null) {
+          settledAt = performance.now();
+        }
+
+        if ((performance.now() - settledAt) >= minimumStableMs) {
+          hideSnapshot(60);
+          settleTimerRef.current = null;
+          return;
+        }
+      }
+
+      if (elapsed >= maxVisibleMs) {
+        hideSnapshot(0);
+        settleTimerRef.current = null;
+        return;
+      }
+
+      settleTimerRef.current = window.setTimeout(tick, 45);
+    };
+
+    settleTimerRef.current = window.setTimeout(tick, 45);
+  }, [clearTimer, enabled, hasPendingTiles, hideSnapshot, maxVisibleMs]);
+
+  const startHandoff = useCallback(() => {
+    if (!enabled) return;
+
+    const hasSnapshot = captureCurrentTiles();
+    if (!hasSnapshot) return;
+
+    showSnapshot();
+    waitForTilesToSettle();
+  }, [enabled, captureCurrentTiles, showSnapshot, waitForTilesToSettle]);
+
+  useEffect(() => {
+    if (!enabled) {
+      hideSnapshot(0);
+      return;
+    }
+
+    const container = map.getContainer();
+    const handleLoading = () => {
+      isLoadingRef.current = true;
+      startHandoff();
+    };
+    const handleLoad = () => {
+      isLoadingRef.current = false;
+      waitForTilesToSettle();
+    };
+    const handleWheel = () => startHandoff();
+    const handleZoomStart = () => startHandoff();
+    const handleMoveEnd = () => waitForTilesToSettle();
+
+    container.addEventListener('wheel', handleWheel, { passive: true });
+    map.on('loading', handleLoading);
+    map.on('load', handleLoad);
+    map.on('zoomstart', handleZoomStart);
+    map.on('moveend', handleMoveEnd);
+
+    return () => {
+      container.removeEventListener('wheel', handleWheel);
+      map.off('loading', handleLoading);
+      map.off('load', handleLoad);
+      map.off('zoomstart', handleZoomStart);
+      map.off('moveend', handleMoveEnd);
+    };
+  }, [enabled, map, startHandoff, hideSnapshot, waitForTilesToSettle]);
+
+  useEffect(() => {
+    return () => {
+      clearTimer(hideTimerRef);
+      clearTimer(settleTimerRef);
+
+      const overlay = overlayRef.current;
+      if (overlay && overlay.parentElement) {
+        overlay.parentElement.removeChild(overlay);
+      }
+      overlayRef.current = null;
+    };
+  }, [clearTimer]);
+
+  return null;
+});
+
+type _DeferredTileLayerProps = {
   url: string;
   attribution?: string;
   minZoom?: number;
@@ -820,7 +1080,10 @@ type DeferredTileLayerProps = {
 export default function OrdersMapView({
   currentPosition,
   tracks,
+  fieldSamples = [],
   fieldBoundaries = [],
+  boundaryAutoFitKey = '',
+  preferActiveBoundaryFit = false,
   drawnFields = [],
   gridOverlayEnabled = false,
   gridOverlaySizeHa = 5,
@@ -835,7 +1098,7 @@ export default function OrdersMapView({
   showNavigationButton = false,
   onNavigationClick,
   isNavigationOpen = false,
-  isSidebarCollapsed = false,
+  isSidebarCollapsed: _isSidebarCollapsed = false,
   recenterTrigger,
   onFieldClick,
   onMapClick,
@@ -853,7 +1116,6 @@ export default function OrdersMapView({
   const activeDrawHandlerRef = useRef<any>(null);
   const onDrawingEditedRef = useRef(onDrawingEdited);
   const canvasRenderer = useMemo(() => L.canvas({ padding: 0.5 }), []);
-  const fieldSvgRenderer = useMemo(() => L.svg({ padding: 0.5 }), []);
   const fieldMetadataRef = useRef<Record<string, any>>({});
   const makeDrawnId = useCallback(() => `drawn_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, []);
   const hasZoomedRef = useRef(false);
@@ -920,7 +1182,6 @@ export default function OrdersMapView({
   const placeInputRef = useRef<HTMLInputElement | null>(null);
   const selectedFieldRef = useRef<{ fieldId: number | string; source: 'uploaded' | 'drawn' } | null>(null);
   const suppressNextMapClickRef = useRef(false);
-  const hasInjectedPatternRef = useRef(false);
   const selectedBoundarySet = useMemo(
     () => new Set(selectedBoundaryIds.map(id => String(id))),
     [selectedBoundaryIds]
@@ -1026,7 +1287,7 @@ export default function OrdersMapView({
     return null;
   });
 
-  const scheduleHoverPopup = useCallback((event: any, fieldId: number | string, source: 'uploaded' | 'drawn') => {
+  const _scheduleHoverPopup = useCallback((event: any, fieldId: number | string, source: 'uploaded' | 'drawn') => {
     const position = getMousePosition(event);
     if (!position) return;
 
@@ -1055,7 +1316,7 @@ export default function OrdersMapView({
     }, 1000);
   }, [clearHoverTimer, getMousePosition, hoverEditPopup]);
 
-  const handleFieldMouseOut = useCallback(() => {
+  const _handleFieldMouseOut = useCallback(() => {
     clearHoverTimer();
     hoverPendingRef.current = null;
     if (hoverPopupActiveRef.current) {
@@ -1189,73 +1450,9 @@ export default function OrdersMapView({
     };
   }, [drawingMode, startDrawingHandler]);
 
-  const ensureInactivePattern = useCallback(() => {
-    const svgContainer = (fieldSvgRenderer as any)?._container as SVGSVGElement | undefined;
-    if (!svgContainer) return false;
-    const svgNs = 'http://www.w3.org/2000/svg';
-    let defs = svgContainer.querySelector('defs');
-    if (!defs) {
-      defs = document.createElementNS(svgNs, 'defs');
-      svgContainer.insertBefore(defs, svgContainer.firstChild);
-    }
-
-    if (!defs.querySelector(`#${inactivePatternId}`)) {
-      const pattern = document.createElementNS(svgNs, 'pattern');
-      pattern.setAttribute('id', inactivePatternId);
-      pattern.setAttribute('patternUnits', 'userSpaceOnUse');
-      pattern.setAttribute('width', '8');
-      pattern.setAttribute('height', '8');
-      pattern.setAttribute('patternTransform', 'rotate(45)');
-
-      const line = document.createElementNS(svgNs, 'line');
-      line.setAttribute('x1', '0');
-      line.setAttribute('y1', '0');
-      line.setAttribute('x2', '0');
-      line.setAttribute('y2', '8');
-      line.setAttribute('stroke', '#94A3B8');
-      line.setAttribute('stroke-width', '2');
-      line.setAttribute('opacity', '0.6');
-
-      pattern.appendChild(line);
-      defs.appendChild(pattern);
-    }
-
-    if (!document.getElementById('inactive-field-hatch-style')) {
-      const style = document.createElement('style');
-      style.id = 'inactive-field-hatch-style';
-      style.textContent = `
-        .leaflet-pane .field-hatch {
-          fill: url(#${inactivePatternId});
-          fill-opacity: 0.25;
-        }
-      `;
-      document.head.appendChild(style);
-    }
-
-    return true;
-  }, [fieldSvgRenderer]);
-
   useEffect(() => {
-    if (!mapRef.current) return;
-    let cancelled = false;
-
-    const tryInject = () => {
-      if (cancelled || hasInjectedPatternRef.current) return;
-      if (ensureInactivePattern()) {
-        hasInjectedPatternRef.current = true;
-        return;
-      }
-      setTimeout(tryInject, 200);
-    };
-
-    tryInject();
-    return () => {
-      cancelled = true;
-    };
-  }, [ensureInactivePattern]);
-
-  useEffect(() => {
-    if (!featureGroupRef.current || !onDrawingEdited) return;
+    const featureGroup = featureGroupRef.current;
+    if (!featureGroup || !onDrawingEdited) return;
 
     const handleLayerEdit = (event: any) => {
       const layer = event?.target;
@@ -1266,7 +1463,7 @@ export default function OrdersMapView({
       }
     };
 
-    featureGroupRef.current.eachLayer((layer: any) => {
+    featureGroup.eachLayer((layer: any) => {
       if (layer?.eachLayer) {
         layer.eachLayer((child: any) => {
           child.off?.('edit', handleLayerEdit);
@@ -1279,7 +1476,7 @@ export default function OrdersMapView({
     });
 
     return () => {
-      featureGroupRef.current?.eachLayer((layer: any) => {
+      featureGroup.eachLayer((layer: any) => {
         if (layer?.eachLayer) {
           layer.eachLayer((child: any) => child.off?.('edit', handleLayerEdit));
         } else {
@@ -1294,17 +1491,17 @@ export default function OrdersMapView({
   const isOffline = !hasInternetAccess;
   const prefetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPrefetchCenterRef = useRef<{ lat: number; lng: number } | null>(null);
-  const [showOfflinePrompt, setShowOfflinePrompt] = useState(false);
+  const [_showOfflinePrompt, setShowOfflinePrompt] = useState(false);
   const [offlinePromptDismissed, setOfflinePromptDismissed] = useState(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem('offlineMapPromptDismissed') === 'true';
   });
   const [isDownloadingOffline, setIsDownloadingOffline] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
+  const [_downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
   const [selectedPackId, setSelectedPackId] = useState<string>(() => getDefaultPack().id);
-  const [userSelectedPack, setUserSelectedPack] = useState(false);
+  const [userSelectedPack, _setUserSelectedPack] = useState(false);
 
-  const handleDismissOfflinePrompt = useCallback(() => {
+  const _handleDismissOfflinePrompt = useCallback(() => {
     setShowOfflinePrompt(false);
     setOfflinePromptDismissed(true);
     if (typeof window !== 'undefined') {
@@ -1392,7 +1589,7 @@ export default function OrdersMapView({
 
     const workers = Array.from({ length: CONCURRENCY }, () => worker());
     await Promise.all(workers);
-  }, [buildPrefetchList]);
+    }, [buildPrefetchList, t]);
 
   // Calculate bounds and offline tile availability before using in callbacks
   const locationPack = useMemo(() => {
@@ -1423,9 +1620,9 @@ export default function OrdersMapView({
   const forceOfflineTiles = !offlineTilesDisabled && isNative && offlineTilesReady && !onlineTileUrl;
   const needsOfflineDownload = false;
   const preferRasterOnNative = !offlineTilesDisabled && isNative && offlineRasterAvailable && !offlinePmtilesUri;
-  const activePackName = activePack.name;
+  const _activePackName = activePack.name;
   const hasDownloadUrl = !!activePack.downloadUrl;
-  const canDownloadOffline = hasDownloadUrl && isOnline;
+  const _canDownloadOffline = hasDownloadUrl && isOnline;
 
   const getActiveTileTemplate = useCallback((): string | null => {
     // If we are inside offline bounds but still probing, don't prefetch online tiles
@@ -1448,7 +1645,7 @@ export default function OrdersMapView({
     // Street map (self-hosted preferred, fallback to OSM online)
     if (Capacitor.isNativePlatform() && !onlineTileUrl) return null;
     return onlineTileUrl || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-  }, [offlinePmtilesUri, offlineRasterAvailable, isOffline, useSatellite, onlineTileUrl, shouldUseOfflineTiles, isWithinOfflineBounds, tileProbeComplete, preferRasterOnNative]);
+  }, [offlinePmtilesUri, offlineRasterAvailable, isOffline, useSatellite, shouldUseOfflineTiles, isWithinOfflineBounds, tileProbeComplete, preferRasterOnNative]);
 
   // Auto prefetch tiles around current view (1km radius, zooms 12-18)
   useEffect(() => {
@@ -1457,6 +1654,17 @@ export default function OrdersMapView({
 
     const template = getActiveTileTemplate();
     if (!template) return;
+
+    let canPrefetchTemplate = false;
+    try {
+      const resolvedTemplateUrl = new URL(template, window.location.origin);
+      canPrefetchTemplate = resolvedTemplateUrl.origin === window.location.origin;
+    } catch {
+      canPrefetchTemplate = false;
+    }
+
+    // Avoid flooding remote tile providers; only prefetch same-origin tiles we control.
+    if (!canPrefetchTemplate) return;
 
     const schedule = () => {
       if (prefetchTimeoutRef.current) clearTimeout(prefetchTimeoutRef.current);
@@ -1521,6 +1729,90 @@ export default function OrdersMapView({
       return true;
     });
   }, [fieldBoundaries]);
+
+  const trackAssignedSamples = useMemo((): GpsFieldSample[] => {
+    return tracks.flatMap((track) => {
+      if (!track || track.field_boundary_id == null) {
+        return [] as GpsFieldSample[];
+      }
+
+      return (track.samples || [])
+        .filter((sample) => Number.isFinite(sample?.latitude) && Number.isFinite(sample?.longitude))
+        .map((sample, index) => ({
+          id: `track_${track.id}_${sample.id ?? index}`,
+          project_id: track.project_id,
+          field_boundary_id: track.field_boundary_id as number | string,
+          latitude: Number(sample.latitude),
+          longitude: Number(sample.longitude),
+          sample_number: sample.sample_number ?? (index + 1),
+          name: sample.name,
+          notes: sample.notes,
+          timestamp: sample.timestamp ?? sample.created_at,
+          created_at: sample.created_at,
+          updated_at: sample.updated_at,
+        }));
+    });
+  }, [tracks]);
+
+  const standaloneTrackSamples = useMemo((): GpsFieldSample[] => {
+    return tracks.flatMap((track) => {
+      if (!track || track.field_boundary_id == null || (track.gps_points || []).length > 0) {
+        return [] as GpsFieldSample[];
+      }
+
+      return (track.samples || [])
+        .filter((sample) => Number.isFinite(sample?.latitude) && Number.isFinite(sample?.longitude))
+        .map((sample, index) => ({
+          id: `standalone_${track.id}_${sample.id ?? index}`,
+          project_id: track.project_id,
+          field_boundary_id: track.field_boundary_id as number | string,
+          latitude: Number(sample.latitude),
+          longitude: Number(sample.longitude),
+          sample_number: sample.sample_number ?? (index + 1),
+          name: sample.name,
+          notes: sample.notes,
+          timestamp: sample.timestamp ?? sample.created_at,
+          created_at: sample.created_at,
+          updated_at: sample.updated_at,
+        }));
+    });
+  }, [tracks]);
+
+  const allBoundarySamples = useMemo((): GpsFieldSample[] => {
+    return [...fieldSamples, ...trackAssignedSamples];
+  }, [fieldSamples, trackAssignedSamples]);
+
+  const standaloneFieldSamplesForRender = useMemo((): GpsFieldSample[] => {
+    const sourceSamples = focusedBoundaryId
+      ? [...fieldSamples, ...standaloneTrackSamples].filter((sample) => String(sample.field_boundary_id) === String(focusedBoundaryId))
+      : [...fieldSamples, ...standaloneTrackSamples];
+
+    if (currentZoom < 14) {
+      return [] as GpsFieldSample[];
+    }
+
+    const maxSamples = currentZoom >= 16 ? 400 : 200;
+    return sourceSamples.slice(0, maxSamples);
+  }, [currentZoom, fieldSamples, focusedBoundaryId, standaloneTrackSamples]);
+
+  const boundarySamplingStateById = useMemo(() => {
+    const counts = new Map<string, number>();
+    allBoundarySamples.forEach((sample) => {
+      const fieldId = String(sample.field_boundary_id);
+      counts.set(fieldId, (counts.get(fieldId) || 0) + 1);
+    });
+
+    const samplingState = new Map<string, { sampleCount: number; status: 'pending' | 'in_progress' | 'completed' }>();
+    uniqueFieldBoundaries.forEach((boundary) => {
+      const sampleCount = counts.get(String(boundary.id)) || 0;
+      samplingState.set(String(boundary.id), {
+        sampleCount,
+        status: deriveBoundarySamplingStatus(sampleCount, boundary),
+      });
+    });
+
+    return samplingState;
+  }, [allBoundarySamples, uniqueFieldBoundaries]);
 
   const baseGridOverlayCells = useMemo(() => {
     if (!gridOverlayEnabled) return [] as GridPreviewCell[];
@@ -1613,7 +1905,7 @@ export default function OrdersMapView({
       const trackBounds = L.latLngBounds(latLngs);
       return bounds.intersects(trackBounds);
     });
-  }, [tracksForSelectedField, currentZoom, focusedBoundaryId]);
+  }, [tracksForSelectedField, focusedBoundaryId]);
 
   // Runtime probe for Germany offline tiles to avoid assuming they exist when missing
   useEffect(() => {
@@ -1733,7 +2025,7 @@ export default function OrdersMapView({
     };
     probe();
     return () => { cancelled = true; };
-  }, [tileProbeCounter, offlinePmtilesUrl, activePack]);
+  }, [tileProbeCounter, activePack, t]);
 
   useEffect(() => {
     if (isNative) {
@@ -1756,7 +2048,7 @@ export default function OrdersMapView({
     return () => window.clearTimeout(timeoutId);
   }, [isNative, offlineTilesReady]);
 
-  const handleDownloadOfflineMaps = useCallback(async () => {
+  const _handleDownloadOfflineMaps = useCallback(async () => {
     if (isDownloadingOffline) return;
     if (!Capacitor.isNativePlatform()) {
       setDownloadProgress({
@@ -1798,7 +2090,7 @@ export default function OrdersMapView({
       setTileProbeCounter((v) => v + 1);
       setShowOfflinePrompt(false);
     }
-  }, [isDownloadingOffline, t, activePack]);
+  }, [isDownloadingOffline, isOnline, t, activePack]);
   
   // Check if we actually have internet access (not just WiFi connection)
   useEffect(() => {
@@ -1856,7 +2148,7 @@ export default function OrdersMapView({
       window.removeEventListener('offline', handleOffline);
       clearInterval(intervalId);
     };
-  }, []);
+  }, [t]);
 
   // Force map rerender and retry tiles on connectivity change
   useEffect(() => {
@@ -1866,8 +2158,8 @@ export default function OrdersMapView({
       setTimeout(() => mapRef.current?.invalidateSize?.(), 150);
     }
   }, [hasInternetAccess]);
-  const forceOffline = isOffline;
-  const [showLabels, setShowLabels] = useState(true); // Show labels on satellite
+  const _forceOffline = isOffline;
+  const [showLabels, _setShowLabels] = useState(true); // Show labels on satellite
   const [mapKey, setMapKey] = useState(0); // Force map refresh on network change
   const formatScaleLabel = useCallback((meters: number) => {
     if (meters >= 1000) {
@@ -1882,7 +2174,7 @@ export default function OrdersMapView({
     label: t('orders.scaleDefaultLabel'),
     width: 80,
   });
-  const [isTileLoading, setIsTileLoading] = useState(false);
+  const [, setIsTileLoading] = useState(false);
   const [placeQuery, setPlaceQuery] = useState('');
   const [placeResults, setPlaceResults] = useState<PlaceSearchResult[]>([]);
   const [isSearchingPlace, setIsSearchingPlace] = useState(false);
@@ -1894,13 +2186,13 @@ export default function OrdersMapView({
   const [isSearchExpanded, setIsSearchExpanded] = useState(() => (
     typeof window !== 'undefined' ? window.innerWidth >= 1280 : true
   ));
-  const pmtilesVersion = import.meta.env.VITE_PMTILES_VERSION || '20260122';
+  const _pmtilesVersion = import.meta.env.VITE_PMTILES_VERSION || '20260122';
 
-  const centerOnCurrentLocation = () => {
+  const centerOnCurrentLocation = useCallback(() => {
     if (currentPosition && mapRef.current) {
       mapRef.current.setView([currentPosition.latitude, currentPosition.longitude], 19); // Zoom 19 = ~2.5m per pixel
     }
-  };
+  }, [currentPosition]);
 
   const DEFAULT_CENTER: [number, number] = [49.6116, 6.1319]; // Luxembourg
 
@@ -1909,7 +2201,7 @@ export default function OrdersMapView({
     if (recenterTrigger && recenterTrigger > 0) {
       centerOnCurrentLocation();
     }
-  }, [recenterTrigger]);
+  }, [recenterTrigger, centerOnCurrentLocation]);
 
   const runPlaceSearch = useCallback(async () => {
     const query = placeQuery.trim();
@@ -2103,6 +2395,13 @@ export default function OrdersMapView({
   // Restrict zoom only when we actually use offline Germany tiles
   const usingOfflineGermanyTiles = shouldUseOfflineTiles && !useSatellite && !useOSM;
   const effectiveInitialZoom = usingOfflineGermanyTiles ? 13 : 18;
+  const tileKeepBuffer = useSatellite ? 12 : 8;
+  const tileUpdateWhenZooming = true;
+  const tileUpdateWhenIdle = false;
+  const mapZoomAnimation = false;
+  const mapFadeAnimation = false;
+  const mapMarkerZoomAnimation = false;
+  const enableTileHandoff = !isNative;
 
   return (
     <div className="w-full h-full relative" ref={mapContainerRef}>
@@ -2113,13 +2412,16 @@ export default function OrdersMapView({
         maxZoom={19}
         zoomSnap={0}
         zoomDelta={10}
+        worldCopyJump={true}
+        maxBounds={LEAFLET_WORLD_BOUNDS}
+        maxBoundsViscosity={1}
         zoomControl={false}
         attributionControl={false}
         className={`w-full h-full orders-map-canvas ${shouldUseOfflineTiles ? 'pmtiles-active' : ''}`}
         ref={mapRef}
-        zoomAnimation={false}
-        fadeAnimation={false}
-        markerZoomAnimation={false}
+        zoomAnimation={mapZoomAnimation}
+        fadeAnimation={mapFadeAnimation}
+        markerZoomAnimation={mapMarkerZoomAnimation}
         preferCanvas={true}
         renderer={canvasRenderer}
       >
@@ -2127,6 +2429,7 @@ export default function OrdersMapView({
         <MapScaleUpdater onScaleChange={setScaleInfo} formatLabel={formatScaleLabel} />
         <FieldVectorPaneSetup />
         <TileLoadingTracker onLoadingChange={setIsTileLoading} />
+        <TileHandoffController enabled={enableTileHandoff} />
         {/* Tile Layer - Street Map or Satellite */}
         {(() => {
 
@@ -2134,14 +2437,16 @@ export default function OrdersMapView({
             return (
               <TileLayer
                 key="osm-map"
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                url={onlineTileUrl || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'}
                 maxZoom={19}
+                noWrap={true}
                 attribution={t('orders.mapAttribution.osm')}
-                crossOrigin="anonymous"
+                crossOrigin={getTileLayerCrossOrigin(onlineTileUrl || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png')}
                 tileSize={256}
-                keepBuffer={12}
-                updateWhenIdle={false}
-                updateWhenZooming={false}
+                keepBuffer={tileKeepBuffer}
+                updateWhenIdle={tileUpdateWhenIdle}
+                updateWhenZooming={tileUpdateWhenZooming}
+                reuseTiles={true}
               />
             );
           }
@@ -2154,12 +2459,14 @@ export default function OrdersMapView({
                 minZoom={1}
                 maxZoom={18}
                 maxNativeZoom={12}
+                noWrap={true}
                 attribution={t('orders.mapAttribution.offlineGermany')}
                 errorTileUrl='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
-                crossOrigin="anonymous"
-                keepBuffer={12}
-                updateWhenIdle={false}
-                updateWhenZooming={false}
+                crossOrigin={getTileLayerCrossOrigin('/tiles/germany/{z}/{x}/{y}.png')}
+                keepBuffer={tileKeepBuffer}
+                updateWhenIdle={tileUpdateWhenIdle}
+                updateWhenZooming={tileUpdateWhenZooming}
+                reuseTiles={true}
               />
             );
           }
@@ -2171,6 +2478,7 @@ export default function OrdersMapView({
                 pmtilesUrl={offlinePmtilesUri}
                 maxZoom={19}
                 maxDataZoom={15}
+                noWrap={true}
                 attribution={t('orders.mapAttribution.offlinePmtiles')}
                 theme={Capacitor.isNativePlatform() && isDarkMode ? 'dark' : 'light'}
                 schema="openmaptiles"
@@ -2186,12 +2494,14 @@ export default function OrdersMapView({
                 minZoom={1}
                 maxZoom={18}
                 maxNativeZoom={12}
+                noWrap={true}
                 attribution={t('orders.mapAttribution.offlineGermany')}
                 errorTileUrl='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
-                crossOrigin="anonymous"
-                keepBuffer={12}
-                updateWhenIdle={false}
-                updateWhenZooming={false}
+                crossOrigin={getTileLayerCrossOrigin('/tiles/germany/{z}/{x}/{y}.png')}
+                keepBuffer={tileKeepBuffer}
+                updateWhenIdle={tileUpdateWhenIdle}
+                updateWhenZooming={tileUpdateWhenZooming}
+                reuseTiles={true}
               />
             );
           }
@@ -2205,6 +2515,7 @@ export default function OrdersMapView({
                 minZoom={1}
                 maxZoom={18}
                 maxNativeZoom={18}
+                noWrap={true}
                 attribution={t('orders.mapAttribution.offlineFallback')}
                 tileSize={256}
               />
@@ -2221,6 +2532,7 @@ export default function OrdersMapView({
                 minZoom={1}
                 maxZoom={18}
                 maxNativeZoom={18}
+                noWrap={true}
                 tileSize={256}
               />
             );
@@ -2234,9 +2546,11 @@ export default function OrdersMapView({
                   key="esri-satellite"
                   url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
                   maxZoom={20}
-                    keepBuffer={12}
-                    updateWhenIdle={false}
-                  updateWhenZooming={false}
+                  noWrap={true}
+                  keepBuffer={tileKeepBuffer}
+                  updateWhenIdle={tileUpdateWhenIdle}
+                  updateWhenZooming={tileUpdateWhenZooming}
+                  reuseTiles={true}
                   attribution={t('orders.mapAttribution.esri')}
                 />
                 {showLabels && (
@@ -2244,10 +2558,12 @@ export default function OrdersMapView({
                     key="esri-labels"
                     url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
                     maxZoom={20}
+                    noWrap={true}
                     opacity={0.7}
-                      keepBuffer={12}
-                      updateWhenIdle={false}
-                    updateWhenZooming={false}
+                    keepBuffer={tileKeepBuffer}
+                    updateWhenIdle={tileUpdateWhenIdle}
+                    updateWhenZooming={tileUpdateWhenZooming}
+                    reuseTiles={true}
                     attribution={t('orders.mapAttribution.esri')}
                   />
                 )}
@@ -2268,6 +2584,7 @@ export default function OrdersMapView({
                 minZoom={1}
                 maxZoom={18}
                 maxNativeZoom={18}
+                noWrap={true}
                 attribution={t('orders.mapAttribution.onlineUnavailable')}
                 tileSize={256}
               />
@@ -2280,12 +2597,14 @@ export default function OrdersMapView({
               url={baseOnlineUrl}
               maxZoom={19}
               maxNativeZoom={19}
+              noWrap={true}
               attribution={onlineTileUrl || rasterFallback ? (t('orders.mapAttribution.selfHosted')) : (t('orders.mapAttribution.osm'))}
-              crossOrigin="anonymous"
+              crossOrigin={getTileLayerCrossOrigin(baseOnlineUrl)}
               tileSize={256}
-                keepBuffer={12}
-                updateWhenIdle={false}
-              updateWhenZooming={false}
+              keepBuffer={tileKeepBuffer}
+              updateWhenIdle={tileUpdateWhenIdle}
+              updateWhenZooming={tileUpdateWhenZooming}
+              reuseTiles={true}
             />
           );
         })()}
@@ -2294,6 +2613,8 @@ export default function OrdersMapView({
         <MapController
           currentPosition={currentPosition}
           fieldBoundaries={uniqueFieldBoundaries}
+          boundaryAutoFitKey={boundaryAutoFitKey}
+          preferActiveBoundaryFit={preferActiveBoundaryFit}
           focusedBoundaryId={focusedBoundaryId}
           focusedDrawnFieldId={focusedDrawnFieldId}
           drawnFields={drawnFields}
@@ -2410,7 +2731,6 @@ export default function OrdersMapView({
                       weight: selectedDrawnSet.has(String(field.id)) ? 4 : 2
                     }}
                     pane="field-vectors"
-                    renderer={fieldSvgRenderer}
                     eventHandlers={{
                       click: (event) => handleFieldClick(event, field.id, 'drawn'),
                       add: (e: any) => {
@@ -2559,11 +2879,14 @@ export default function OrdersMapView({
             return (
               <div key={boundary.id}>
                 {(() => {
-                  // Auto-change to pink if field has tracks assigned (active contract only)
-                  const hasTracksInField = isActive && tracks.some(t => t && String(t.field_boundary_id) === String(boundary.id));
-                  const fieldColor = isActive
-                    ? (hasTracksInField ? '#FF1493' : (boundary.color || '#00FF00'))
-                    : inactiveFieldColor;
+                  const boundarySampling = boundarySamplingStateById.get(String(boundary.id));
+                  const fieldColor = !isActive
+                    ? inactiveFieldColor
+                    : boundarySampling?.status === 'completed'
+                      ? '#16A34A'
+                      : (boundarySampling?.sampleCount || 0) > 0
+                        ? '#FF1493'
+                        : (boundary.color || '#00FF00');
                   
                   return (
                     <>
@@ -2577,7 +2900,6 @@ export default function OrdersMapView({
                           className: undefined
                         }}
                         pane="field-vectors"
-                        renderer={fieldSvgRenderer}
                         interactive={true}
                         eventHandlers={{
                           click: (event) => handleFieldClick(event, boundary.id, 'uploaded')
@@ -2641,11 +2963,14 @@ export default function OrdersMapView({
                       .map(coord => [coord[1], coord[0]] as [number, number])
                   );
 
-                  // Auto-change to pink if field has tracks assigned
-                  const hasTracksInField = isActive && tracks.some(t => t && String(t.field_boundary_id) === String(boundary.id));
-                  const fieldColor = isActive
-                    ? (hasTracksInField ? '#FF1493' : (boundary.color || '#00FF00'))
-                    : inactiveFieldColor;
+                  const boundarySampling = boundarySamplingStateById.get(String(boundary.id));
+                  const fieldColor = !isActive
+                    ? inactiveFieldColor
+                    : boundarySampling?.status === 'completed'
+                      ? '#16A34A'
+                      : (boundarySampling?.sampleCount || 0) > 0
+                        ? '#FF1493'
+                        : (boundary.color || '#00FF00');
                   
                   return (
                     <Polygon
@@ -2659,7 +2984,6 @@ export default function OrdersMapView({
                         className: undefined
                       }}
                       pane="field-vectors"
-                      renderer={fieldSvgRenderer}
                       interactive={true}
                       eventHandlers={{
                         click: (event) => handleFieldClick(event, boundary.id, 'uploaded')
@@ -2680,8 +3004,12 @@ export default function OrdersMapView({
                 {/* Manual sample dots */}
                 {isActive && boundary.manual_samples?.enabled && boundary.manual_samples.count > 0 && (() => {
                   const samplePositions: [number, number][] = calculateManualSamplePositions(boundary, boundary.manual_samples.count);
-                  const hasTracksInField = tracks.some(t => t && String(t.field_boundary_id) === String(boundary.id));
-                  const dotColor = hasTracksInField ? '#FF1493' : (boundary.color || '#00FF00');
+                  const boundarySampling = boundarySamplingStateById.get(String(boundary.id));
+                  const dotColor = boundarySampling?.status === 'completed'
+                    ? '#16A34A'
+                    : (boundarySampling?.sampleCount || 0) > 0
+                      ? '#FF1493'
+                      : (boundary.color || '#00FF00');
                   
                   return (
                     <>
@@ -2783,9 +3111,36 @@ export default function OrdersMapView({
               fill: false,
             }}
             pane="field-vectors"
-            renderer={canvasRenderer}
             interactive={false}
           />
+        ))}
+
+        {/* Direct field samples and standalone track samples without path geometry */}
+        {standaloneFieldSamplesForRender.map((sample) => (
+          <Marker
+            key={`field-sample-${sample.id}`}
+            position={[sample.latitude, sample.longitude]}
+            icon={sampleIcon}
+            zIndexOffset={1000}
+          >
+            <Popup className={isDarkMode ? 'dark-popup' : 'light-popup'}>
+              <div className={`text-sm ${isDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'}`}>
+                <strong>{t('gps.sample')} #{sample.sample_number}</strong>
+                {sample.name && (
+                  <>
+                    <br />
+                    <span className={isDarkMode ? 'text-gray-300' : 'text-gray-700'}>{sample.name}</span>
+                  </>
+                )}
+                {sample.notes && (
+                  <>
+                    <br />
+                    <span className={isDarkMode ? 'text-gray-300' : 'text-gray-700'}>{sample.notes}</span>
+                  </>
+                )}
+              </div>
+            </Popup>
+          </Marker>
         ))}
 
         {/* Render viewport-filtered tracks - memoized for performance */}
@@ -2915,7 +3270,7 @@ export default function OrdersMapView({
             </div>
           );
         });
-        }, [viewportFilteredTracks, currentZoom, isDarkMode, t, focusedBoundaryId])}
+        }, [viewportFilteredTracks, currentZoom, isDarkMode, t])}
       </MapContainer>
       {/* Navigation Button - Bottom right, hidden when navigation panel is open on mobile, moves left on desktop */}
       {showNavigationButton && onNavigationClick && (
@@ -2983,7 +3338,7 @@ export default function OrdersMapView({
                   const value = t('orders.map.searchPlacesPlaceholder');
                   return value && value !== 'orders.map.searchPlacesPlaceholder'
                     ? value
-                    : 'Search place or city';
+                    : 'Search place or city. Preferably the right one.';
                 })()}
                 className="min-w-0 flex-1 bg-transparent text-sm text-gray-900 dark:text-white placeholder:text-gray-500 dark:placeholder:text-gray-400 outline-none"
               />
@@ -2995,7 +3350,7 @@ export default function OrdersMapView({
                 title={isOffline ? (t('orders.mapMode.offlineDisabled') || 'Map mode switch requires internet connection') : mapModeToggleTitle}
                 className={`h-8 w-8 sm:h-9 sm:w-9 shrink-0 rounded-xl border transition-colors flex items-center justify-center ${isOffline ? 'border-gray-200 text-gray-400 dark:border-gray-800 dark:text-gray-600 cursor-not-allowed' : 'border-gray-200/80 text-gray-600 hover:bg-gray-100/80 hover:text-gray-900 dark:border-gray-700/80 dark:text-gray-300 dark:hover:bg-gray-800/80 dark:hover:text-white'}`}
               >
-                {useSatellite ? <Map className="w-4 h-4" /> : <Satellite className="w-4 h-4" />}
+                {useSatellite ? <MapIcon className="w-4 h-4" /> : <Satellite className="w-4 h-4" />}
               </button>
               <button
                 type="button"

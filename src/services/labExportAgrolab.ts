@@ -1,14 +1,15 @@
 import templateCsv from '../assets/templates/agrolab-template.csv?raw';
 import { OrderDraft } from '../types';
+import { getFieldBarcodeList } from '../utils/orderBarcodes';
 
 const formatDate = (date: Date) => {
   return date.toLocaleDateString('de-DE');
 };
 
-const normalizeDateValue = (value: string | undefined, fallback: Date) => {
-  if (!value) return formatDate(fallback);
+const normalizeDateValue = (value: string | undefined) => {
+  if (!value) return '';
   const trimmed = value.trim();
-  if (!trimmed) return formatDate(fallback);
+  if (!trimmed) return '';
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
     return formatDate(new Date(`${trimmed}T00:00:00`));
   }
@@ -41,26 +42,27 @@ export const generateAgrolabCsv = (draft: OrderDraft) => {
       headerByCode.H = lines[i];
       hHeaderIndex = i;
     }
+    if (lines[i][0] === 'E' && !headerByCode.E) {
+      headerByCode.E = lines[i];
+      rowIndexByCode.E = i;
+    }
   }
 
-  const now = new Date();
   const customer = draft.customerProfile || {};
   const billing = draft.billingRecipient || { isDifferent: false };
   const fields = draft.fields || [];
   const labMeta = draft.labMeta || {};
   const sampling = draft.samplingDetails || {};
-  const totalAreaHa = fields.reduce((sum, field) => sum + (field.areaHa || 0), 0).toFixed(2);
 
   if (rowIndexByCode.A != null && headerByCode.A) {
     const row = lines[rowIndexByCode.A];
     setValue(row, headerByCode.A, 'Beauftragtes Labor', labMeta.assignedLab || '');
     setValue(row, headerByCode.A, 'Labor', labMeta.labName || '');
     setValue(row, headerByCode.A, 'Probenart,BNS', labMeta.sampleTypeBns || '');
-    setValue(row, headerByCode.A, 'Version', labMeta.version || '');
+    setValue(row, headerByCode.A, 'Version', normalizeDateValue(sampling.samplingDate || labMeta.version));
     setValue(row, headerByCode.A, 'Paketdienst-Tracking', labMeta.trackingNumber || '');
-    setValue(row, headerByCode.A, 'Datum', normalizeDateValue(labMeta.orderDate, now));
-    setValue(row, headerByCode.A, 'Speichername', labMeta.storageName || `${customer.lastName || 'Order'}-${now.getFullYear()}`);
-    setValue(row, headerByCode.A, 'lab-interne Info', labMeta.internalInfo || '');
+    setValue(row, headerByCode.A, 'Datum', normalizeDateValue(labMeta.orderDate));
+    setValue(row, headerByCode.A, 'Speichername', labMeta.storageName || '');
   }
 
   if (rowIndexByCode.B != null && headerByCode.B) {
@@ -112,14 +114,14 @@ export const generateAgrolabCsv = (draft: OrderDraft) => {
     setValue(row, headerByCode.F, 'WerberNo', sampling.advertiserNo || '');
     setValue(row, headerByCode.F, 'PN-AuftragsNr', sampling.samplingOrderNo || '');
     setValue(row, headerByCode.F, 'Preisliste', sampling.priceList || '');
-    setValue(row, headerByCode.F, 'Probenahmedatum', normalizeDateValue(sampling.samplingDate, now));
+    setValue(row, headerByCode.F, 'Probenahmedatum', normalizeDateValue(sampling.samplingDate));
     setValue(row, headerByCode.F, 'PN-Preis/Probe', sampling.pricePerSample || '');
     setValue(row, headerByCode.F, 'PN-Preis/ha', sampling.pricePerHa || '');
-    setValue(row, headerByCode.F, 'ha', sampling.totalAreaHa || totalAreaHa);
+    setValue(row, headerByCode.F, 'ha', sampling.totalAreaHa || '');
     setValue(row, headerByCode.F, 'Fahrtkosten', sampling.travelCost || '');
     setValue(row, headerByCode.F, 'Fahrtkosten/km', sampling.travelCostPerKm || '');
     setValue(row, headerByCode.F, 'km', sampling.km || '');
-    setValue(row, headerByCode.F, 'AnzahlProben', sampling.sampleCount || String(fields.length));
+    setValue(row, headerByCode.F, 'AnzahlProben', sampling.sampleCount || '');
   }
 
   if (rowIndexByCode.G != null && headerByCode.G) {
@@ -142,13 +144,15 @@ export const generateAgrolabCsv = (draft: OrderDraft) => {
         || field.samplingCell?.parentBaseId
         || field.baseId
         || field.fieldId;
+      const primaryBarcode = getFieldBarcodeList(field)[0];
       const suffix = field.samplingCell?.cellIndex
         ? String(field.samplingCell.cellIndex)
         : (exportSampleKey.split('.').pop() || '');
 
       setValue(row, hHeader, 'lfd.Nr. /GPS', exportSampleKey);
-      if (field.barcode) {
-        setValue(row, hHeader, 'Tütenbarcode', field.barcode);
+      if (primaryBarcode) {
+        setValue(row, hHeader, 'Tütenbarcode', primaryBarcode);
+        setValue(row, hHeader, 'LOT. BARCODE', primaryBarcode);
       }
       setValue(row, hHeader, 'Schlagnr.', exportSourceBaseId);
       setValue(row, hHeader, 'Teilschlagnr.', suffix);

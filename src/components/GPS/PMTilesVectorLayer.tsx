@@ -11,6 +11,7 @@ interface PMTilesVectorLayerProps {
   theme?: 'light' | 'dark';
   schema?: 'protomaps' | 'openmaptiles';
   disableLabels?: boolean;
+  noWrap?: boolean;
   keepBuffer?: number;
   updateWhenIdle?: boolean;
   updateWhenZooming?: boolean;
@@ -27,6 +28,7 @@ export default function PMTilesVectorLayer({
   theme = 'light',
   schema = 'protomaps',
   disableLabels = false,
+  noWrap = false,
   keepBuffer,
   updateWhenIdle,
   updateWhenZooming,
@@ -102,7 +104,6 @@ export default function PMTilesVectorLayer({
         const waterStroke = '#7fb0e3';
         const roadCasing = '#8f8f8f';
         const roadFill = '#ffffff';
-        const minorRoad = '#f5f5f5';
         const pathColor = '#d4b891';
         const highway = '#f2b07e';
         const motorway = '#f08a5d';
@@ -562,6 +563,7 @@ export default function PMTilesVectorLayer({
         paint_rules,
         label_rules,
         backgroundColor,
+        noWrap,
         keepBuffer,
         updateWhenIdle,
         updateWhenZooming,
@@ -596,6 +598,7 @@ export default function PMTilesVectorLayer({
     theme,
     schema,
     disableLabels,
+    noWrap,
     keepBuffer,
     updateWhenIdle,
     updateWhenZooming,

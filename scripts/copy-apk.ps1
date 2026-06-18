@@ -1,6 +1,7 @@
 # Copy APK to public folder for download
 $apkSource = "android\app\build\outputs\apk\debug\app-debug.apk"
-$apkDest = "public\gps-tracker.apk"
+$apkDest = "public\TECHBYP-GPS Pro.apk"
+$downloadUrl = "http://localhost:5173/TECHBYP-GPS%20Pro.apk"
 
 if (Test-Path $apkSource) {
     Write-Host "📦 Copying APK to public folder..." -ForegroundColor Cyan
@@ -9,7 +10,7 @@ if (Test-Path $apkSource) {
     $size = (Get-Item $apkDest).Length / 1MB
     Write-Host "✅ APK copied successfully! Size: $([math]::Round($size, 2)) MB" -ForegroundColor Green
     Write-Host "📍 Location: $apkDest" -ForegroundColor Gray
-    Write-Host "`n💡 The APK is now available at: http://localhost:5173/gps-tracker.apk" -ForegroundColor Cyan
+    Write-Host "`n💡 The APK is now available at: $downloadUrl" -ForegroundColor Cyan
 } else {
     Write-Host "❌ APK not found at: $apkSource" -ForegroundColor Red
     Write-Host "💡 Build the APK first in Android Studio" -ForegroundColor Yellow

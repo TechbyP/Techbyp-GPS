@@ -11,6 +11,7 @@ interface TrackingStateOptions {
 }
 
 export function useTrackingState(options: TrackingStateOptions = {}) {
+  const { onTrackingStarted, onTrackingStopped, onSampleAdded, onError } = options;
   const [isStartingTracking, setIsStartingTracking] = useState(false);
   const [isAddingSample, setIsAddingSample] = useState(false);
   const [sampleCount, setSampleCount] = useState(0);
@@ -82,9 +83,9 @@ export function useTrackingState(options: TrackingStateOptions = {}) {
       ));
     } catch (error) {
       console.error('Error saving GPS point:', error);
-      options.onError?.('Failed to save GPS point');
+      onError?.('Failed to save GPS point');
     }
-  }, [currentTrack, calculateDistance, setTracks, options.onError]);
+  }, [currentTrack, calculateDistance, setTracks, onError]);
 
   const startTracking = useCallback(async (
     projectId: string | number,
@@ -110,16 +111,16 @@ export function useTrackingState(options: TrackingStateOptions = {}) {
       const trackDetail = { ...newTrack, gps_points: [], samples: [] };
       setTracks(prev => [...prev, trackDetail]);
       
-      options.onTrackingStarted?.(newTrack);
+      onTrackingStarted?.(newTrack);
       return newTrack;
     } catch (error) {
       console.error('Error starting track:', error);
-      options.onError?.('Failed to start tracking');
+      onError?.('Failed to start tracking');
       throw error;
     } finally {
       setIsStartingTracking(false);
     }
-  }, [setTracks, options.onTrackingStarted, options.onError]);
+  }, [setTracks, onTrackingStarted, onError, tracks.length]);
 
   const stopTracking = useCallback(async (projectId?: string | number) => {
     if (!currentTrack) return;
@@ -133,12 +134,12 @@ export function useTrackingState(options: TrackingStateOptions = {}) {
         await loadTracks(projectId.toString());
       }
       
-      options.onTrackingStopped?.();
+      onTrackingStopped?.();
     } catch (error) {
       console.error('Error stopping track:', error);
-      options.onError?.('Failed to stop tracking');
+      onError?.('Failed to stop tracking');
     }
-  }, [currentTrack, loadTracks, options.onTrackingStopped, options.onError]);
+  }, [currentTrack, loadTracks, onTrackingStopped, onError]);
 
   const addSample = useCallback(async (position: GpsPosition, sampleName?: string) => {
     if (!currentTrack || !position) return;
@@ -176,16 +177,16 @@ export function useTrackingState(options: TrackingStateOptions = {}) {
           : t
       ));
       
-      options.onSampleAdded?.(newSampleNumber);
+      onSampleAdded?.(newSampleNumber);
       return newSample;
     } catch (error) {
       console.error('Error adding sample:', error);
-      options.onError?.('Failed to add sample');
+      onError?.('Failed to add sample');
       throw error;
     } finally {
       setIsAddingSample(false);
     }
-  }, [currentTrack, sampleCount, setTracks, options.onSampleAdded, options.onError]);
+  }, [currentTrack, sampleCount, setTracks, onSampleAdded, onError]);
 
   const deleteTrack = useCallback(async (trackId: number) => {
     try {
@@ -193,10 +194,10 @@ export function useTrackingState(options: TrackingStateOptions = {}) {
       setTracks(prev => prev.filter(t => t !== null && t.id !== trackId));
     } catch (error) {
       console.error('Error deleting track:', error);
-      options.onError?.('Failed to delete track');
+      onError?.('Failed to delete track');
       throw error;
     }
-  }, [setTracks, options.onError]);
+  }, [setTracks, onError]);
 
   const assignTrack = useCallback(async (trackId: number, fieldBoundaryId: number | null) => {
     try {
@@ -212,10 +213,10 @@ export function useTrackingState(options: TrackingStateOptions = {}) {
       ));
     } catch (error) {
       console.error('Error assigning track:', error);
-      options.onError?.('Failed to assign track');
+      onError?.('Failed to assign track');
       throw error;
     }
-  }, [setTracks, options.onError]);
+  }, [setTracks, onError]);
 
   return {
     // State

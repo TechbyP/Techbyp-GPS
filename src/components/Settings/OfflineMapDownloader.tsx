@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { getTileCacheStats, clearTileCache } from '../../services/tileDownloadService';
 import { tileDownloader } from '../../services/offlineTileDownloader';
-import { OFFLINE_MAP_PACKS, OfflineMapPack } from '../../config/offlineMapPacks';
+import { OFFLINE_MAP_PACKS } from '../../config/offlineMapPacks';
 import { getBundledGermanyPmtilesUrl } from '../../utils/tileUtils';
 import toast from 'react-hot-toast';
 import { useLanguage } from '../../hooks/useLanguage';
@@ -65,25 +65,16 @@ export default function OfflineMapDownloader() {
   const [selectedPackId, setSelectedPackId] = useState<string>(() => OFFLINE_MAP_PACKS[0]?.id || '');
   const offlinePmtilesUrl = getBundledGermanyPmtilesUrl();
 
-  if (offlineTilesDisabledByEnv) {
-    return null;
-  }
-
-  useEffect(() => {
-    loadCacheStats();
-    checkPmtilesAvailability();
-  }, []);
-
-  const loadCacheStats = async () => {
+  const loadCacheStats = useCallback(async () => {
     try {
       const stats = await getTileCacheStats();
       setCacheStats(stats);
     } catch (error) {
       console.error('Failed to load cache stats:', error);
     }
-  };
+  }, []);
 
-  const checkPmtilesAvailability = async () => {
+  const checkPmtilesAvailability = useCallback(async () => {
     try {
       if (Capacitor.isNativePlatform()) {
         const uri = await tileDownloader.getLocalTileUri();
@@ -104,7 +95,16 @@ export default function OfflineMapDownloader() {
     } catch {
       setPmtilesAvailable(false);
     }
-  };
+  }, [offlinePmtilesUrl]);
+
+  useEffect(() => {
+    if (offlineTilesDisabledByEnv) {
+      return;
+    }
+
+    void loadCacheStats();
+    void checkPmtilesAvailability();
+  }, [loadCacheStats, checkPmtilesAvailability]);
 
   const handleDownloadPmtiles = async () => {
     if (!Capacitor.isNativePlatform()) {
@@ -214,6 +214,10 @@ export default function OfflineMapDownloader() {
       toast.error(t('offlineMapDownloader.cacheClearFailed'));
     }
   };
+
+  if (offlineTilesDisabledByEnv) {
+    return null;
+  }
 
   return (
     <div className="space-y-6">
@@ -400,9 +404,8 @@ function latLonToTile(lat: number, lon: number, zoom: number) {
   return { x, y, zoom };
 }
 
-async function downloadTile(x: number, y: number, zoom: number) {
+async function downloadTile(_x: number, _y: number, _zoom: number) {
   // Use the tile download service
-  const { requestTilesForViewport } = await import('../../services/tileDownloadService');
   // This is a simplified version - in production you'd call a proper download function
   return Promise.resolve();
 }

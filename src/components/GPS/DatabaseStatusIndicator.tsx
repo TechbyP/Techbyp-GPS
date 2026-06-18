@@ -54,7 +54,7 @@ export const DatabaseStatusIndicator = () => {
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
       if (completeTimeoutRef.current) clearTimeout(completeTimeoutRef.current);
     };
-  }, []);
+  }, [syncing]);
 
   // Auto-expand when online status changes
   useEffect(() => {

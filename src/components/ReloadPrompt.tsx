@@ -106,7 +106,7 @@ function ActiveReloadPrompt() {
         position: 'bottom-right',
       })
     }
-  }, [needRefresh, setNeedRefresh, updateServiceWorker])
+  }, [needRefresh, setNeedRefresh, updateServiceWorker, t])
 
   return null
 }

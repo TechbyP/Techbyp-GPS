@@ -60,6 +60,40 @@ export const getBlankTileUrl = (): string => {
 };
 
 /**
+ * Only enable anonymous CORS for same-origin or known CORS-safe tile hosts.
+ * Public OSM raster tiles do not send ACAO headers, so forcing crossorigin on
+ * those requests turns otherwise valid <img> loads into hard failures.
+ */
+export const getTileLayerCrossOrigin = (tileUrl?: string | null): 'anonymous' | undefined => {
+  if (!tileUrl) {
+    return undefined;
+  }
+
+  if (tileUrl.startsWith('/')) {
+    return 'anonymous';
+  }
+
+  const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://example.invalid';
+
+  try {
+    const normalizedUrl = tileUrl.replace(/:\/\/\{s\}\./i, '://');
+    const parsedUrl = new URL(normalizedUrl, baseOrigin);
+
+    if (parsedUrl.origin === baseOrigin) {
+      return 'anonymous';
+    }
+
+    if (/^(?:.+\.)?server\.arcgisonline\.com$/i.test(parsedUrl.hostname)) {
+      return 'anonymous';
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+};
+
+/**
  * Create tile error handler that forces blank tiles
  */
 export const createTileErrorHandler = (layerId: string = 'unknown') => (error: any) => {
@@ -135,7 +169,7 @@ export const resolveTileUrl = (
   baseUrl: string,
   options: TileUrlOptions
 ): string => {
-  const { isCapacitor, forceOffline, requiresOnline } = options;
+  const { isCapacitor, requiresOnline } = options;
   
   // For offline layers in Capacitor, use localhost
   if (!requiresOnline && isCapacitor && baseUrl.includes('/tiles/germany/')) {

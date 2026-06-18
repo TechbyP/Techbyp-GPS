@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<import>
+  <kundeninformation>
+    <kunde adrnr="127789"/>
+    <auftrag standarduntersuchungsumfang="DED">
+      <auftraggeber adrnr="100000/35"/>
+      <kostentraeger adrnr="100000"/>
+      <durchschriftenempfaenger adrnr="100000/97"/>
+      <probe fremdkennung="3182440010030408">
+        <kennzeichnung_probe element="piafKennung" wertlang="3182440010030408"/>
+        <kennzeichnung_probe element="Ort" wertlang="Testhausen"/>
+        <kennzeichnung_probe element="Serie" wertlang="Testserie"/>
+        <kennzeichnung_probe element="Termin" wertlang="Testtermin"/>
+        <kennzeichnung_probe element="Bezeichnung" wertlang="ohne organische Dgg./N2: optimale N-Dgg."/>
+        <kennzeichnung_probe element="Schicht von" wertlang="0"/>
+        <kennzeichnung_probe element="Wdh" wertlang="1"/>
+        <kennzeichnung_probe element="Kürzel" wertlang="1/3/*"/>
+        <kennzeichnung_probe element="Gruppenart" wertlang="AB"/>
+        <kennzeichnung_probe element="Objekt" wertlang="BO"/>
+        <zusatzpruefparameter kennung="CAT_Boden"/>
+        <zusatzpruefparameter kennung="Na-Gehalt"/>
+        <zusatzpruefparameter kennung="Humus"/>
+        <zusatzpruefparameter kennung="Gesamt_N"/>
+      </probe>
+    </auftrag>
+    <auftrag standarduntersuchungsumfang="DED">
+      <auftraggeber adrnr="100000/35"/>
+      <kostentraeger adrnr="100000"/>
+      <durchschriftenempfaenger adrnr="100000/97"/>
+      <probe fremdkennung="3182440020030405">
+        <kennzeichnung_probe element="piafKennung" wertlang="3182440020030405"/>
+        <kennzeichnung_probe element="Ort" wertlang="Testhausen"/>
+        <kennzeichnung_probe element="Serie" wertlang="Testserie"/>
+        <kennzeichnung_probe element="Termin" wertlang="Testtermin"/>
+        <kennzeichnung_probe element="Bezeichnung" wertlang="Kompost/N2: optimale N-Dgg."/>
+        <kennzeichnung_probe element="Schicht von" wertlang="0"/>
+        <kennzeichnung_probe element="Wdh" wertlang="1"/>
+        <kennzeichnung_probe element="Kürzel" wertlang="2/3/*"/>
+        <kennzeichnung_probe element="Gruppenart" wertlang="AB"/>
+        <kennzeichnung_probe element="Objekt" wertlang="BO"/>
+        <zusatzpruefparameter kennung="CAT_Boden"/>
+        <zusatzpruefparameter kennung="Na-Gehalt"/>
+        <zusatzpruefparameter kennung="Humus"/>
+        <zusatzpruefparameter kennung="Gesamt_N"/>
+      </probe>
+    </auftrag>
+    <auftrag standarduntersuchungsumfang="DED">
+      <auftraggeber adrnr="100000/35"/>
+      <kostentraeger adrnr="100000"/>
+      <durchschriftenempfaenger adrnr="100000/97"/>
+      <probe fremdkennung="3182440030030402">
+        <kennzeichnung_probe element="piafKennung" wertlang="3182440030030402"/>
+        <kennzeichnung_probe element="Ort" wertlang="Testhausen"/>
+        <kennzeichnung_probe element="Serie" wertlang="Testserie"/>
+        <kennzeichnung_probe element="Termin" wertlang="Testtermin"/>
+        <kennzeichnung_probe element="Bezeichnung" wertlang="Champignonerde/N2: optimale N-Dgg."/>
+        <kennzeichnung_probe element="Schicht von" wertlang="0"/>
+        <kennzeichnung_probe element="Wdh" wertlang="1"/>
+        <kennzeichnung_probe element="Kürzel" wertlang="3/3/*"/>
+        <kennzeichnung_probe element="Gruppenart" wertlang="AB"/>
+        <kennzeichnung_probe element="Objekt" wertlang="BO"/>
+        <zusatzpruefparameter kennung="CAT_Boden"/>
+        <zusatzpruefparameter kennung="Na-Gehalt"/>
+        <zusatzpruefparameter kennung="Humus"/>
+        <zusatzpruefparameter kennung="Gesamt_N"/>
+      </probe>
+    </auftrag>
+    <auftrag standarduntersuchungsumfang="DED">
+      <auftraggeber adrnr="100000/35"/>
+      <kostentraeger adrnr="100000"/>
+      <durchschriftenempfaenger adrnr="100000"/>
+      <probe fremdkennung="3182440040030409">
+        <kennzeichnung_probe element="piafKennung" wertlang="3182440040030409"/>
+        <kennzeichnung_probe element="Ort" wertlang="Testhausen"/>
+        <kennzeichnung_probe element="Serie" wertlang="Testserie"/>
+        <kennzeichnung_probe element="Termin" wertlang="Testtermin"/>
+        <kennzeichnung_probe element="Bezeichnung" wertlang="Kompost+Gärrest/N2: optimale N-Dgg."/>
+        <kennzeichnung_probe element="Schicht von" wertlang="0"/>
+        <kennzeichnung_probe element="Wdh" wertlang="1"/>
+        <kennzeichnung_probe element="Kürzel" wertlang="4/3/*"/>
+        <kennzeichnung_probe element="Gruppenart" wertlang="AB"/>
+        <kennzeichnung_probe element="Objekt" wertlang="BO"/>
+        <zusatzpruefparameter kennung="CAT_Boden"/>
+        <zusatzpruefparameter kennung="Na-Gehalt"/>
+        <zusatzpruefparameter kennung="Humus"/>
+        <zusatzpruefparameter kennung="Gesamt_N"/>
+      </probe>
+    </auftrag>
+    <auftrag standarduntersuchungsumfang="DED">
+      <auftraggeber adrnr="100000/35"/>
+      <kostentraeger adrnr="100000"/>
+      <durchschriftenempfaenger adrnr="100000"/>
+      <probe fremdkennung="3182440050030406">
+        <kennzeichnung_probe element="piafKennung" wertlang="3182440050030406"/>
+        <kennzeichnung_probe element="Ort" wertlang="Testhausen"/>
+        <kennzeichnung_probe element="Serie" wertlang="Testserie"/>
+        <kennzeichnung_probe element="Termin" wertlang="Testtermin"/>
+        <kennzeichnung_probe element="Bezeichnung" wertlang="Gärrest/N2: optimale N-Dgg."/>
+        <kennzeichnung_probe element="Schicht von" wertlang="0"/>
+        <kennzeichnung_probe element="Wdh" wertlang="1"/>
+        <kennzeichnung_probe element="Kürzel" wertlang="5/3/*"/>
+        <kennzeichnung_probe element="Gruppenart" wertlang="AB"/>
+        <kennzeichnung_probe element="Objekt" wertlang="BO"/>
+        <zusatzpruefparameter kennung="CAT_Boden"/>
+        <zusatzpruefparameter kennung="Na-Gehalt"/>
+        <zusatzpruefparameter kennung="Humus"/>
+        <zusatzpruefparameter kennung="Gesamt_N"/>
+      </probe>
+    </auftrag>
+  </kundeninformation>
+</import>

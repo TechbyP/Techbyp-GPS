@@ -20,6 +20,12 @@ interface OptimizationSettings {
   dimScreen: boolean;
 }
 
+interface BrowserBatteryManager {
+  level: number;
+  charging: boolean;
+  addEventListener: (event: 'levelchange' | 'chargingchange', listener: () => void) => void;
+}
+
 class BatteryOptimizationService {
   private isNative = Capacitor.isNativePlatform();
   private currentSettings: OptimizationSettings = this.getDefaultSettings();
@@ -73,13 +79,20 @@ class BatteryOptimizationService {
     }
   }
 
+  private async getBrowserBattery(): Promise<BrowserBatteryManager | null> {
+    const batteryNavigator = navigator as Navigator & {
+      getBattery?: () => Promise<BrowserBatteryManager>;
+    };
+
+    return (await batteryNavigator.getBattery?.()) ?? null;
+  }
+
   /**
    * Initialize browser battery API
    */
   private async initializeBrowserBattery(): Promise<void> {
     try {
-      // @ts-ignore - Battery API not in all browsers
-      const battery = await navigator.getBattery?.();
+      const battery = await this.getBrowserBattery();
       if (!battery) return;
 
       const updateBatteryInfo = () => {
@@ -135,8 +148,7 @@ class BatteryOptimizationService {
   async getBatteryInfo(): Promise<BatteryInfo | null> {
     try {
       if (!this.isNative) {
-        // @ts-ignore
-        const battery = await navigator.getBattery?.();
+        const battery = await this.getBrowserBattery();
         if (battery) {
           return {
             level: battery.level * 100,

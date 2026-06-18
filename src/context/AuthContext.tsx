@@ -6,12 +6,19 @@ import {
   onAuthStateChanged,
   User,
 } from 'firebase/auth';
+import toast from 'react-hot-toast';
 import { auth } from '../firebase';
-import { hybridDB } from '../services/hybridDatabase';
+import { userProfileService } from '../services/userProfileService';
 import { firebaseGPS } from '../services/firebaseSync';
-import { debugAuthPersistence } from '../utils/authDebug';
+import { hybridDB } from '../services/hybridDatabase';
 import { secureStorage } from '../utils/secureStorage';
 import { clearStartupRecoveryMarker, triggerAutomaticStartupRecovery } from '../utils/startupRecovery';
+import {
+  getUserAccessSnapshot,
+  getUserAccessState,
+  type UserAccessShape,
+  type UserAccessState,
+} from '../utils/userAccess';
 
 // Simple translation helper for AuthContext (since we can't use hooks in contexts)
 const getAuthErrorMessage = (key: string, fallback: string): string => {
@@ -26,14 +33,18 @@ const getAuthErrorMessage = (key: string, fallback: string): string => {
         'error.auth.loginFailed': 'Login failed',
         'error.auth.logoutFailed': 'Logout failed',
         'error.auth.contextError': 'useAuth must be used within an AuthProvider',
-        'error.auth.offlineLogin': 'Cannot login offline: No cached session found for this email. Connect to internet to login first.'
+        'error.auth.offlineLogin': 'Cannot login offline: No cached session found for this email. Connect to internet to login first.',
+        'error.auth.accountDisabled': 'This account has been disabled. Contact your administrator.',
+        'error.auth.accountExpired': 'This account access has expired. Contact your administrator.'
       },
       'de': {
         'error.auth.signupFailed': 'Anmeldung fehlgeschlagen',
         'error.auth.loginFailed': 'Anmeldung fehlgeschlagen',
         'error.auth.logoutFailed': 'Abmeldung fehlgeschlagen',
         'error.auth.contextError': 'useAuth muss innerhalb eines AuthProvider verwendet werden',
-        'error.auth.offlineLogin': 'Offline-Anmeldung nicht möglich: Keine zwischengespeicherte Sitzung für diese E-Mail gefunden. Verbinden Sie sich zuerst mit dem Internet.'
+        'error.auth.offlineLogin': 'Offline-Anmeldung nicht möglich: Keine zwischengespeicherte Sitzung für diese E-Mail gefunden. Verbinden Sie sich zuerst mit dem Internet.',
+        'error.auth.accountDisabled': 'Dieses Konto wurde deaktiviert. Bitte wenden Sie sich an Ihren Administrator.',
+        'error.auth.accountExpired': 'Der Zugriff für dieses Konto ist abgelaufen. Bitte wenden Sie sich an Ihren Administrator.'
       }
     };
     
@@ -41,6 +52,26 @@ const getAuthErrorMessage = (key: string, fallback: string): string => {
   } catch {
     return fallback;
   }
+};
+
+const buildOfflineUser = (uid: string, email: string): User => ({
+  uid,
+  email,
+  emailVerified: true,
+  isAnonymous: false,
+  displayName: null,
+  photoURL: null,
+  phoneNumber: null,
+  providerId: 'firebase',
+  providerData: []
+} as User);
+
+const getAccessBlockedMessage = (accessState: UserAccessState): string => {
+  if (accessState.status === 'disabled') {
+    return getAuthErrorMessage('error.auth.accountDisabled', 'This account has been disabled. Contact your administrator.');
+  }
+
+  return getAuthErrorMessage('error.auth.accountExpired', 'This account access has expired. Contact your administrator.');
 };
 
 interface AuthContextType {
@@ -60,6 +91,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [authInitialized, setAuthInitialized] = useState(false); // Prevent double initialization
+
+  const resolveUserAccess = async (uid: string, email?: string | null) => {
+    const profile = await userProfileService.getProfile(uid);
+    if (profile) {
+      return {
+        accessSnapshot: getUserAccessSnapshot(profile),
+        accessState: getUserAccessState(profile)
+      };
+    }
+
+    const offlineAuth = await secureStorage.getOfflineAuth();
+    if (offlineAuth && offlineAuth.uid === uid && (!email || offlineAuth.email === email)) {
+      return {
+        accessSnapshot: getUserAccessSnapshot(offlineAuth),
+        accessState: getUserAccessState(offlineAuth)
+      };
+    }
+
+    const accessSnapshot: UserAccessShape = getUserAccessSnapshot(null);
+    return {
+      accessSnapshot,
+      accessState: getUserAccessState(accessSnapshot)
+    };
+  };
+
+  const blockAccess = async (accessState: UserAccessState, shouldNotify: boolean = true) => {
+    const message = getAccessBlockedMessage(accessState);
+
+    await secureStorage.removeOfflineAuth();
+    setUser(null);
+    setIsAuthReady(true);
+    setLoading(false);
+    void hybridDB.setUserId('');
+
+    if (shouldNotify) {
+      toast.error(message);
+    }
+
+    return message;
+  };
 
   // Listen to auth state changes
   useEffect(() => {
@@ -88,16 +159,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
     
     window.addEventListener('offline-auth', handleOfflineAuth as EventListener);
-    
-    // Test internet connectivity using Firebase ping to avoid cross-domain/firewall issues
-    const testConnectivity = async (): Promise<boolean> => {
-      try {
-        const result = await firebaseGPS.ping();
-        return !!result.success;
-      } catch {
-        return false;
-      }
-    };
 
     // ✅ PRIORITY 4 FIX: Single auth initialization path
     const initializeAuth = async () => {
@@ -125,13 +186,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
         
-        setUser(currentUser);
-        
         // Update hybrid database service with user ID
         if (currentUser?.uid) {
+          const { accessSnapshot, accessState } = await resolveUserAccess(currentUser.uid, currentUser.email);
+
+          if (accessState.blocked) {
+            await blockAccess(accessState);
+            try {
+              await signOut(auth);
+            } catch (error) {
+              console.warn('🔐 Failed to sign out blocked user:', error);
+            }
+            clearStartupRecoveryMarker();
+            return;
+          }
+
+          setUser(currentUser);
+
           // Non-blocking: Let database initialization happen in background
           void hybridDB.setUserId(currentUser.uid).catch(err => {
             console.error('⚠️ Failed to set user ID in HybridDB:', err);
+          });
+
+          void secureStorage.storeOfflineAuth(currentUser.uid, currentUser.email || '', accessSnapshot).catch(err => {
+            console.error('⚠️ Failed to store offline auth snapshot:', err);
           });
 
           // Ensure user document exists and update last active
@@ -146,7 +224,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Allow offline cache access only with a verified secure token
           secureStorage.getOfflineAuth()
             .then(token => {
-              if (!navigator.onLine && token) {
+              const accessState = token ? getUserAccessState(token) : null;
+
+              if (!navigator.onLine && token && accessState && !accessState.blocked) {
                 void hybridDB.setUserId(token.uid);
                 console.log('ℹ️  Offline mode using secure token UID:', token.uid);
               } else {
@@ -201,21 +281,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const offlineAuth = await secureStorage.getOfflineAuth();
         
         if (offlineAuth && !authResolved) {
+          const accessState = getUserAccessState(offlineAuth);
+          if (accessState.blocked) {
+            authResolved = true;
+            await blockAccess(accessState);
+            return;
+          }
+
           console.log('🔐 Auto-login with secure offline token');
           authResolved = true;
-          
-          const offlineUser = {
-            uid: offlineAuth.uid,
-            email: offlineAuth.email,
-            emailVerified: true,
-            isAnonymous: false,
-            displayName: null,
-            photoURL: null,
-            phoneNumber: null,
-            providerId: 'firebase',
-            providerData: []
-          } as User;
-          
+
+          const offlineUser = buildOfflineUser(offlineAuth.uid, offlineAuth.email);
+
           setUser(offlineUser);
           void hybridDB.setUserId(offlineAuth.uid);
           setIsAuthReady(true);
@@ -260,7 +337,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener('offline-auth', handleOfflineAuth as EventListener);
       if (unsubscribe) unsubscribe();
     };
-  }, []);
+  }, [authInitialized]);
 
   const signup = async (email: string, password: string) => {
     try {
@@ -269,7 +346,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await hybridDB.setUserId(userCredential.user.uid);
       
       // Store secure offline token (NO PASSWORD)
-      await secureStorage.storeOfflineAuth(userCredential.user.uid, email);
+      await secureStorage.storeOfflineAuth(userCredential.user.uid, email, getUserAccessSnapshot(null));
       
       // Create user document in Firestore
       try {
@@ -320,18 +397,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const offlineAuth = await secureStorage.getOfflineAuth();
       
       if (offlineAuth && offlineAuth.email === email) {
+        const accessState = getUserAccessState(offlineAuth);
+        if (accessState.blocked) {
+          throw new Error(await blockAccess(accessState, false));
+        }
+
         console.log('🔄 Offline login using secure token');
-        const offlineUser = {
-          uid: offlineAuth.uid,
-          email: offlineAuth.email,
-          emailVerified: true,
-          isAnonymous: false,
-          displayName: null,
-          photoURL: null,
-          phoneNumber: null,
-          providerId: 'firebase',
-          providerData: []
-        } as User;
+        const offlineUser = buildOfflineUser(offlineAuth.uid, offlineAuth.email);
         
         setUser(offlineUser);
         await hybridDB.setUserId(offlineAuth.uid);
@@ -354,6 +426,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log('🔐 [AUTH] ✅ Firebase authentication successful!');
       console.log('🔐 [AUTH] User UID:', userCredential.user.uid);
       console.log('🔐 [AUTH] User email:', userCredential.user.email);
+
+      const { accessSnapshot, accessState } = await resolveUserAccess(userCredential.user.uid, userCredential.user.email);
+      if (accessState.blocked) {
+        const message = await blockAccess(accessState, false);
+        await signOut(auth);
+        throw new Error(message);
+      }
       
       // Force refresh token to get latest custom claims (admin role, etc.)
       try {
@@ -374,7 +453,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       // Store secure offline token (NO PASSWORD)
       console.log('🔐 [AUTH] Storing offline authentication token...');
-      await secureStorage.storeOfflineAuth(userCredential.user.uid, email);
+      await secureStorage.storeOfflineAuth(userCredential.user.uid, email, accessSnapshot);
       console.log('🔐 [AUTH] ✅ Offline token stored');
       
       // Update user last active time
@@ -419,18 +498,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const offlineAuth = await secureStorage.getOfflineAuth();
         
         if (offlineAuth && offlineAuth.email === email) {
+          const accessState = getUserAccessState(offlineAuth);
+          if (accessState.blocked) {
+            throw new Error(await blockAccess(accessState, false));
+          }
+
           console.log('🔄 Fallback to offline login');
-          const offlineUser = {
-            uid: offlineAuth.uid,
-            email: offlineAuth.email,
-            emailVerified: true,
-            isAnonymous: false,
-            displayName: null,
-            photoURL: null,
-            phoneNumber: null,
-            providerId: 'firebase',
-            providerData: []
-          } as User;
+          const offlineUser = buildOfflineUser(offlineAuth.uid, offlineAuth.email);
           
           setUser(offlineUser);
           await hybridDB.setUserId(offlineAuth.uid);
@@ -471,7 +545,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         login,
         logout,
         // Permit cached/offline access when we have a remembered UID but no live session
-        isAuthenticated: !!user || (!navigator.onLine && !!localStorage.getItem('lastKnownUid')),
+        isAuthenticated: !!user,
       }}
     >
       {children}

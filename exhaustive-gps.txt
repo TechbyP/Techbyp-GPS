@@ -1,0 +1,45 @@
+FILE: src/components/GPS/MapView.tsx
+  L1016: React Hook useEffect has a missing dependency: 'trackingCenterDoneRef'. Either include it or remove the dependency array.
+  L1054: React Hook useEffect has missing dependencies: 'boundaryFocusDoneRef', 'lastFocusedBoundaryIdRef', and 'lastFocusedBoundaryRequestKeyRef'. Either include them or remove the dependency array.
+  L1079: React Hook useEffect has a missing dependency: 'hasZoomedToBoundariesRef'. Either include it or remove the dependency array.
+  L1087: React Hook useEffect has a missing dependency: 'hasZoomedRef'. Either include it or remove the dependency array.
+  L2826: React Hook useCallback has a missing dependency: 'isOnline'. Either include it or remove the dependency array.
+  L2913: React Hook useEffect has a missing dependency: 'centerOnCurrentLocation'. Either include it or remove the dependency array.
+
+FILE: src/hooks/useTrackingState.ts
+  L87: React Hook useCallback has a missing dependency: 'options'. Either include it or remove the dependency array.
+  L122: React Hook useCallback has missing dependencies: 'options' and 'tracks.length'. Either include them or remove the dependency array.
+  L141: React Hook useCallback has a missing dependency: 'options'. Either include it or remove the dependency array.
+  L188: React Hook useCallback has a missing dependency: 'options'. Either include it or remove the dependency array.
+  L199: React Hook useCallback has a missing dependency: 'options'. Either include it or remove the dependency array.
+  L218: React Hook useCallback has a missing dependency: 'options'. Either include it or remove the dependency array.
+
+FILE: src/components/GPS/GPSTracker.tsx
+  L1316: React Hook useEffect has a missing dependency: 'loadProjects'. Either include it or remove the dependency array.
+  L1344: React Hook useEffect has a missing dependency: 'loadProjects'. Either include it or remove the dependency array.
+  L1792: React Hook useEffect has a missing dependency: 'loadProjects'. Either include it or remove the dependency array.
+  L2021: React Hook useCallback has a missing dependency: 'startTrackingProcess'. Either include it or remove the dependency array.
+  L2322: The 'handleAddSample' function makes the dependencies of useEffect Hook (at line 2453) change on every render. To fix this, wrap the definition of 'handleAddSample' in its own useCallback() Hook.
+
+FILE: src/hooks/useDeviceState.ts
+  L24: React Hook useCallback has a missing dependency: 'options'. Either include it or remove the dependency array.
+  L34: React Hook useCallback has a missing dependency: 'options'. Either include it or remove the dependency array.
+  L45: React Hook useCallback has a missing dependency: 'options'. Either include it or remove the dependency array.
+  L62: React Hook useCallback has a missing dependency: 'options'. Either include it or remove the dependency array.
+  L110: React Hook useEffect has a missing dependency: 'externalGpsPosition'. Either include it or remove the dependency array.
+
+FILE: src/components/GPS/NavigationPanel.tsx
+  L424: React Hook useCallback has missing dependencies: 'language' and 'translateInstruction'. Either include them or remove the dependency array.
+  L556: React Hook useCallback has a missing dependency: 't'. Either include it or remove the dependency array.
+  L591: React Hook useCallback has a missing dependency: 't'. Either include it or remove the dependency array.
+  L597: React Hook useCallback has a missing dependency: 't'. Either include it or remove the dependency array.
+
+FILE: src/components/GPS/Navigation/NavigationMap.tsx
+  L339: React Hook useEffect has a missing dependency: 'headingOverride'. Either include it or remove the dependency array.
+  L929: React Hook useEffect has an unnecessary dependency: 'offlinePmtilesUrl'. Either exclude it or remove the dependency array. Outer scope values like 'offlinePmtilesUrl' aren't valid dependencies because mutating them doesn't re-render the component.
+  L994: React Hook useCallback has a missing dependency: 'isOnline'. Either include it or remove the dependency array.
+
+FILE: src/components/GPS/FieldBoundaryEditor.tsx
+  L266: React Hook useEffect has a missing dependency: 'updateDrawLocalization'. Either include it or remove the dependency array.
+  L617: React Hook useEffect has a missing dependency: 'loadBoundaries'. Either include it or remove the dependency array.
+

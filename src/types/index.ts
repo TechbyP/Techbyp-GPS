@@ -24,6 +24,18 @@ export type Bundesland =
   | 'Thüringen';
 
 export type UserRole = 'admin' | 'client' | 'consultant' | 'lab_manager' | 'technician';
+export type GpsFieldSamplingStatus = 'pending' | 'in_progress' | 'completed';
+
+export interface GpsFieldBoundaryProperties extends Record<string, any> {
+  sampling_status?: GpsFieldSamplingStatus;
+  sampling_locked?: boolean;
+  sampling_completed_at?: string;
+  sampling_completed_by?: string;
+  barcode_primary?: string;
+  barcode_count?: number;
+  barcode_list?: string;
+  barcode_values?: string[];
+}
 
 export interface GpsProject {
   id: number | string; // Firebase IDs are strings, local IDs are "local_xxx"
@@ -182,7 +194,7 @@ export interface GpsFieldBoundary {
   geometry_type: 'Polygon' | 'MultiPolygon' | 'Point' | 'LineString';
   coordinates: number[][][] | number[][][][];
   render_meta?: GpsFieldBoundaryRenderMeta;
-  properties?: Record<string, any>;
+  properties?: GpsFieldBoundaryProperties;
   color?: string;
   created_at: string;
   created_by?: string;
@@ -311,9 +323,6 @@ export interface DeviceScanResult {
   services?: string[];
 }
 
-export interface GpsPositionUpdate extends GpsPosition {
-  // Extends GpsPosition with no additional fields
-  // All properties inherited from GpsPosition
-}
+export type GpsPositionUpdate = GpsPosition;
 
 export * from './orders';

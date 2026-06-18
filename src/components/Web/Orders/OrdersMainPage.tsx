@@ -1,6 +1,6 @@
-import { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect, type ChangeEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, User, LogOut, Settings, Square, Pentagon, ChevronDown, Trash2, ShieldCheck, Menu, ArrowRight, FileText, Send, Pencil } from 'lucide-react';
+import { Plus, User, LogOut, Settings, Square, Pentagon, ChevronDown, Trash2, ShieldCheck, Menu, ArrowRight, FileText, Send, Pencil, Download, Tag, Upload } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDarkMode } from '../../../hooks/useDarkMode';
 import { useLanguage } from '../../../hooks/useLanguage';
@@ -10,12 +10,32 @@ import OrdersMapView from './OrdersMapView';
 import OrderWizard from './OrderWizard';
 import area from '@turf/area';
 import type { DrawnField } from './types';
-import type { LufaStandarduntersuchungsumfang, OrderDraft, OrderLabProvider } from '../../../types';
+import type {
+  GpsFieldBoundaryProperties,
+  GpsFieldSample,
+  LufaStandarduntersuchungsumfang,
+  OrderDraft,
+  OrderLabProvider,
+  PbsProfile,
+} from '../../../types';
 import { userProfileService, type UserProfile } from '../../../services/userProfileService';
 import { createOrderDraft } from './orderDraftUtils';
+import { orderService } from '../../../services/orderService';
+import { parseLufaResultXmlFile } from '../../../services/lufaResultXml';
 import { db } from '../../../firebase';
 import { collection, query, where, getDocs, deleteDoc, doc, getDoc, updateDoc, setDoc, deleteField } from 'firebase/firestore';
+import { downloadCompletedProjectShapes, downloadCompletedProjectWorkbook } from '../../../services/completedProjectExport';
 import { deserializeGeometryFromFirestore, simplifyGeometryForStorage } from '../../../utils/geometryUtils';
+import { deriveBoundarySamplingStatus, getBoundarySamplingState } from '../../../utils/fieldSamplingState';
+import {
+  buildBarcodeFieldPatch,
+  buildBoundaryBarcodeProperties,
+  getBoundaryBarcodeList,
+  getFieldBarcodeList,
+  normalizeBarcode,
+  normalizeBarcodeList,
+} from '../../../utils/orderBarcodes';
+import { getPbsProfileDefinition } from '../../../utils/pbs';
 import toast from 'react-hot-toast';
 
 type OrderFilter = 'submitted' | 'in_progress' | 'completed';
@@ -34,6 +54,11 @@ type ContractEntry = {
   completedBy?: string;
 };
 
+type StoredContractSelection = {
+  contractId: string;
+  clientId?: string | null;
+};
+
 type ContractField = {
   firestoreId?: string;
   baseId: string;
@@ -41,11 +66,89 @@ type ContractField = {
   areaHa: number;
   geometry: any;
   color?: string;
+  properties?: GpsFieldBoundaryProperties;
   labAttributes?: Record<string, string>;
   samplingCell?: NonNullable<OrderDraft['sourceFields']>[number]['samplingCell'];
   exportMapping?: NonNullable<OrderDraft['sourceFields']>[number]['exportMapping'];
+  importMeta?: NonNullable<OrderDraft['sourceFields']>[number]['importMeta'];
   projectId: string;
   clientId?: string;
+};
+
+const getWizardStepSequence = (labProvider?: OrderLabProvider | null): number[] => {
+  if (labProvider === 'documentation_only') {
+    return [3, 4, 5, 6];
+  }
+
+  return [2, 3, 4, 5, 6];
+};
+
+const normalizeFieldIdentity = (value: unknown): string => String(value || '').trim().toLowerCase();
+
+const appendUniqueFieldIdentity = (values: string[], value: unknown) => {
+  const normalized = String(value || '').trim();
+  if (!normalized || values.includes(normalized)) return;
+  values.push(normalized);
+};
+
+const getFieldIdentityCandidates = (field: Record<string, any> | null | undefined): string[] => {
+  if (!field) return [];
+
+  const candidates: string[] = [];
+  appendUniqueFieldIdentity(candidates, field.baseId);
+  appendUniqueFieldIdentity(candidates, field.baseName);
+  appendUniqueFieldIdentity(candidates, field.fieldId);
+  appendUniqueFieldIdentity(candidates, field.fieldName);
+  appendUniqueFieldIdentity(candidates, field.exportMapping?.sampleKey);
+  appendUniqueFieldIdentity(candidates, field.exportMapping?.sampleDisplayName);
+  appendUniqueFieldIdentity(candidates, field.exportMapping?.sourceBaseId);
+  appendUniqueFieldIdentity(candidates, field.exportMapping?.sourceBaseName);
+  appendUniqueFieldIdentity(candidates, field.samplingCell?.parentBaseId);
+  appendUniqueFieldIdentity(candidates, field.samplingCell?.parentBaseName);
+  return candidates;
+};
+
+const hasFieldIdentityOverlap = (left: string[], right: string[]): boolean => {
+  if (!left.length || !right.length) return false;
+
+  const normalizedRight = new Set(
+    right.map((value) => normalizeFieldIdentity(value)).filter((value) => value.length > 0),
+  );
+
+  return left.some((value) => normalizedRight.has(normalizeFieldIdentity(value)));
+};
+
+const getPreferredFieldIdentity = (field: Record<string, any> | null | undefined): string => (
+  String(field?.baseId || field?.baseName || field?.fieldId || field?.fieldName || '').trim()
+);
+
+const getLastSelectedContractStorageKey = (userId: string): string => `orders:last-selected-contract:${userId}`;
+
+const readStoredContractSelection = (storageKey: string | null): StoredContractSelection | null => {
+  if (!storageKey || typeof window === 'undefined') return null;
+
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as StoredContractSelection | string;
+    if (typeof parsed === 'string') {
+      const contractId = parsed.trim();
+      return contractId ? { contractId } : null;
+    }
+
+    const contractId = String(parsed?.contractId || '').trim();
+    if (!contractId) return null;
+
+    const clientId = typeof parsed?.clientId === 'string' ? parsed.clientId.trim() : '';
+    return {
+      contractId,
+      clientId: clientId || null,
+    };
+  } catch (error) {
+    console.warn('[OrdersMainPage] Failed to read last selected contract:', error);
+    return null;
+  }
 };
 
 export default function OrdersMainPage() {
@@ -61,21 +164,25 @@ export default function OrdersMainPage() {
   const [showStepModal, setShowStepModal] = useState(false);
   const [selectedStep, setSelectedStep] = useState(1);
   const [viewportHeightPx, setViewportHeightPx] = useState<number | null>(null);
+  const [viewportWidthPx, setViewportWidthPx] = useState<number | null>(null);
   const [mapLayoutSyncToken, setMapLayoutSyncToken] = useState(0);
   const [gridPreviewEnabled, setGridPreviewEnabled] = useState(true);
   const [gridPreviewSizeHa, setGridPreviewSizeHa] = useState<3 | 5>(5);
   const submitOrderRef = useRef<(() => void) | null>(null);
   const stepContentRef = useRef<HTMLDivElement | null>(null);
+  const lufaResultFileInputRef = useRef<HTMLInputElement | null>(null);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [openFilterMenu, setOpenFilterMenu] = useState<OrderFilter | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showNewContractModal, setShowNewContractModal] = useState(false);
   const [newContractName, setNewContractName] = useState('');
   const [newContractOwnerId, setNewContractOwnerId] = useState('');
   const [newContractLabProvider, setNewContractLabProvider] = useState<OrderLabProvider | ''>('');
   const [newContractLufaScope, setNewContractLufaScope] = useState<LufaStandarduntersuchungsumfang>('DED');
+  const [newContractPbsProfile, setNewContractPbsProfile] = useState<PbsProfile>('boden');
   const [isCreatingContract, setIsCreatingContract] = useState(false);
   const [showOwnersDropdown, setShowOwnersDropdown] = useState(false);
   const [wizardPanelCollapsed, setWizardPanelCollapsed] = useState(false);
@@ -95,12 +202,21 @@ export default function OrdersMainPage() {
     if (typeof window === 'undefined') return;
 
     const nextHeight = Math.round(window.visualViewport?.height ?? window.innerHeight);
+    const nextWidth = Math.round(window.visualViewport?.width ?? window.innerWidth);
     let shouldSyncMap = force;
 
     setViewportHeightPx((prev) => {
       if (prev !== nextHeight) {
         shouldSyncMap = true;
         return nextHeight;
+      }
+      return prev;
+    });
+
+    setViewportWidthPx((prev) => {
+      if (prev !== nextWidth) {
+        shouldSyncMap = true;
+        return nextWidth;
       }
       return prev;
     });
@@ -211,6 +327,9 @@ export default function OrdersMainPage() {
   const [fieldDetailsName, setFieldDetailsName] = useState('');
   const [fieldDetailsId, setFieldDetailsId] = useState('');
   const [fieldDetailsColor, setFieldDetailsColor] = useState('#3B82F6');
+  const [showBagCodesModal, setShowBagCodesModal] = useState(false);
+  const [bagCodeInput, setBagCodeInput] = useState('');
+  const [editingBagCodeIndex, setEditingBagCodeIndex] = useState<number | null>(null);
   const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<null | {
     fieldId: number | string;
     source?: 'uploaded' | 'drawn';
@@ -229,6 +348,9 @@ export default function OrdersMainPage() {
   const headerSelectorPanelRef = useRef<HTMLDivElement>(null);
   const fieldItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const fieldsListRef = useRef<HTMLDivElement | null>(null);
+  const compactFieldPanelScrollRef = useRef<HTMLDivElement | null>(null);
+  const bagCodeInputRef = useRef<HTMLInputElement | null>(null);
+  const lastCompactFieldPanelDragAtRef = useRef(0);
   const toastCooldownRef = useRef<Record<string, number>>({});
   const boundarySyncSessionsRef = useRef<Record<string, string>>({});
   const projectTelemetrySessionRef = useRef<Record<string, string>>({});
@@ -304,13 +426,14 @@ export default function OrdersMainPage() {
   const [showContractsDropdown, setShowContractsDropdown] = useState(false);
   const [contractsLoading, setContractsLoading] = useState(false);
   const [allContractFields, setAllContractFields] = useState<ContractField[]>([]);
-  const fieldCompletionSampleThreshold = 3;
+  const [fieldSamples, setFieldSamples] = useState<GpsFieldSample[]>([]);
   const [fieldSampleCountByBoundaryId, setFieldSampleCountByBoundaryId] = useState<Record<string, number>>({});
   const [contractStatusMap, setContractStatusMap] = useState<Record<string, OrderFilter>>({});
   const [projectDataMap, setProjectDataMap] = useState<Record<string, any>>({});
   
   // Tracks state for field color changes
   const [tracks, setTracks] = useState<Array<any>>([]);
+  const lastSelectedContractRestoreAttemptedRef = useRef(false);
 
   useEffect(() => {
     drawnFieldsCountRef.current = drawnFields.length;
@@ -339,7 +462,16 @@ export default function OrdersMainPage() {
   const closeStatusMenus = useCallback(() => {
     setOpenFilterMenu(null);
     setShowHeaderMenu(false);
+    setShowExportMenu(false);
   }, []);
+
+  const lastSelectedContractStorageKey = useMemo(() => (
+    user?.uid ? getLastSelectedContractStorageKey(user.uid) : null
+  ), [user?.uid]);
+
+  useEffect(() => {
+    lastSelectedContractRestoreAttemptedRef.current = false;
+  }, [user?.uid]);
 
   const handleSelectContract = useCallback((contract: ContractEntry) => {
     setSelectedContractId(contract.id);
@@ -389,6 +521,21 @@ export default function OrdersMainPage() {
     return contracts.find((contract) => contract.id === selectedContractId) || null;
   }, [contracts, selectedContractId]);
 
+  useEffect(() => {
+    if (!lastSelectedContractStorageKey || !selectedContract?.id || typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(lastSelectedContractStorageKey, JSON.stringify({
+        contractId: selectedContract.id,
+        clientId: selectedContract.clientId || null,
+      }));
+    } catch (error) {
+      console.warn('[OrdersMainPage] Failed to persist last selected contract:', error);
+    }
+  }, [lastSelectedContractStorageKey, selectedContract?.id, selectedContract?.clientId]);
+
   const selectedOwnerDropdownValue = selectedOwnerId || '';
   const selectedOwnerOption = useMemo(() => (
     userOptions.find((option) => option.id === selectedOwnerDropdownValue) || null
@@ -397,6 +544,24 @@ export default function OrdersMainPage() {
   const selectedContractButtonLabel = selectedContractId
     ? selectedContract?.name || t('orders.selectContract')
     : t('orders.contracts');
+  const selectedContractStatus = useMemo<OrderFilter | null>(() => {
+    if (!selectedContractId) return null;
+    return contractStatusMap[selectedContractId] || null;
+  }, [contractStatusMap, selectedContractId]);
+  const canExportSelectedContract = useMemo(() => (
+    Boolean(selectedContract && !draftOverrideId && selectedContractStatus === 'completed')
+  ), [draftOverrideId, selectedContract, selectedContractStatus]);
+  const exportButtonTitle = useMemo(() => {
+    if (!selectedContract) {
+      return t('orders.export.disabledNoSelection');
+    }
+
+    if (!canExportSelectedContract) {
+      return t('orders.export.disabledIncomplete');
+    }
+
+    return t('orders.export.label');
+  }, [canExportSelectedContract, selectedContract, t]);
 
   const ownerLabelById = useMemo(() => {
     const map = new globalThis.Map<string, string>();
@@ -407,7 +572,14 @@ export default function OrdersMainPage() {
     return map;
   }, [userOptions]);
 
-  const resolveContractStatus = useCallback((projectData: any, hasTracks: boolean): OrderFilter => {
+  const resolveContractStatus = useCallback((
+    projectData: any,
+    progress: {
+      hasTracks: boolean;
+      hasSamples: boolean;
+      allFieldsCompleted: boolean;
+    },
+  ): OrderFilter => {
     // Completion markers and explicit completed status take highest priority
     if (projectData?.completedAt || projectData?.completedBy) {
       return 'completed';
@@ -417,8 +589,12 @@ export default function OrdersMainPage() {
       return 'completed';
     }
 
-    // Any active tracking means in-progress, even if status was never updated from submitted
-    if (projectData?.status === 'in_progress' || hasTracks) {
+    if (progress.allFieldsCompleted) {
+      return 'completed';
+    }
+
+    // Any active sampling or tracking means in-progress, even if the project status was never updated.
+    if (projectData?.status === 'in_progress' || progress.hasTracks || progress.hasSamples) {
       return 'in_progress';
     }
 
@@ -453,14 +629,22 @@ export default function OrdersMainPage() {
 
         snapshot.docs.forEach((docSnapshot, index) => {
           try {
-            const geometry = deserializeGeometryFromFirestore(docSnapshot.data().geometry);
+            const raw = docSnapshot.data();
+            const geometry = deserializeGeometryFromFirestore(raw.geometry);
+            const properties = (raw.properties && typeof raw.properties === 'object') ? raw.properties : {};
             allFields.push({
               firestoreId: docSnapshot.id,
-              baseId: docSnapshot.data().baseId || docSnapshot.data().id || `Field ${index + 1}`,
-              baseName: docSnapshot.data().baseName || docSnapshot.data().name || `Field ${index + 1}`,
-              areaHa: docSnapshot.data().areaHa || 0,
+              baseId: raw.baseId || properties.baseId || raw.id || `Field ${index + 1}`,
+              baseName: raw.baseName || properties.baseName || raw.name || `Field ${index + 1}`,
+              areaHa: raw.areaHa ?? properties.areaHa ?? properties.area_ha ?? 0,
               geometry,
-              color: docSnapshot.data().color || '#3B82F6',
+              color: raw.color || '#3B82F6',
+              properties: properties as GpsFieldBoundaryProperties,
+              labAttributes: (raw.labAttributes && typeof raw.labAttributes === 'object')
+                ? raw.labAttributes as Record<string, string>
+                : undefined,
+              samplingCell: raw.samplingCell,
+              exportMapping: raw.exportMapping,
               projectId: contract.id,
               clientId: contract.clientId
             });
@@ -620,24 +804,48 @@ export default function OrdersMainPage() {
         projectDataMap[entry.contract.id] = entry.projectData;
       });
 
-      const trackStates = await Promise.all(allContracts.map(async (contract) => {
+      const contractProgressStates = await Promise.all(allContracts.map(async (contract) => {
         if (!contract.clientId) {
-          return { id: contract.id, hasTracks: false };
+          return { id: contract.id, hasTracks: false, hasSamples: false, allFieldsCompleted: false };
         }
         try {
           const tracksRef = collection(db, `users/${contract.clientId}/tracks`);
           const tracksQuery = query(tracksRef, where('project_id', '==', contract.id));
-          const snapshot = await getDocs(tracksQuery);
-          return { id: contract.id, hasTracks: !snapshot.empty };
+          const samplesRef = collection(db, `users/${contract.clientId}/field_samples`);
+          const samplesQuery = query(samplesRef, where('project_id', '==', contract.id));
+          const boundariesRef = collection(db, `users/${contract.clientId}/field_boundaries`);
+          const boundariesQuery = query(boundariesRef, where('project_id', '==', contract.id));
+          const [tracksSnapshot, samplesSnapshot, boundariesSnapshot] = await Promise.all([
+            getDocs(tracksQuery),
+            getDocs(samplesQuery),
+            getDocs(boundariesQuery),
+          ]);
+
+          const allFieldsCompleted = boundariesSnapshot.docs.length > 0 && boundariesSnapshot.docs.every((boundaryDoc) => {
+            const data = boundaryDoc.data() as any;
+            const samplingState = getBoundarySamplingState({ properties: data?.properties });
+            return samplingState.status === 'completed';
+          });
+
+          return {
+            id: contract.id,
+            hasTracks: !tracksSnapshot.empty,
+            hasSamples: !samplesSnapshot.empty,
+            allFieldsCompleted,
+          };
         } catch (error) {
-          console.warn('Failed to load tracks for contract:', contract.id, error);
-          return { id: contract.id, hasTracks: false };
+          console.warn('Failed to load progress for contract:', contract.id, error);
+          return { id: contract.id, hasTracks: false, hasSamples: false, allFieldsCompleted: false };
         }
       }));
 
       const nextStatusMap: Record<string, OrderFilter> = {};
-      trackStates.forEach(({ id, hasTracks }) => {
-        nextStatusMap[id] = resolveContractStatus(projectDataMap[id], hasTracks);
+      contractProgressStates.forEach(({ id, hasTracks, hasSamples, allFieldsCompleted }) => {
+        nextStatusMap[id] = resolveContractStatus(projectDataMap[id], {
+          hasTracks,
+          hasSamples,
+          allFieldsCompleted,
+        });
       });
 
       setContracts(allContracts);
@@ -650,12 +858,51 @@ export default function OrdersMainPage() {
     } finally {
       setContractsLoading(false);
     }
-  }, [user?.uid, resolveContractStatus, loadAllContractFields, t, selectedOwnerId, notifyToast]);
+  }, [user, resolveContractStatus, loadAllContractFields, t, notifyToast]);
 
   // Load contracts on mount
   useEffect(() => {
     loadContracts();
   }, [loadContracts]);
+
+  useEffect(() => {
+    if (lastSelectedContractRestoreAttemptedRef.current) {
+      return;
+    }
+
+    if (!contracts.length) {
+      return;
+    }
+
+    lastSelectedContractRestoreAttemptedRef.current = true;
+
+    if (selectedContractId) {
+      return;
+    }
+
+    const storedSelection = readStoredContractSelection(lastSelectedContractStorageKey);
+    if (!storedSelection) {
+      return;
+    }
+
+    const matchingContract = contracts.find((contract) => {
+      if (contract.id !== storedSelection.contractId) {
+        return false;
+      }
+
+      if (storedSelection.clientId && contract.clientId) {
+        return contract.clientId === storedSelection.clientId;
+      }
+
+      return true;
+    });
+
+    if (!matchingContract) {
+      return;
+    }
+
+    handleSelectContract(matchingContract);
+  }, [contracts, selectedContractId, lastSelectedContractStorageKey, handleSelectContract]);
 
   const loadContractFields = useCallback(async (contractId: string) => {
     const loadStartedMs = nowMs();
@@ -699,7 +946,13 @@ export default function OrdersMainPage() {
             baseName: raw.baseName || properties.baseName || raw.name || `Field ${index + 1}`,
             areaHa: raw.areaHa ?? properties.areaHa ?? properties.area_ha ?? 0,
             geometry: geometry,
-            color: raw.color || '#3B82F6'
+            color: raw.color || '#3B82F6',
+            properties: properties as GpsFieldBoundaryProperties,
+            labAttributes: (raw.labAttributes && typeof raw.labAttributes === 'object')
+              ? raw.labAttributes as Record<string, string>
+              : undefined,
+            samplingCell: raw.samplingCell,
+            exportMapping: raw.exportMapping,
           };
           
           // Log all fields with their IDs for debugging
@@ -806,34 +1059,24 @@ export default function OrdersMainPage() {
       
       setTracks(hydratedTracks);
 
-      const hasTracks = hydratedTracks.length > 0;
-      const computedStatus = resolveContractStatus(projectDataMap[contractId], hasTracks);
-      setContractStatusMap((prev) => {
-        if (prev[contractId] === computedStatus) {
-          return prev;
-        }
-        return {
-          ...prev,
-          [contractId]: computedStatus
-        };
-      });
-
       console.log(`Loaded ${hydratedTracks.length} tracks for contract ${contractId}`);
     } catch (error) {
       console.error('Error loading contract tracks:', error);
       // Don't show toast for tracks - it's not critical
     }
-  }, [contracts, projectDataMap, resolveContractStatus]);
+  }, [contracts]);
 
   const loadContractFieldSamples = useCallback(async (contractId: string) => {
     try {
       if (!contractId || !contracts.length) {
+        setFieldSamples([]);
         setFieldSampleCountByBoundaryId({});
         return;
       }
 
       const selectedContract = contracts.find((contract) => contract.id === contractId);
       if (!selectedContract?.clientId) {
+        setFieldSamples([]);
         setFieldSampleCountByBoundaryId({});
         return;
       }
@@ -843,17 +1086,34 @@ export default function OrdersMainPage() {
       const samplesSnapshot = await getDocs(samplesQuery);
 
       const counts: Record<string, number> = {};
+      const nextSamples: GpsFieldSample[] = [];
       samplesSnapshot.docs.forEach((sampleDoc) => {
         const data = sampleDoc.data() as any;
         const boundaryId = data?.field_boundary_id;
         if (boundaryId === undefined || boundaryId === null || boundaryId === '') return;
         const key = String(boundaryId);
         counts[key] = (counts[key] || 0) + 1;
+        nextSamples.push({
+          id: sampleDoc.id,
+          project_id: data.project_id,
+          field_boundary_id: boundaryId,
+          latitude: Number(data.latitude),
+          longitude: Number(data.longitude),
+          sample_number: Number(data.sample_number || counts[key]),
+          name: data.name,
+          notes: data.notes,
+          timestamp: data.timestamp,
+          created_at: data.created_at,
+          updated_at: data.updated_at,
+          ...data,
+        });
       });
 
+      setFieldSamples(nextSamples);
       setFieldSampleCountByBoundaryId(counts);
     } catch (error) {
       console.error('Error loading field samples:', error);
+      setFieldSamples([]);
       setFieldSampleCountByBoundaryId({});
     }
   }, [contracts]);
@@ -862,6 +1122,7 @@ export default function OrdersMainPage() {
     if (!selectedContractId) {
       setUploadedFields([]);
       setTracks([]);
+      setFieldSamples([]);
       setFieldSampleCountByBoundaryId({});
       return;
     }
@@ -870,6 +1131,35 @@ export default function OrdersMainPage() {
     loadContractTracks(selectedContractId);
     loadContractFieldSamples(selectedContractId);
   }, [selectedContractId, loadContractFields, loadContractTracks, loadContractFieldSamples]);
+
+  useEffect(() => {
+    if (!selectedContractId) {
+      return;
+    }
+
+    const relevantBoundaries = allContractFields.filter((field) => field.projectId === selectedContractId);
+    const allFieldsCompleted = relevantBoundaries.length > 0 && relevantBoundaries.every((field) => {
+      const state = getBoundarySamplingState({ properties: field.properties });
+      return state.status === 'completed';
+    });
+
+    const computedStatus = resolveContractStatus(projectDataMap[selectedContractId], {
+      hasTracks: tracks.length > 0,
+      hasSamples: fieldSamples.length > 0,
+      allFieldsCompleted,
+    });
+
+    setContractStatusMap((prev) => {
+      if (prev[selectedContractId] === computedStatus) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [selectedContractId]: computedStatus,
+      };
+    });
+  }, [allContractFields, fieldSamples, projectDataMap, resolveContractStatus, selectedContractId, tracks.length]);
 
   useEffect(() => {
     const handleSubmitStarted = (event: Event) => {
@@ -1002,7 +1292,8 @@ export default function OrdersMainPage() {
       const newId = `draft_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       const seededDraft = createOrderDraft(ownerId, newId, trimmedName, {
         labProvider: newContractLabProvider,
-        lufaScope: newContractLufaScope
+        lufaScope: newContractLufaScope,
+        pbsProfile: newContractPbsProfile,
       });
       try {
         localStorage.setItem(`order_draft_${newId}`, JSON.stringify(seededDraft));
@@ -1021,7 +1312,7 @@ export default function OrdersMainPage() {
       setTracks([]);
       setMapSelectionEvent(null);
       setShowSidebar(true);
-      setSelectedStep(1);
+      setSelectedStep(getWizardStepSequence(newContractLabProvider)[0] || 2);
       setShowStepModal(true);
       setShowNewContractModal(false);
       resetViewportPosition();
@@ -1032,7 +1323,7 @@ export default function OrdersMainPage() {
     } finally {
       setIsCreatingContract(false);
     }
-  }, [newContractName, t, user?.uid, userRole, newContractOwnerId, newContractLabProvider, newContractLufaScope, clearSelectedFields, resetViewportPosition]);
+  }, [newContractName, t, user?.uid, userRole, newContractOwnerId, newContractLabProvider, newContractLufaScope, newContractPbsProfile, clearSelectedFields, resetViewportPosition]);
 
   const handleDiscardContract = useCallback(async () => {
     const discardQuips = [
@@ -1079,15 +1370,23 @@ export default function OrdersMainPage() {
     setShowStepModal(false);
     setStep3Collapsed(false);
     setShowSidebar(false);
-    setSelectedStep(1);
+    setSelectedStep(getWizardStepSequence(null)[0] || 2);
     setNewContractName('');
     setNewContractOwnerId(selectedOwnerId || user?.uid || '');
     setNewContractLabProvider('');
     setNewContractLufaScope('DED');
+    setNewContractPbsProfile('boden');
     resetViewportPosition();
   }, [draftOverrideId, clearSelectedFields, selectedOwnerId, user?.uid, showConfirmation, t, resetViewportPosition]);
 
   const handleOpenStep = useCallback((step: number) => {
+    const activeLabProvider = draftOverrideId
+      ? (newContractLabProvider || 'agrolab')
+      : ((selectedContractId ? projectDataMap[selectedContractId]?.labProvider : undefined) || 'agrolab');
+    if (!getWizardStepSequence(activeLabProvider).includes(step)) {
+      return;
+    }
+
     setSelectedStep(step);
     setShowStepModal(true);
     if (step !== 3) {
@@ -1099,9 +1398,16 @@ export default function OrdersMainPage() {
       setFocusedDrawnFieldId(null);
       setMapSelectionEvent(null);
     }
-  }, []);
+  }, [clearSelectedFields, draftOverrideId, newContractLabProvider, projectDataMap, selectedContractId]);
 
   const handleWizardStepChange = useCallback((step: number) => {
+    const activeLabProvider = draftOverrideId
+      ? (newContractLabProvider || 'agrolab')
+      : ((selectedContractId ? projectDataMap[selectedContractId]?.labProvider : undefined) || 'agrolab');
+    if (!getWizardStepSequence(activeLabProvider).includes(step)) {
+      return;
+    }
+
     setSelectedStep(step);
     setShowStepModal(true);
     if (step !== 3) {
@@ -1113,9 +1419,9 @@ export default function OrdersMainPage() {
       setFocusedDrawnFieldId(null);
       setMapSelectionEvent(null);
     }
-  }, []);
+  }, [clearSelectedFields, draftOverrideId, newContractLabProvider, projectDataMap, selectedContractId]);
 
-  const handleCloseStepModal = useCallback(() => {
+  const _handleCloseStepModal = useCallback(() => {
     setShowStepModal(false);
     setStep3Collapsed(false);
     resetViewportPosition();
@@ -1138,13 +1444,30 @@ export default function OrdersMainPage() {
     loadContracts();
   }, [clearSelectedFields, loadContracts, resetViewportPosition]);
 
+  const confirmationQuips = useMemo(() => ([
+    t('orders.humor.confirmationQuips.0'),
+    t('orders.humor.confirmationQuips.1'),
+    t('orders.humor.confirmationQuips.2'),
+    t('orders.humor.confirmationQuips.3'),
+    t('orders.humor.confirmationQuips.4')
+  ]), [t]);
+
+  const nextConfirmationQuip = useCallback(() => {
+    const list = confirmationQuips.length ? confirmationQuips : ['Well, that happened.'];
+    const index = confirmationQuipIndexRef.current % list.length;
+    confirmationQuipIndexRef.current += 1;
+    return list[index];
+  }, [confirmationQuips]);
+
   const handleDeleteContract = useCallback(async (contract: ContractEntry) => {
     if (!contract.clientId) return;
 
     const confirmed = await showConfirmation(
       t('orders.confirmDeleteContractTitle'),
-      `${nextConfirmationQuip()} ${t('orders.confirmDeleteContractMessage', { name: contract.name })
-        || `Delete "${contract.name}"? This cannot be undone.`}`,
+      `${nextConfirmationQuip()} ${t('orders.confirmDeleteContractMessage', {
+        name: contract.name,
+        defaultValue: `Delete "${contract.name}"? This cannot be undone.`,
+      })}`,
       {
         type: 'danger',
         confirmText: t('common.delete'),
@@ -1176,7 +1499,7 @@ export default function OrdersMainPage() {
       console.error('Failed to delete contract:', error);
       toast.error(t('orders.contractDeleteFailed'));
     }
-  }, [selectedContractId, showConfirmation, t]);
+  }, [selectedContractId, showConfirmation, t, nextConfirmationQuip]);
 
   const handleFieldsLoaded = useCallback((fields: NonNullable<OrderDraft['sourceFields']>) => {
     const normalizedFields = fields.map((field) => ({ ...field, color: field.color ?? '#3B82F6' }));
@@ -1225,6 +1548,314 @@ export default function OrdersMainPage() {
     [...mappedUploadedFields, ...mappedDrawnFields]
   ), [mappedUploadedFields, mappedDrawnFields]);
 
+  const selectedProjectData = useMemo(() => (
+    selectedContractId ? (projectDataMap[selectedContractId] || null) : null
+  ), [projectDataMap, selectedContractId]);
+
+  const barcodeLookupByFieldKey = useMemo(() => {
+    const lookup = new Map<string, { codes: string[]; label: string }>();
+
+    const registerCodes = (key: unknown, codesInput: unknown, label: string) => {
+      const normalizedKey = normalizeFieldIdentity(key);
+      const codes = normalizeBarcodeList(codesInput);
+      if (!normalizedKey || !codes.length) return;
+
+      const existing = lookup.get(normalizedKey);
+      lookup.set(normalizedKey, {
+        label: existing?.label || label,
+        codes: normalizeBarcodeList([...(existing?.codes || []), ...codes]),
+      });
+    };
+
+    const projectFields = Array.isArray(selectedProjectData?.fields) ? selectedProjectData.fields : [];
+    projectFields.forEach((field: any) => {
+      const label = String(field?.fieldName || field?.baseName || field?.fieldId || field?.baseId || '').trim() || 'Field';
+      const codes = getFieldBarcodeList(field);
+      getFieldIdentityCandidates(field).forEach((candidate) => registerCodes(candidate, codes, label));
+    });
+
+    const assignments = selectedProjectData?.fieldBarcodeAssignments;
+    if (assignments && typeof assignments === 'object') {
+      Object.entries(assignments as Record<string, any>).forEach(([key, value]) => {
+        registerCodes(key, getFieldBarcodeList(value), key);
+      });
+    }
+
+    uploadedFields.forEach((field) => {
+      const label = String(field.baseName || field.baseId || '').trim() || 'Field';
+      const codes = getBoundaryBarcodeList(field.properties);
+      getFieldIdentityCandidates(field).forEach((candidate) => registerCodes(candidate, codes, label));
+    });
+
+    return lookup;
+  }, [selectedProjectData, uploadedFields]);
+
+  const getBagCodesForField = useCallback((field: Record<string, any> | null | undefined) => {
+    if (!field) return [] as string[];
+
+    for (const candidate of getFieldIdentityCandidates(field)) {
+      const entry = barcodeLookupByFieldKey.get(normalizeFieldIdentity(candidate));
+      if (entry?.codes?.length) {
+        return entry.codes;
+      }
+    }
+
+    return [] as string[];
+  }, [barcodeLookupByFieldKey]);
+
+  const selectedBagCodeField = useMemo(() => {
+    if (selectedFieldKeys.length !== 1) return null;
+    return combinedFields.find((field) => field.key === selectedFieldKeys[0]) || null;
+  }, [combinedFields, selectedFieldKeys]);
+
+  const selectedBagCodes = useMemo(() => (
+    selectedBagCodeField ? getBagCodesForField(selectedBagCodeField as Record<string, any>) : []
+  ), [getBagCodesForField, selectedBagCodeField]);
+
+  const canManageSelectedFieldBagCodes = useMemo(() => (
+    Boolean(selectedBagCodeField && selectedBagCodeField.source === 'uploaded' && selectedContractId && selectedContract?.clientId)
+  ), [selectedBagCodeField, selectedContract, selectedContractId]);
+
+  const bagCodesButtonTitle = useMemo(() => {
+    if (!selectedContractId) {
+      return t('orders.bagCodes.contractRequired', { defaultValue: 'Select a contract first' });
+    }
+
+    if (selectedFieldKeys.length === 0) {
+      return t('orders.bagCodes.selectFieldRequired', { defaultValue: 'Select one field first' });
+    }
+
+    if (selectedFieldKeys.length > 1) {
+      return t('orders.bagCodes.singleFieldRequired', { defaultValue: 'Select exactly one field to edit bag codes' });
+    }
+
+    if (selectedBagCodeField?.source !== 'uploaded') {
+      return t('orders.bagCodes.savedFieldRequired', { defaultValue: 'Bag codes can only be assigned to saved field shapes' });
+    }
+
+    return t('orders.bagCodes.open', { defaultValue: 'Edit bag codes' });
+  }, [selectedBagCodeField, selectedContractId, selectedFieldKeys.length, t]);
+
+  const findBagCodeConflict = useCallback((code: string, targetField: Record<string, any>) => {
+    const normalizedCode = normalizeBarcode(code);
+    if (!normalizedCode) return null;
+
+    const targetKeys = new Set(
+      getFieldIdentityCandidates(targetField)
+        .map((value) => normalizeFieldIdentity(value))
+        .filter((value) => value.length > 0),
+    );
+
+    for (const [fieldKey, entry] of barcodeLookupByFieldKey.entries()) {
+      if (targetKeys.has(fieldKey)) continue;
+      if (entry.codes.includes(normalizedCode)) {
+        return entry.label;
+      }
+    }
+
+    return null;
+  }, [barcodeLookupByFieldKey]);
+
+  const closeBagCodesModal = useCallback(() => {
+    setShowBagCodesModal(false);
+    setBagCodeInput('');
+    setEditingBagCodeIndex(null);
+  }, []);
+
+  useEffect(() => {
+    if (!showBagCodesModal) return;
+
+    const timeoutId = window.setTimeout(() => {
+      bagCodeInputRef.current?.focus();
+      bagCodeInputRef.current?.select();
+    }, 40);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [showBagCodesModal, editingBagCodeIndex]);
+
+  useEffect(() => {
+    if (showBagCodesModal && !canManageSelectedFieldBagCodes) {
+      closeBagCodesModal();
+    }
+  }, [canManageSelectedFieldBagCodes, closeBagCodesModal, showBagCodesModal]);
+
+  const persistBagCodesForField = useCallback(async (field: Record<string, any>, codesInput: unknown) => {
+    if (!selectedContractId || !selectedContract?.clientId) {
+      throw new Error(t('orders.bagCodes.contractRequired', { defaultValue: 'Select a contract first' }));
+    }
+
+    const currentProjectData = projectDataMap[selectedContractId];
+    if (!currentProjectData) {
+      throw new Error(t('orders.bagCodes.projectDataMissing', { defaultValue: 'Project data is not loaded yet' }));
+    }
+
+    const nextCodes = normalizeBarcodeList(codesInput);
+    const barcodePatch = buildBarcodeFieldPatch(nextCodes);
+    const targetCandidates = getFieldIdentityCandidates(field);
+    const currentFields = Array.isArray(currentProjectData.fields) ? currentProjectData.fields : [];
+    const nextFields = currentFields.map((projectField: any) => (
+      hasFieldIdentityOverlap(getFieldIdentityCandidates(projectField), targetCandidates)
+        ? { ...projectField, ...barcodePatch }
+        : projectField
+    ));
+
+    const nextAssignments = {
+      ...(currentProjectData.fieldBarcodeAssignments || {}),
+    } as Record<string, { barcode?: string; barcodes?: string[] }>;
+    targetCandidates.forEach((candidate) => {
+      if (!candidate) return;
+      nextAssignments[candidate] = barcodePatch;
+    });
+    const preferredIdentity = getPreferredFieldIdentity(field);
+    if (preferredIdentity) {
+      nextAssignments[preferredIdentity] = barcodePatch;
+    }
+
+    const nextProjectData = {
+      ...currentProjectData,
+      fields: nextFields,
+      fieldBarcodeAssignments: nextAssignments,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setProjectDataMap((prev) => ({
+      ...prev,
+      [selectedContractId]: nextProjectData,
+    }));
+
+    await orderService.upsertDraft(nextProjectData as OrderDraft, selectedContract.clientId);
+
+    if (field.source === 'uploaded') {
+      const boundaryId = String(field.boundaryId || field.firestoreId || '');
+      if (boundaryId) {
+        const nextProperties = buildBoundaryBarcodeProperties(
+          field.properties as Record<string, unknown> | undefined,
+          nextCodes,
+        ) as GpsFieldBoundaryProperties;
+
+        setUploadedFields((prev) => prev.map((entry) => (
+          String(entry.firestoreId || '') === boundaryId
+            ? { ...entry, properties: nextProperties }
+            : entry
+        )));
+
+        setAllContractFields((prev) => prev.map((entry) => (
+          String(entry.firestoreId || '') === boundaryId
+            ? { ...entry, properties: nextProperties }
+            : entry
+        )));
+
+        await updateDoc(doc(db, `users/${selectedContract.clientId}/field_boundaries/${boundaryId}`), {
+          properties: nextProperties,
+        });
+      }
+    }
+  }, [projectDataMap, selectedContract, selectedContractId, t]);
+
+  const handleOpenBagCodesModal = useCallback(() => {
+    if (!canManageSelectedFieldBagCodes) {
+      toast.error(bagCodesButtonTitle);
+      return;
+    }
+
+    setBagCodeInput('');
+    setEditingBagCodeIndex(null);
+    setShowBagCodesModal(true);
+  }, [bagCodesButtonTitle, canManageSelectedFieldBagCodes]);
+
+  const handleSubmitBagCode = useCallback(async () => {
+    if (!selectedBagCodeField) return;
+
+    const nextCode = normalizeBarcode(bagCodeInput);
+    if (!nextCode) {
+      toast.error(t('orders.bagCodes.emptyInput', { defaultValue: 'Scan or enter a bag code first' }));
+      return;
+    }
+
+    const duplicateFieldLabel = findBagCodeConflict(nextCode, selectedBagCodeField as Record<string, any>);
+    if (duplicateFieldLabel) {
+      toast.error(t('orders.bagCodes.duplicateConflict', {
+        code: nextCode,
+        field: duplicateFieldLabel,
+        defaultValue: `${nextCode} is already assigned to ${duplicateFieldLabel}`,
+      }));
+      return;
+    }
+
+    const currentCodes = selectedBagCodes;
+    const nextCodes = editingBagCodeIndex == null
+      ? normalizeBarcodeList([...currentCodes, nextCode])
+      : normalizeBarcodeList(currentCodes.map((code, index) => (index === editingBagCodeIndex ? nextCode : code)));
+
+    try {
+      await persistBagCodesForField(selectedBagCodeField as Record<string, any>, nextCodes);
+      setBagCodeInput('');
+      setEditingBagCodeIndex(null);
+      toast.success(t(
+        editingBagCodeIndex == null ? 'orders.bagCodes.addedSuccess' : 'orders.bagCodes.replacedSuccess',
+        {
+          code: nextCode,
+          field: selectedBagCodeField.baseName || selectedBagCodeField.baseId,
+          defaultValue: editingBagCodeIndex == null
+            ? `${nextCode} added to ${selectedBagCodeField.baseName || selectedBagCodeField.baseId}`
+            : `${nextCode} updated for ${selectedBagCodeField.baseName || selectedBagCodeField.baseId}`,
+        },
+      ));
+    } catch (error) {
+      console.error('Failed to save bag code:', error);
+      toast.error(t('orders.bagCodes.saveFailed', { defaultValue: 'Failed to save bag codes' }));
+    }
+  }, [bagCodeInput, editingBagCodeIndex, findBagCodeConflict, persistBagCodesForField, selectedBagCodeField, selectedBagCodes, t]);
+
+  const handleDeleteBagCode = useCallback(async (index: number) => {
+    if (!selectedBagCodeField) return;
+
+    const removedCode = selectedBagCodes[index];
+    const nextCodes = selectedBagCodes.filter((_, entryIndex) => entryIndex !== index);
+
+    try {
+      await persistBagCodesForField(selectedBagCodeField as Record<string, any>, nextCodes);
+      if (editingBagCodeIndex === index) {
+        setEditingBagCodeIndex(null);
+        setBagCodeInput('');
+      }
+      toast.success(t('orders.bagCodes.deletedSuccess', {
+        code: removedCode,
+        field: selectedBagCodeField.baseName || selectedBagCodeField.baseId,
+        defaultValue: `${removedCode} removed from ${selectedBagCodeField.baseName || selectedBagCodeField.baseId}`,
+      }));
+    } catch (error) {
+      console.error('Failed to delete bag code:', error);
+      toast.error(t('orders.bagCodes.saveFailed', { defaultValue: 'Failed to save bag codes' }));
+    }
+  }, [editingBagCodeIndex, persistBagCodesForField, selectedBagCodeField, selectedBagCodes, t]);
+
+  const handleEditBagCode = useCallback((index: number) => {
+    const targetCode = selectedBagCodes[index] || '';
+    setEditingBagCodeIndex(index);
+    setBagCodeInput(targetCode);
+  }, [selectedBagCodes]);
+
+  const selectedWizardFieldTargets = useMemo(() => {
+    const targets = new Set<string>();
+
+    selectedFieldKeys.forEach((key) => {
+      const field = combinedFields.find((entry) => entry.key === key);
+      if (!field) return;
+
+      [field.baseId, field.baseName].forEach((value) => {
+        const normalized = String(value || '').trim();
+        if (normalized) {
+          targets.add(normalized);
+        }
+      });
+    });
+
+    return Array.from(targets);
+  }, [selectedFieldKeys, combinedFields]);
+
   const wizardSourceFields = useMemo(() => {
     const normalizedUploaded = uploadedFields.map((field) => ({
       baseId: field.baseId,
@@ -1235,6 +1866,7 @@ export default function OrdersMainPage() {
       labAttributes: field.labAttributes,
       samplingCell: field.samplingCell,
       exportMapping: field.exportMapping,
+      importMeta: field.importMeta,
     }));
 
     const normalizedDraftDrawn = draftDrawnFields.map((field) => ({
@@ -1378,7 +2010,12 @@ export default function OrdersMainPage() {
 
       setEditingFieldBackup({ ...drawnField });
       editingFieldSourceRef.current = 'drawn';
-      setUploadedFields((prev) => prev.filter((field) => String(field.firestoreId) !== String(fieldId)));
+        const targetIndex = resolveUploadedIndex(fieldId);
+        if (targetIndex >= 0) {
+          setUploadedFields((prev) => prev.filter((_, idx) => idx !== targetIndex));
+        } else {
+          setUploadedFields((prev) => prev.filter((field) => String(field.firestoreId) !== String(fieldId)));
+        }
       setAllContractFields((prev) => prev.filter((field) => String(field.firestoreId) !== String(fieldId)));
       clearSelectedFields();
       setFocusedDrawnFieldId(null);
@@ -1389,7 +2026,7 @@ export default function OrdersMainPage() {
 
     // Show edit mode menu (vertex edit or recreate)
     setEditModeMenu({ fieldId, source });
-  }, [drawnFields, uploadedFields, allContractFields, makeDrawnId, area, resolveUploadedIndex, resolveDrawnField, draftDrawnFields, clearSelectedFields, isAdmin, showStepModal, draftOverrideId]);
+  }, [uploadedFields, allContractFields, makeDrawnId, resolveUploadedIndex, resolveDrawnField, draftDrawnFields, clearSelectedFields, isAdmin, showStepModal, draftOverrideId]);
 
   const handleMapBackgroundClick = useCallback(() => {
     clearSelectedFields();
@@ -1443,7 +2080,7 @@ export default function OrdersMainPage() {
     selectFieldKey(`d-${drawnId}`, false);
     setDrawingMode('edit');
     setEditModeMenu(null);
-  }, [editModeMenu, drawnFields, makeDrawnId, uploadedFields, selectFieldKey, resolveUploadedIndex, resolveDrawnField, draftDrawnFields]);
+  }, [editModeMenu, makeDrawnId, uploadedFields, selectFieldKey, resolveUploadedIndex, resolveDrawnField, draftDrawnFields]);
 
   const handleRecreateField = useCallback(() => {
     if (!editModeMenu) return;
@@ -1493,7 +2130,7 @@ export default function OrdersMainPage() {
     setFocusedBoundaryId(null);
     setDrawingMode('polygon');
     setEditModeMenu(null);
-  }, [editModeMenu, drawnFields, makeDrawnId, uploadedFields, clearSelectedFields, resolveUploadedIndex, resolveDrawnField, draftDrawnFields]);
+  }, [editModeMenu, makeDrawnId, uploadedFields, clearSelectedFields, resolveUploadedIndex, resolveDrawnField, draftDrawnFields]);
 
   const handleCancelEdit = useCallback(() => {
     if (!editingFieldBackup) return;
@@ -1541,16 +2178,22 @@ export default function OrdersMainPage() {
       const numericId = Number(fieldId);
       const fallback = allContractFields.find((field) => String(field.firestoreId) === String(fieldId));
       const targetIndex = resolveUploadedIndex(fieldId);
-      const key = targetIndex !== -1 ? `u-${targetIndex + 1}` : `u-${fieldId}`;
+      const uploadedField = targetIndex >= 0 ? uploadedFields[targetIndex] : undefined;
+      const resolvedBoundaryId = uploadedField?.firestoreId || (targetIndex >= 0 ? targetIndex + 1 : fieldId);
+      const key = `u-${resolvedBoundaryId}`;
 
-      setUploadedFields((prev) => prev.filter((field) => String(field.firestoreId) !== String(fieldId)));
+      if (targetIndex >= 0) {
+        setUploadedFields((prev) => prev.filter((_, idx) => idx !== targetIndex));
+      } else {
+        setUploadedFields((prev) => prev.filter((field) => String(field.firestoreId) !== String(fieldId)));
+      }
       setAllContractFields((prev) => prev.filter((field) => String(field.firestoreId) !== String(fieldId)));
       setSelectedFieldKey((prev) => (prev === key ? null : prev));
       setSelectedFieldKeys((prev) => prev.filter(item => item !== key));
-      setFocusedBoundaryId((prev) => (prev === numericId ? null : prev));
+      setFocusedBoundaryId((prev) => (prev === String(resolvedBoundaryId) || prev === String(numericId) ? null : prev));
 
       const targetClientId = fallback?.clientId || selectedContract?.clientId;
-      const firestoreId = fallback?.firestoreId || String(fieldId);
+      const firestoreId = fallback?.firestoreId || uploadedField?.firestoreId;
       if (targetClientId && firestoreId) {
         deleteDoc(doc(db, `users/${targetClientId}/field_boundaries/${firestoreId}`)).catch((error) => {
           console.warn('Failed to delete field boundary:', error);
@@ -1559,7 +2202,7 @@ export default function OrdersMainPage() {
     }
     setDrawingMode(null);
     setDeleteConfirmTarget(null);
-  }, [deleteConfirmTarget, resolveUploadedIndex, allContractFields, selectedContract?.clientId, db]);
+  }, [deleteConfirmTarget, resolveUploadedIndex, allContractFields, selectedContract?.clientId, uploadedFields]);
 
   const handleSaveFieldDetails = useCallback(async () => {
     if (!fieldDetailsKey) return;
@@ -1688,14 +2331,7 @@ export default function OrdersMainPage() {
       )));
     }
     setFieldDetailsOpen(false);
-  }, [fieldDetailsKey, fieldDetailsName, fieldDetailsId, fieldDetailsColor, uploadedFields, selectedContract?.clientId, db, t]);
-
-  useEffect(() => {
-    if (!selectedFieldKey || fieldsSidebarCollapsed) return;
-    const el = fieldItemRefs.current[selectedFieldKey];
-    if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [selectedFieldKey, fieldsSidebarCollapsed]);
+  }, [fieldDetailsKey, fieldDetailsName, fieldDetailsId, fieldDetailsColor, uploadedFields, selectedContract?.clientId, selectedContractId, t]);
 
   const handleSignOut = useCallback(async () => {
     await logout();
@@ -1752,16 +2388,28 @@ export default function OrdersMainPage() {
       }
     };
 
-    if (openFilterMenu || showHeaderMenu) {
+    if (openFilterMenu || showHeaderMenu || showExportMenu) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [closeStatusMenus, openFilterMenu, showHeaderMenu]);
+  }, [closeStatusMenus, openFilterMenu, showExportMenu, showHeaderMenu]);
+
+  useEffect(() => {
+    if (!showExportMenu) return;
+    if (showContractsDropdown || showOwnersDropdown || showUserMenu || showHeaderMenu || openFilterMenu) {
+      setShowExportMenu(false);
+    }
+  }, [openFilterMenu, showContractsDropdown, showExportMenu, showHeaderMenu, showOwnersDropdown, showUserMenu]);
 
   useEffect(() => {
     if (!selectedContractId && !draftOverrideId) return;
     closeStatusMenus();
   }, [closeStatusMenus, draftOverrideId, selectedContractId]);
+
+  useEffect(() => {
+    if (canExportSelectedContract) return;
+    setShowExportMenu(false);
+  }, [canExportSelectedContract]);
 
   useEffect(() => {
     if (!showSettingsModal || !user?.uid) return;
@@ -1834,7 +2482,16 @@ export default function OrdersMainPage() {
     }
   }, [profileDraft, t, user?.uid, user?.email]);
 
-  const wizardSteps = [
+  const activeWizardLabProvider = useMemo<OrderLabProvider>(() => {
+    if (draftOverrideId) {
+      return (newContractLabProvider || 'agrolab') as OrderLabProvider;
+    }
+
+    const storedLabProvider = selectedContractId ? projectDataMap[selectedContractId]?.labProvider : undefined;
+    return (storedLabProvider || 'agrolab') as OrderLabProvider;
+  }, [draftOverrideId, newContractLabProvider, projectDataMap, selectedContractId]);
+
+  const wizardStepCatalog = useMemo(() => ([
     {
       step: 1,
       label: t('orders.wizard.steps.step1Label'),
@@ -1865,26 +2522,212 @@ export default function OrdersMainPage() {
       label: t('orders.wizard.steps.step6Label'),
       description: t('orders.wizard.steps.step6Desc')
     }
-  ];
+  ]), [t]);
 
-  const getContinueLabel = useCallback((step: number) => {
-    if (step === 1) return t('orders.wizard.continueToStep2');
-    if (step === 2) return t('orders.wizard.continueToStep3');
-    if (step === 3) return t('orders.wizard.continueToStep4');
-    if (step === 4) return t('orders.wizard.continueToStep5');
-    if (step === 5) return t('orders.wizard.continueToStep6');
-    return '';
-  }, [t]);
+  const wizardSteps = useMemo(() => {
+    const stepSequence = getWizardStepSequence(activeWizardLabProvider);
+    return stepSequence
+      .map((step, index) => {
+        const meta = wizardStepCatalog.find((entry) => entry.step === step);
+        if (!meta) return null;
+        return {
+          ...meta,
+          visibleStep: index + 1
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+  }, [activeWizardLabProvider, wizardStepCatalog]);
 
-  const canContinueStep = useMemo(() => {
-    if (selectedStep === 1) return stepReadiness.step1Ready;
-    if (selectedStep === 2) return stepReadiness.step2Ready;
-    if (selectedStep === 3) return stepReadiness.step3Ready;
-    if (selectedStep === 4) return stepReadiness.step4Ready;
-    if (selectedStep === 5) return stepReadiness.step5Ready;
+  const currentWizardStepIndex = useMemo(() => (
+    wizardSteps.findIndex((entry) => entry.step === selectedStep)
+  ), [selectedStep, wizardSteps]);
+
+  const currentWizardStep = useMemo(() => (
+    currentWizardStepIndex >= 0 ? wizardSteps[currentWizardStepIndex] : (wizardSteps[0] || null)
+  ), [currentWizardStepIndex, wizardSteps]);
+
+  const nextWizardStep = useMemo(() => (
+    currentWizardStepIndex >= 0 ? (wizardSteps[currentWizardStepIndex + 1] || null) : null
+  ), [currentWizardStepIndex, wizardSteps]);
+
+  const lastWizardStep = useMemo(() => (
+    wizardSteps.length ? wizardSteps[wizardSteps.length - 1] : null
+  ), [wizardSteps]);
+
+  useEffect(() => {
+    if (!wizardSteps.length) return;
+    if (wizardSteps.some((entry) => entry.step === selectedStep)) return;
+    setSelectedStep(wizardSteps[0].step);
+  }, [selectedStep, wizardSteps]);
+
+  const getStepReady = useCallback((step: number) => {
+    if (step === 1) return stepReadiness.step1Ready;
+    if (step === 2) return stepReadiness.step2Ready;
+    if (step === 3) return stepReadiness.step3Ready;
+    if (step === 4) return stepReadiness.step4Ready;
+    if (step === 5) return stepReadiness.step5Ready;
+    if (step === 6) return stepReadiness.step6Ready;
     return false;
-  }, [selectedStep, stepReadiness]);
-  const canSubmitStep = useMemo(() => stepReadiness.step6Ready, [stepReadiness.step6Ready]);
+  }, [stepReadiness]);
+
+  const canContinueStep = useMemo(() => (
+    currentWizardStep ? getStepReady(currentWizardStep.step) : false
+  ), [currentWizardStep, getStepReady]);
+
+  const canSubmitStep = useMemo(() => (
+    lastWizardStep ? getStepReady(lastWizardStep.step) : false
+  ), [getStepReady, lastWizardStep]);
+
+  const handleExportWorkbook = useCallback(() => {
+    if (!selectedContractId || !selectedContract || !canExportSelectedContract) {
+      return;
+    }
+
+    try {
+      downloadCompletedProjectWorkbook({
+        contractId: selectedContract.id,
+        contractName: selectedContract.name,
+        contractStatus: selectedContractStatus,
+        clientId: selectedContract.clientId || null,
+        language,
+        labProvider: activeWizardLabProvider,
+        projectData: projectDataMap[selectedContractId] || null,
+        boundaries: allContractFields.filter((field) => field.projectId === selectedContractId),
+        fieldSamples,
+        fieldSampleCountByBoundaryId,
+        fieldSummaries,
+        trackCount: tracks.length,
+        translateServiceLabel: (serviceKey: string) => {
+          if (serviceKey === 'basic_nutrients') return t('orders.wizard.serviceBasic');
+          if (serviceKey === 'nmin') return t('orders.wizard.serviceNmin');
+          if (serviceKey === 'nematodes') return t('orders.wizard.serviceNematodes');
+          return serviceKey;
+        },
+      });
+      setShowExportMenu(false);
+      toast.success(t('orders.export.excelSuccess', { name: selectedContract.name }));
+    } catch (error) {
+      console.error('Failed to export completed project workbook:', error);
+      toast.error(t('orders.export.excelFailed'));
+    }
+  }, [
+    activeWizardLabProvider,
+    allContractFields,
+    canExportSelectedContract,
+    fieldSampleCountByBoundaryId,
+    fieldSamples,
+    fieldSummaries,
+    projectDataMap,
+    language,
+    selectedContract,
+    selectedContractId,
+    selectedContractStatus,
+    t,
+    tracks,
+  ]);
+
+  const handleExportShapes = useCallback(async () => {
+    if (!selectedContractId || !selectedContract || !canExportSelectedContract) {
+      return;
+    }
+
+    try {
+      await downloadCompletedProjectShapes({
+        contractId: selectedContract.id,
+        contractName: selectedContract.name,
+        contractStatus: selectedContractStatus,
+        clientId: selectedContract.clientId || null,
+        language,
+        labProvider: activeWizardLabProvider,
+        projectData: projectDataMap[selectedContractId] || null,
+        boundaries: allContractFields.filter((field) => field.projectId === selectedContractId),
+        fieldSamples,
+        fieldSampleCountByBoundaryId,
+        fieldSummaries,
+        trackCount: tracks.length,
+        translateServiceLabel: (serviceKey: string) => {
+          if (serviceKey === 'basic_nutrients') return t('orders.wizard.serviceBasic');
+          if (serviceKey === 'nmin') return t('orders.wizard.serviceNmin');
+          if (serviceKey === 'nematodes') return t('orders.wizard.serviceNematodes');
+          return serviceKey;
+        },
+      });
+      setShowExportMenu(false);
+      toast.success(t('orders.export.shapesSuccess', { name: selectedContract.name }));
+    } catch (error) {
+      console.error('Failed to export completed project shapes:', error);
+      toast.error(t('orders.export.shapesFailed'));
+    }
+  }, [
+    activeWizardLabProvider,
+    allContractFields,
+    canExportSelectedContract,
+    fieldSampleCountByBoundaryId,
+    fieldSamples,
+    fieldSummaries,
+    projectDataMap,
+    language,
+    selectedContract,
+    selectedContractId,
+    selectedContractStatus,
+    t,
+    tracks,
+  ]);
+
+  const handleTriggerLufaResultImport = useCallback(() => {
+    if (!selectedContractId || !selectedContract?.clientId || activeWizardLabProvider !== 'lufa_nrw') {
+      return;
+    }
+    lufaResultFileInputRef.current?.click();
+  }, [activeWizardLabProvider, selectedContract, selectedContractId]);
+
+  const handleLufaResultFileChange = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file || !selectedContractId || !selectedContract?.clientId || activeWizardLabProvider !== 'lufa_nrw') {
+      return;
+    }
+
+    if (!selectedProjectData) {
+      toast.error(t('orders.export.lufaResultImportFailed'));
+      return;
+    }
+
+    try {
+      const parsed = await parseLufaResultXmlFile(file, selectedProjectData as OrderDraft);
+      const nextProjectData = {
+        ...selectedProjectData,
+        lufaResults: parsed,
+        updatedAt: new Date().toISOString(),
+      };
+
+      setProjectDataMap((prev) => ({
+        ...prev,
+        [selectedContractId]: nextProjectData,
+      }));
+
+      await orderService.upsertDraft(nextProjectData as OrderDraft, selectedContract.clientId);
+      setShowExportMenu(false);
+      toast.success(t('orders.export.lufaResultImportSuccess', { count: parsed.probeCount }));
+    } catch (error) {
+      console.error('Failed to import LUFA result XML:', error);
+      const isFormatError = error instanceof Error && (
+        error.message === 'Invalid LUFA result XML'
+        || error.message === 'Unsupported LUFA result format'
+      );
+      toast.error(isFormatError ? t('orders.export.lufaResultInvalidFile') : t('orders.export.lufaResultImportFailed'));
+    }
+  }, [activeWizardLabProvider, selectedContract, selectedContractId, selectedProjectData, t]);
+
+  const continueButtonLabel = useMemo(() => (
+    nextWizardStep
+      ? t('orders.wizard.continueToStep', {
+        step: nextWizardStep.visibleStep,
+        defaultValue: `Continue to Step ${nextWizardStep.visibleStep}`
+      })
+      : ''
+  ), [nextWizardStep, t]);
 
   const filterButtons = [
     { key: 'submitted' as const, label: t('orders.filters.submitted') },
@@ -1904,20 +2747,6 @@ export default function OrdersMainPage() {
     completed: t('orders.filters.completed')
   };
 
-  const confirmationQuips = useMemo(() => ([
-    t('orders.humor.confirmationQuips.0'),
-    t('orders.humor.confirmationQuips.1'),
-    t('orders.humor.confirmationQuips.2'),
-    t('orders.humor.confirmationQuips.3'),
-    t('orders.humor.confirmationQuips.4')
-  ]), [t]);
-  const nextConfirmationQuip = useCallback(() => {
-    const list = confirmationQuips.length ? confirmationQuips : ['Well, that happened.'];
-    const index = confirmationQuipIndexRef.current % list.length;
-    confirmationQuipIndexRef.current += 1;
-    return list[index];
-  }, [confirmationQuips]);
-
   const userDisplayName = useMemo(() => {
     const firstName = profileDraft?.firstName?.trim() || '';
     const lastName = profileDraft?.lastName?.trim() || '';
@@ -1936,7 +2765,7 @@ export default function OrdersMainPage() {
     return selectedOwnerId || selectedContract?.clientId || null;
   }, [isAdmin, selectedOwnerId, selectedContract?.clientId, user?.uid]);
 
-  const filteredContracts = useMemo(() => {
+  const _filteredContracts = useMemo(() => {
     return contracts.filter((contract) => {
       const status = contractStatusMap[contract.id] || 'submitted';
       return status === activeFilter;
@@ -1986,7 +2815,10 @@ export default function OrdersMainPage() {
     try {
       const confirmed = await showConfirmation(
         t('orders.markCompleteConfirmTitle'),
-        t('orders.markCompleteConfirmMessage', { name: contract.name }) || `Mark "${contract.name}" as completed?`,
+        t('orders.markCompleteConfirmMessage', {
+          name: contract.name,
+          defaultValue: `Mark "${contract.name}" as completed?`,
+        }),
         {
           type: 'warning',
           confirmText: t('orders.markComplete'),
@@ -2021,14 +2853,17 @@ export default function OrdersMainPage() {
       console.error('Failed to mark contract complete:', error);
       toast.error(t('orders.markCompleteFailed'));
     }
-  }, [db, isAdmin, user?.uid, t, showConfirmation]);
+  }, [isAdmin, user?.uid, t, showConfirmation]);
 
   const handleMarkContractInProgress = useCallback(async (contract: ContractEntry) => {
     if (!isAdmin || !contract.clientId) return;
     try {
       const confirmed = await showConfirmation(
         t('orders.markInProgressConfirmTitle'),
-        t('orders.markInProgressConfirmMessage', { name: contract.name }) || `Move "${contract.name}" back to in progress?`,
+        t('orders.markInProgressConfirmMessage', {
+          name: contract.name,
+          defaultValue: `Move "${contract.name}" back to in progress?`,
+        }),
         {
           type: 'warning',
           confirmText: t('orders.markInProgress'),
@@ -2064,7 +2899,7 @@ export default function OrdersMainPage() {
       console.error('Failed to mark contract in progress:', error);
       toast.error(t('orders.markInProgressFailed'));
     }
-  }, [db, isAdmin, t, showConfirmation]);
+  }, [isAdmin, t, showConfirmation]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -2176,7 +3011,7 @@ export default function OrdersMainPage() {
   }, [selectedContractId, projectDataMap, showStepModal, t]);
 
   const showRightSidebar = Boolean(
-    !showStepModal || selectedStep === 4 || selectedStep === 5
+    !showStepModal || selectedStep === 3 || selectedStep === 4 || selectedStep === 5
   );
 
   const mapFieldBoundaries = useMemo(() => {
@@ -2194,6 +3029,7 @@ export default function OrdersMainPage() {
         coordinates: field.geometry.coordinates,
         color: field.color ?? '#3B82F6',
         properties: {
+          ...(field.properties || {}),
           baseId: field.baseId,
           areaHa: field.areaHa,
           isActive,
@@ -2256,15 +3092,35 @@ export default function OrdersMainPage() {
 
   const canMapEdit = isAdmin || showStepModal || Boolean(draftOverrideId);
   const showCompactFieldPanel = showRightSidebar && combinedFields.length > 0;
+  const uploadedFieldByBoundaryId = useMemo(() => {
+    const map = new Map<string, ContractField>();
+    allContractFields.forEach((field) => {
+      if (field.firestoreId == null) return;
+      map.set(String(field.firestoreId), field);
+    });
+    return map;
+  }, [allContractFields]);
   const showCompactFieldPanelExpanded = showCompactFieldPanel && !compactFieldPanelCollapsed;
-  const compactFieldStepActive = showCompactFieldPanelExpanded && showStepModal && (selectedStep === 4 || selectedStep === 5);
-  const wizardContentMaxHeightClass = compactFieldStepActive
-    ? 'max-h-[17.5rem] sm:max-h-[19.5rem] lg:max-h-[19rem] xl:max-h-[calc(100vh-19rem)]'
-    : showCompactFieldPanelExpanded
-      ? 'max-h-[38vh] sm:max-h-[42vh] lg:max-h-[42vh] xl:max-h-[calc(100vh-19rem)]'
-      : 'max-h-[calc(100vh-10.5rem)] sm:max-h-[calc(100vh-11.25rem)] xl:max-h-[calc(100vh-19rem)]';
+  const isDesktopWizardLayout = Boolean(viewportWidthPx && viewportWidthPx >= 1024);
+  const usesDesktopFieldSidebar = Boolean(viewportWidthPx && viewportWidthPx >= 1280);
+  const compactFieldStepActive = !isDesktopWizardLayout && showCompactFieldPanelExpanded && showStepModal && (selectedStep === 3 || selectedStep === 4 || selectedStep === 5);
+  const wizardContentMaxHeightClass = isDesktopWizardLayout
+    ? ''
+    : compactFieldStepActive
+      ? 'max-h-[17.5rem] sm:max-h-[19.5rem]'
+      : showCompactFieldPanelExpanded
+        ? 'max-h-[38vh] sm:max-h-[42vh]'
+        : 'max-h-[calc(100vh-10.5rem)] sm:max-h-[calc(100vh-11.25rem)]';
   const wizardContentMaxHeightStyle = useMemo(() => {
     if (!viewportHeightPx) return undefined;
+
+    if (isDesktopWizardLayout) {
+      // Keep the lower-left map scale/search controls visible on desktop.
+      const desktopHeight = Math.max(320, viewportHeightPx - 248);
+      return {
+        maxHeight: `${desktopHeight}px`
+      };
+    }
 
     if (compactFieldStepActive) {
       return { maxHeight: '17.5rem' };
@@ -2275,10 +3131,20 @@ export default function OrdersMainPage() {
     }
 
     return { maxHeight: `${Math.max(280, viewportHeightPx - 168)}px` };
-  }, [viewportHeightPx, compactFieldStepActive, showCompactFieldPanelExpanded]);
+  }, [viewportHeightPx, isDesktopWizardLayout, compactFieldStepActive, showCompactFieldPanelExpanded]);
   const compactFieldPanelHeightClass = showStepModal
-    ? 'h-[7.75rem] sm:h-[8rem] lg:h-[8.5rem]'
-    : 'h-[8rem] sm:h-[8.25rem] lg:h-[8.75rem]';
+    ? 'min-h-[8.75rem] sm:min-h-[9rem] lg:min-h-[9.5rem]'
+    : 'min-h-[9.25rem] sm:min-h-[9.75rem] lg:min-h-[10.25rem]';
+
+  useEffect(() => {
+    if (!selectedFieldKey) return;
+    if (usesDesktopFieldSidebar && fieldsSidebarCollapsed) return;
+    if (!usesDesktopFieldSidebar && !showCompactFieldPanelExpanded) return;
+    const el = fieldItemRefs.current[selectedFieldKey];
+    const container = usesDesktopFieldSidebar ? fieldsListRef.current : compactFieldPanelScrollRef.current;
+    if (!el || !container || !container.contains(el)) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+  }, [selectedFieldKey, fieldsSidebarCollapsed, usesDesktopFieldSidebar, showCompactFieldPanelExpanded]);
 
   useEffect(() => {
     if (!showCompactFieldPanel) {
@@ -2286,11 +3152,145 @@ export default function OrdersMainPage() {
     }
   }, [showCompactFieldPanel]);
 
+  useEffect(() => {
+    const container = compactFieldPanelScrollRef.current;
+    if (!container || usesDesktopFieldSidebar || !showCompactFieldPanelExpanded) {
+      return;
+    }
+
+    let activePointerId: number | null = null;
+    let startClientX = 0;
+    let startClientY = 0;
+    let startScrollLeft = 0;
+    let dragging = false;
+    let dragAxis: 'x' | 'y' | null = null;
+
+    const teardownWindowListeners = () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', finishPointerDrag);
+      window.removeEventListener('pointercancel', finishPointerDrag);
+    };
+
+    const clearDrag = () => {
+      activePointerId = null;
+      startClientX = 0;
+      startClientY = 0;
+      startScrollLeft = container.scrollLeft;
+      dragging = false;
+      dragAxis = null;
+      container.style.cursor = 'grab';
+    };
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (container.scrollWidth <= container.clientWidth) {
+        return;
+      }
+      if (event.pointerType === 'mouse' && event.button !== 0) {
+        return;
+      }
+
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest('button, input, select, textarea, label, a')) {
+        return;
+      }
+
+      activePointerId = event.pointerId;
+      startClientX = event.clientX;
+      startClientY = event.clientY;
+      startScrollLeft = container.scrollLeft;
+      dragging = false;
+      dragAxis = null;
+      container.style.cursor = 'grab';
+
+      window.addEventListener('pointermove', onPointerMove, { passive: false });
+      window.addEventListener('pointerup', finishPointerDrag);
+      window.addEventListener('pointercancel', finishPointerDrag);
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      if (activePointerId !== event.pointerId) {
+        return;
+      }
+
+      const deltaX = event.clientX - startClientX;
+      const deltaY = event.clientY - startClientY;
+      if (!dragAxis) {
+        if (Math.abs(deltaX) < 6 && Math.abs(deltaY) < 6) {
+          return;
+        }
+
+        dragAxis = Math.abs(deltaX) >= Math.abs(deltaY) ? 'x' : 'y';
+        if (dragAxis !== 'x') {
+          teardownWindowListeners();
+          clearDrag();
+          return;
+        }
+      }
+
+      if (!dragging) {
+        dragging = true;
+      }
+
+      container.style.cursor = 'grabbing';
+      container.scrollLeft = startScrollLeft - deltaX;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    const finishPointerDrag = (event: PointerEvent) => {
+      if (activePointerId !== event.pointerId) {
+        return;
+      }
+
+      if (dragging) {
+        lastCompactFieldPanelDragAtRef.current = Date.now();
+      }
+
+      teardownWindowListeners();
+      clearDrag();
+    };
+
+    const onWheel = (event: WheelEvent) => {
+      if (container.scrollWidth <= container.clientWidth) {
+        return;
+      }
+
+      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY)
+        ? event.deltaX
+        : event.deltaY;
+
+      if (!delta) {
+        return;
+      }
+
+      container.scrollLeft += delta;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    container.style.cursor = 'grab';
+    container.style.touchAction = 'pan-x';
+    container.addEventListener('pointerdown', onPointerDown);
+    container.addEventListener('wheel', onWheel, { passive: false });
+
+    return () => {
+      teardownWindowListeners();
+      container.style.cursor = '';
+      container.style.touchAction = '';
+      container.removeEventListener('pointerdown', onPointerDown);
+      container.removeEventListener('wheel', onWheel);
+    };
+  }, [usesDesktopFieldSidebar, showCompactFieldPanelExpanded]);
+
   const renderFieldCards = useCallback((includeRefs: boolean, compact = false) => (
     combinedFields.map((field) => (
       <div
         key={field.key}
         onClick={(event) => {
+          if (compact && Date.now() - lastCompactFieldPanelDragAtRef.current < 180) {
+            return;
+          }
+
           const isMulti = event.ctrlKey || event.metaKey;
           selectFieldKey(field.key, isMulti);
           if (field.source === 'uploaded') {
@@ -2310,7 +3310,7 @@ export default function OrdersMainPage() {
         ref={includeRefs ? ((el) => {
           fieldItemRefs.current[field.key] = el;
         }) : undefined}
-        className={`${compact ? 'h-auto min-h-full min-w-[11.5rem] max-w-[11.5rem] sm:min-w-[12.5rem] sm:max-w-[12.5rem] p-1.5 sm:p-2 snap-start overflow-hidden' : 'p-3'} rounded-lg border cursor-pointer transition-all ${
+        className={`${compact ? 'h-auto min-w-[11.5rem] max-w-[11.5rem] self-stretch sm:min-w-[12.5rem] sm:max-w-[12.5rem] p-1.5 sm:p-2 snap-start' : 'p-3'} rounded-lg border cursor-pointer transition-all ${
           selectedFieldKeys.includes(field.key)
             ? 'bg-blue-500/20 dark:bg-blue-500/30 border-blue-500/40 ring-1 ring-blue-500/50'
             : 'bg-white/50 dark:bg-gray-800/50 border-gray-200/50 dark:border-gray-700/50 hover:bg-white dark:hover:bg-gray-800'
@@ -2323,110 +3323,137 @@ export default function OrdersMainPage() {
           const sampleCount = field.source === 'uploaded'
             ? (fieldSampleCountByBoundaryId[String(field.boundaryId)] || 0)
             : 0;
+          const barcodeCount = getBagCodesForField(field as Record<string, any>).length;
+          const uploadedBoundary = field.source === 'uploaded'
+            ? uploadedFieldByBoundaryId.get(String(field.boundaryId))
+            : undefined;
+          const derivedSamplingStatus = field.source === 'uploaded'
+            ? deriveBoundarySamplingStatus(sampleCount, uploadedBoundary ? { properties: uploadedBoundary.properties } : undefined)
+            : undefined;
           const status: 'pending' | 'completed' | 'skipped' | 'mixed' | undefined =
             field.source === 'uploaded'
-              ? (
-                sampleCount > fieldCompletionSampleThreshold
+              ? (summaryStatus === 'skipped'
+                ? 'skipped'
+                : derivedSamplingStatus === 'completed'
                   ? 'completed'
-                  : (summaryStatus === 'skipped' ? 'skipped' : 'pending')
-              )
+                  : derivedSamplingStatus === 'in_progress'
+                    ? 'mixed'
+                    : 'pending')
               : summaryStatus;
           const landUseBadge = summary?.badges?.find((badge) => badge.startsWith('LU '));
           const landUseValue = landUseBadge ? landUseBadge.slice(3).trim() : '';
           const otherBadges = summary?.badges?.filter((badge) => badge !== landUseBadge) || [];
           return (
-            <div className={`${compact ? 'mb-0.5 space-y-0.5' : 'mb-2 space-y-2'}`}>
-              {status && (
-                <div className="flex flex-wrap items-center gap-1">
-                  <span className={`${compact ? 'text-[9px]' : 'text-[10px]'} uppercase tracking-wide text-gray-500 dark:text-gray-400`}>{t('orders.statusLabel')}</span>
-                  <span
-                    className={`${compact ? 'text-[9px] px-1.5' : 'text-[11px] px-2'} py-0.5 rounded-full font-semibold ${
-                      status === 'completed'
-                        ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
-                        : status === 'skipped'
-                        ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300'
-                        : status === 'pending'
-                        ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
-                        : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200'
-                    }`}
+            <>
+              <div className={`${compact ? 'mb-0.5 space-y-0.5' : 'mb-2 space-y-2'}`}>
+                {status && (
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className={`${compact ? 'text-[9px]' : 'text-[10px]'} uppercase tracking-wide text-gray-500 dark:text-gray-400`}>{t('orders.statusLabel')}</span>
+                    <span
+                      className={`${compact ? 'text-[9px] px-1.5' : 'text-[11px] px-2'} py-0.5 rounded-full font-semibold ${
+                        status === 'completed'
+                          ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+                          : status === 'mixed'
+                          ? 'bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300'
+                          : status === 'skipped'
+                          ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300'
+                          : status === 'pending'
+                          ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                          : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200'
+                      }`}
+                    >
+                      {t(`orders.status.${status}`, { defaultValue: status })}
+                    </span>
+                    {landUseValue && (
+                      <span className={`${compact ? 'text-[9px] px-1.5' : 'text-[11px] px-2'} py-0.5 rounded-full font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200`}>
+                        {t('orders.landUseBadge', {
+                          value: landUseValue,
+                          defaultValue: `Land use ${landUseValue}`,
+                        })}
+                      </span>
+                    )}
+                    {barcodeCount > 0 && (
+                      <span className={`${compact ? 'text-[9px] px-1.5' : 'text-[11px] px-2'} py-0.5 rounded-full font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200`}>
+                        {t('orders.bagCodes.countBadge', {
+                          count: barcodeCount,
+                          defaultValue: `${barcodeCount} codes`,
+                        })}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {(((summary?.services?.length ?? 0) > 0) || otherBadges.length > 0) && (
+                  <div className="flex flex-wrap items-center gap-1">
+                    {summary?.services?.map((label) => (
+                      <span
+                        key={`${field.key}-${label}`}
+                        className={`${compact ? 'text-[8px] px-1.5' : 'text-[10px] px-2'} py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200`}
+                      >
+                        {label}
+                      </span>
+                    ))}
+                    {otherBadges.map((badge) => (
+                      <span
+                        key={`${field.key}-${badge}`}
+                        className={`${compact ? 'text-[9px] px-1.5' : 'text-[11px] px-2'} py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200`}
+                      >
+                        {badge}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className={`flex items-start ${compact ? 'gap-1.5' : 'gap-2'}`}>
+                <div
+                  className={`${compact ? 'w-3 h-3' : 'w-4 h-4'} rounded border-2 border-white flex-shrink-0 mt-0.5`}
+                  style={{
+                    backgroundColor: field.source === 'uploaded'
+                      ? (derivedSamplingStatus === 'completed'
+                        ? '#16A34A'
+                        : sampleCount > 0
+                          ? '#FF1493'
+                          : (field.color ?? '#3B82F6'))
+                      : (field.color ?? '#3B82F6')
+                  }}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className={`${compact ? 'text-[11px] sm:text-[12px] leading-4' : 'text-sm'} font-medium text-gray-900 dark:text-white truncate`}>
+                    {field.baseName}
+                  </div>
+                  <div className={`${compact ? 'text-[8px] sm:text-[9px] leading-3.5' : 'text-xs'} text-gray-600 dark:text-gray-400 space-y-0`}>
+                    <div>{t('orders.fieldIdLabel', { id: field.baseId, defaultValue: `ID: ${field.baseId}` })}</div>
+                    <div>{t('orders.fieldAreaLabel', { area: field.areaHa, defaultValue: `Area: ${field.areaHa} ha` })}</div>
+                    {field.source === 'uploaded' && (
+                      <div className={`${compact ? 'text-[9px] sm:text-[10px]' : 'text-xs'} font-semibold ${derivedSamplingStatus === 'completed' ? 'text-green-600 dark:text-green-400' : sampleCount > 0 ? 'text-pink-600 dark:text-pink-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                        {fieldSampleCountByBoundaryId[String(field.boundaryId)] || 0} samples
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {isAdmin && (
+                  <button
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openFieldDetails(field.key);
+                    }}
+                    title={t('common.edit')}
+                    aria-label={t('common.edit')}
+                    className={compact
+                      ? 'ml-auto flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-full border border-gray-200/60 dark:border-gray-700/60 bg-white/90 dark:bg-gray-900/85 text-blue-700 dark:text-blue-200 shadow-sm transition-colors hover:bg-white dark:hover:bg-gray-900 touch-manipulation shrink-0'
+                      : 'ml-auto rounded-lg border border-gray-200/50 dark:border-gray-700/50 bg-white/80 dark:bg-gray-900/80 px-2.5 py-1.5 text-xs font-semibold text-blue-700 dark:text-blue-200 shadow-sm hover:bg-white dark:hover:bg-gray-900'
+                    }
                   >
-                    {t(`orders.status.${status}`, { defaultValue: status })}
-                  </span>
-                  {landUseValue && (
-                    <span className={`${compact ? 'text-[9px] px-1.5' : 'text-[11px] px-2'} py-0.5 rounded-full font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200`}>
-                      {t('orders.landUseBadge', { value: landUseValue }) || `Land use ${landUseValue}`}
-                    </span>
-                  )}
-                </div>
-              )}
-              {(((summary?.services?.length ?? 0) > 0) || otherBadges.length > 0) && (
-                <div className="flex flex-wrap items-center gap-1">
-                  {summary?.services?.map((label) => (
-                    <span
-                      key={`${field.key}-${label}`}
-                      className={`${compact ? 'text-[8px] px-1.5' : 'text-[10px] px-2'} py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200`}
-                    >
-                      {label}
-                    </span>
-                  ))}
-                  {otherBadges.map((badge) => (
-                    <span
-                      key={`${field.key}-${badge}`}
-                      className={`${compact ? 'text-[9px] px-1.5' : 'text-[11px] px-2'} py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200`}
-                    >
-                      {badge}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
+                    {compact ? <Pencil className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> : t('common.edit')}
+                  </button>
+                )}
+              </div>
+            </>
           );
         })()}
-        <div className={`flex items-start ${compact ? 'gap-1.5' : 'gap-2'}`}>
-          <div
-            className={`${compact ? 'w-3 h-3' : 'w-4 h-4'} rounded border-2 border-white flex-shrink-0 mt-0.5`}
-            style={{
-              backgroundColor: field.source === 'uploaded' && (fieldSampleCountByBoundaryId[String(field.boundaryId)] || 0) > 0
-                ? '#FF1493'
-                : (field.color ?? '#3B82F6')
-            }}
-          />
-          <div className="flex-1 min-w-0">
-            <div className={`${compact ? 'text-[11px] sm:text-[12px] leading-4' : 'text-sm'} font-medium text-gray-900 dark:text-white truncate`}>
-              {field.baseName}
-            </div>
-            <div className={`${compact ? 'text-[8px] sm:text-[9px] leading-3.5' : 'text-xs'} text-gray-600 dark:text-gray-400 space-y-0`}>
-              <div>{t('orders.fieldIdLabel', { id: field.baseId }) || `ID: ${field.baseId}`}</div>
-              <div>{t('orders.fieldAreaLabel', { area: field.areaHa }) || `Area: ${field.areaHa} ha`}</div>
-              {field.source === 'uploaded' && (
-                <div className={`${compact ? 'text-[9px] sm:text-[10px]' : 'text-xs'} font-semibold ${(fieldSampleCountByBoundaryId[String(field.boundaryId)] || 0) > 0 ? 'text-pink-600 dark:text-pink-400' : 'text-gray-500 dark:text-gray-400'}`}>
-                  {fieldSampleCountByBoundaryId[String(field.boundaryId)] || 0} samples
-                </div>
-              )}
-            </div>
-          </div>
-          {isAdmin && (
-            <button
-              onClick={(event) => {
-                event.stopPropagation();
-                openFieldDetails(field.key);
-              }}
-              title={t('common.edit')}
-              aria-label={t('common.edit')}
-              className={compact
-                ? 'ml-auto flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-full border border-gray-200/60 dark:border-gray-700/60 bg-white/90 dark:bg-gray-900/85 text-blue-700 dark:text-blue-200 shadow-sm transition-colors hover:bg-white dark:hover:bg-gray-900 touch-manipulation shrink-0'
-                : 'ml-auto rounded-lg border border-gray-200/50 dark:border-gray-700/50 bg-white/80 dark:bg-gray-900/80 px-2.5 py-1.5 text-xs font-semibold text-blue-700 dark:text-blue-200 shadow-sm hover:bg-white dark:hover:bg-gray-900'
-              }
-            >
-              {compact ? <Pencil className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> : t('common.edit')}
-            </button>
-          )}
-        </div>
       </div>
     ))
   ), [
     combinedFields,
-    fieldCompletionSampleThreshold,
     fieldSampleCountByBoundaryId,
     fieldSummaries,
     isAdmin,
@@ -2436,6 +3463,8 @@ export default function OrdersMainPage() {
     selectedStep,
     showStepModal,
     t,
+    getBagCodesForField,
+    uploadedFieldByBoundaryId,
   ]);
 
   return (
@@ -2456,7 +3485,10 @@ export default function OrdersMainPage() {
           <OrdersMapView
             currentPosition={null}
             tracks={tracks}
+            fieldSamples={fieldSamples}
             fieldBoundaries={mapFieldBoundaries}
+            boundaryAutoFitKey={selectedContractId || activeOwnerId || ''}
+            preferActiveBoundaryFit={Boolean(selectedContractId)}
             drawnFields={previewDrawnFields.map((field) => ({ id: field.id, geometry: field.geometry, color: field.color, baseName: field.baseName, baseId: field.baseId, areaHa: field.areaHa }))}
             focusedBoundaryId={focusedBoundaryId}
             focusedDrawnFieldId={focusedDrawnFieldId}
@@ -2522,7 +3554,10 @@ export default function OrdersMainPage() {
                 const nextField: DrawnField = {
                   id,
                   baseId: `D${nextIndex}`,
-                  baseName: t('orders.drawnFieldDefaultName', { index: nextIndex }) || `Drawn Field ${nextIndex}`,
+                  baseName: t('orders.drawnFieldDefaultName', {
+                    index: nextIndex,
+                    defaultValue: `Drawn Field ${nextIndex}`,
+                  }),
                   areaHa,
                   geometry: simplifiedGeometry,
                   color: '#3B82F6'
@@ -2821,6 +3856,127 @@ export default function OrdersMainPage() {
                   })}
                 </div>
                 <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <input
+                      ref={lufaResultFileInputRef}
+                      type="file"
+                      accept=".xml,text/xml,application/xml"
+                      className="hidden"
+                      onChange={handleLufaResultFileChange}
+                    />
+                    <button
+                      onClick={() => {
+                        if (!canExportSelectedContract) return;
+                        const next = !showExportMenu;
+                        setShowExportMenu(next);
+                        if (next) {
+                          setOpenFilterMenu(null);
+                          setShowHeaderMenu(false);
+                          setShowUserMenu(false);
+                          setShowOwnersDropdown(false);
+                          setShowContractsDropdown(false);
+                        }
+                      }}
+                      disabled={!canExportSelectedContract}
+                      className={`glass-panel glass-panel-light dark:glass-panel-dark flex items-center justify-center gap-2 h-10 w-10 xl:w-auto xl:px-4 rounded-xl transition-all ${
+                        canExportSelectedContract
+                          ? 'text-gray-900 dark:text-white hover:bg-gray-200/20 dark:hover:bg-gray-700/20'
+                          : 'text-gray-400 dark:text-gray-500 opacity-60 cursor-not-allowed'
+                      }`}
+                      title={exportButtonTitle}
+                      aria-expanded={showExportMenu}
+                      aria-label={t('orders.export.label')}
+                    >
+                      <Download className="w-5 h-5" />
+                      <span className="hidden xl:inline text-sm font-semibold">{t('orders.export.label')}</span>
+                      <ChevronDown className={`hidden xl:block w-4 h-4 transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {showExportMenu && (
+                      <div className="absolute right-0 mt-2 w-[min(22rem,calc(100vw-1rem))] rounded-xl shadow-xl backdrop-blur-2xl bg-white/90 dark:bg-gray-900/90 border border-gray-200/50 dark:border-gray-700/50 z-[5001] overflow-hidden">
+                        <div className="px-4 py-3 border-b border-gray-200/50 dark:border-gray-700/50">
+                          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+                            {t('orders.export.menuTitle')}
+                          </div>
+                          <div className="text-sm font-semibold text-gray-900 dark:text-white mt-1 truncate">
+                            {selectedContract?.name}
+                          </div>
+                        </div>
+                        <div className="py-2">
+                          <button
+                            onClick={handleExportWorkbook}
+                            className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-gray-100/60 dark:hover:bg-gray-800/60 transition-colors"
+                          >
+                            <Download className="w-4 h-4 mt-0.5 text-gray-700 dark:text-gray-200" />
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-sm font-semibold text-gray-900 dark:text-white">
+                                {t('orders.export.excel')}
+                              </span>
+                              <span className="block text-xs text-gray-500 dark:text-gray-400">
+                                {t('orders.export.excelDescription')}
+                              </span>
+                            </span>
+                          </button>
+                          {activeWizardLabProvider === 'lufa_nrw' && (
+                            <button
+                              onClick={handleTriggerLufaResultImport}
+                              className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-gray-100/60 dark:hover:bg-gray-800/60 transition-colors"
+                              title={t('orders.export.lufaResultImportDescription')}
+                            >
+                              <Upload className="w-4 h-4 mt-0.5" />
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-sm font-semibold text-gray-900 dark:text-white">
+                                  {t('orders.export.lufaResultImport')}
+                                </span>
+                                <span className="block text-xs text-gray-500 dark:text-gray-400">
+                                  {t('orders.export.lufaResultImportDescription')}
+                                </span>
+                              </span>
+                            </button>
+                          )}
+                          {activeWizardLabProvider === 'lufa_nrw' && selectedProjectData?.lufaResults && (
+                            <div className="mx-4 mt-2 rounded-lg border border-emerald-200/70 dark:border-emerald-700/60 bg-emerald-50/80 dark:bg-emerald-900/20 px-3 py-3 text-xs text-emerald-900 dark:text-emerald-100 space-y-1">
+                              <div className="font-semibold text-emerald-900 dark:text-emerald-100">
+                                {t('orders.export.lufaResultSummary')}
+                              </div>
+                              <div>
+                                {t('orders.export.lufaResultSummaryFile')}: {selectedProjectData.lufaResults.fileName || selectedProjectData.lufaResults.exportFileName || 'XML'}
+                              </div>
+                              <div>
+                                {t('orders.export.lufaResultSummaryImportedAt')}: {new Date(selectedProjectData.lufaResults.importedAt).toLocaleString(language || undefined)}
+                              </div>
+                              <div>
+                                {t('orders.export.lufaResultSummaryProbes', {
+                                  orders: selectedProjectData.lufaResults.orderCount,
+                                  probes: selectedProjectData.lufaResults.probeCount,
+                                })}
+                              </div>
+                              <div className={selectedProjectData.lufaResults.unmatchedProbeCount ? 'text-amber-700 dark:text-amber-300' : ''}>
+                                {t('orders.export.lufaResultSummaryUnmatched', {
+                                  count: selectedProjectData.lufaResults.unmatchedProbeCount || 0,
+                                })}
+                              </div>
+                            </div>
+                          )}
+                          <button
+                            onClick={handleExportShapes}
+                            className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-gray-100/60 dark:hover:bg-gray-800/60 transition-colors"
+                            title={t('orders.export.shapesDescription')}
+                          >
+                            <FileText className="w-4 h-4 mt-0.5" />
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-sm font-semibold text-gray-900 dark:text-white">
+                                {t('orders.export.shapes')}
+                              </span>
+                              <span className="block text-xs text-gray-500 dark:text-gray-400">
+                                {t('orders.export.shapesDescription')}
+                              </span>
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   <button
                     onClick={() => {
                       const next = !showHeaderMenu;
@@ -2829,6 +3985,7 @@ export default function OrdersMainPage() {
                       setShowUserMenu(false);
                       setShowOwnersDropdown(false);
                       setShowContractsDropdown(false);
+                      setShowExportMenu(false);
                     }}
                     className="header-status-burger glass-panel glass-panel-light dark:glass-panel-dark items-center justify-center w-10 h-10 rounded-xl text-gray-900 dark:text-white hover:bg-gray-200/20 dark:hover:bg-gray-700/20 transition-all"
                     title={t('common.menu')}
@@ -3095,14 +4252,14 @@ export default function OrdersMainPage() {
         </header>
 
         {(showSidebar || showStepModal || showCompactFieldPanel) && (
-          <div className="pointer-events-none absolute top-20 left-3 right-3 bottom-16 sm:top-[5.5rem] sm:left-4 sm:right-4 sm:bottom-20 xl:left-4 xl:right-auto xl:bottom-auto z-[3999] flex items-start gap-2 sm:gap-3">
+          <div className="pointer-events-none absolute top-20 left-3 right-3 bottom-16 sm:top-[5.5rem] sm:left-4 sm:right-4 sm:bottom-20 xl:left-4 xl:right-auto xl:bottom-24 z-[3999] flex items-start gap-2 sm:gap-3">
             {showSidebar && (
-              <div className={`pointer-events-auto flex shrink-0 flex-col gap-2 sm:gap-3 ${selectedStep === 3 ? 'w-20 sm:w-24 xl:w-[8rem]' : 'w-11 sm:w-12 xl:w-14'}`}>
+              <div className="pointer-events-auto flex shrink-0 flex-col gap-2 sm:gap-3 w-11 sm:w-12 xl:w-14">
                 <div className="rounded-xl shadow-2xl overflow-visible backdrop-blur-2xl bg-white/70 dark:bg-gray-900/70 border border-gray-200/50 dark:border-gray-700/50 animate-slide-down">
                   <div className="p-2 max-h-[60vh] overflow-y-auto scrollbar-modern">
-                    {wizardSteps.map(({ step }, index) => {
+                    {wizardSteps.map(({ step, visibleStep }, index) => {
                       const isActive = selectedStep === step && showStepModal;
-                      const isComplete = step < selectedStep;
+                      const isComplete = currentWizardStepIndex > index;
                       const isLast = index === wizardSteps.length - 1;
                       return (
                         <div key={step} className="flex flex-col items-center relative">
@@ -3120,7 +4277,7 @@ export default function OrdersMainPage() {
                                   : 'bg-gray-200/70 text-gray-700 dark:bg-gray-800/70 dark:text-gray-300'
                               }`}
                             >
-                              {step}
+                              {visibleStep}
                             </div>
                           </button>
                           {!isLast && (
@@ -3140,31 +4297,26 @@ export default function OrdersMainPage() {
 
                 {selectedStep === 3 && (
                   <div className="rounded-xl shadow-2xl overflow-hidden backdrop-blur-2xl bg-white/70 dark:bg-gray-900/70 border border-gray-200/50 dark:border-gray-700/50">
-                    <div className="px-2 py-2 border-b border-gray-200/50 dark:border-gray-700/50">
-                      <div className="text-[11px] font-semibold text-gray-900 dark:text-white text-center leading-tight whitespace-normal">
-                        {t('orders.controlsShort')}
-                      </div>
-                    </div>
-
-                    <div className="p-2 space-y-1.5">
+                    <div className="p-2 space-y-1">
                       <button
                         onClick={() => {
                           const next = drawingMode === 'polygon' ? null : 'polygon';
                           setDrawingMode(next);
                           if (next) setShowStepModal(false);
                         }}
-                        className={`w-full flex min-h-[3.5rem] flex-col items-center justify-center gap-1 rounded-lg px-2 py-2.5 text-center transition-colors ${
-                          drawingMode === 'polygon'
-                            ? 'bg-blue-500/20 dark:bg-blue-500/30 text-blue-900 dark:text-blue-100 border border-blue-500/40'
-                            : 'bg-gray-100/50 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300 hover:bg-gray-200/50 dark:hover:bg-gray-700/50'
-                        }`}
+                        className="w-full flex items-center justify-center py-1 transition-colors"
                         title={t('orders.drawPolygon')}
                         aria-label={t('orders.drawPolygon')}
                       >
-                        <Pentagon className="h-5 w-5 shrink-0" />
-                        <span className="max-w-full text-[10px] font-medium leading-tight sm:text-[11px]">
-                          {t('orders.polygonShort')}
-                        </span>
+                        <div
+                          className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors ${
+                            drawingMode === 'polygon'
+                              ? 'bg-blue-600 text-white ring-2 ring-blue-300/70'
+                              : 'bg-gray-200/70 text-gray-700 dark:bg-gray-800/70 dark:text-gray-300 hover:bg-gray-300/80 dark:hover:bg-gray-700/80'
+                          }`}
+                        >
+                          <Pentagon className="h-3.5 w-3.5 shrink-0" />
+                        </div>
                       </button>
 
                       <button
@@ -3173,18 +4325,19 @@ export default function OrdersMainPage() {
                           setDrawingMode(next);
                           if (next) setShowStepModal(false);
                         }}
-                        className={`w-full flex min-h-[3.5rem] flex-col items-center justify-center gap-1 rounded-lg px-2 py-2.5 text-center transition-colors ${
-                          drawingMode === 'rectangle'
-                            ? 'bg-blue-500/20 dark:bg-blue-500/30 text-blue-900 dark:text-blue-100 border border-blue-500/40'
-                            : 'bg-gray-100/50 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300 hover:bg-gray-200/50 dark:hover:bg-gray-700/50'
-                        }`}
+                        className="w-full flex items-center justify-center py-1 transition-colors"
                         title={t('orders.drawRectangle')}
                         aria-label={t('orders.drawRectangle')}
                       >
-                        <Square className="h-5 w-5 shrink-0" />
-                        <span className="max-w-full text-[10px] font-medium leading-tight sm:text-[11px]">
-                          {t('orders.rectangleShort')}
-                        </span>
+                        <div
+                          className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors ${
+                            drawingMode === 'rectangle'
+                              ? 'bg-blue-600 text-white ring-2 ring-blue-300/70'
+                              : 'bg-gray-200/70 text-gray-700 dark:bg-gray-800/70 dark:text-gray-300 hover:bg-gray-300/80 dark:hover:bg-gray-700/80'
+                          }`}
+                        >
+                          <Square className="h-3.5 w-3.5 shrink-0" />
+                        </div>
                       </button>
                     </div>
                   </div>
@@ -3237,10 +4390,13 @@ export default function OrdersMainPage() {
                   >
                     <div className="min-w-0">
                       <div className="text-[10px] sm:text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 leading-none">
-                        {t('orders.wizard.stepLabel', { step: selectedStep }) || `Step ${selectedStep}`}
+                        {t('orders.wizard.stepLabel', {
+                          step: currentWizardStep?.visibleStep || 1,
+                          defaultValue: `Step ${currentWizardStep?.visibleStep || 1}`,
+                        })}
                       </div>
                       <div className="mt-0.5 text-sm sm:text-base xl:text-lg font-semibold text-gray-900 dark:text-white truncate leading-tight">
-                        {wizardSteps[selectedStep - 1]?.label}
+                        {currentWizardStep?.label}
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 sm:gap-2 shrink-0" onClick={(event) => event.stopPropagation()}>
@@ -3253,23 +4409,23 @@ export default function OrdersMainPage() {
                       >
                         <ChevronDown className={`w-3.5 h-3.5 sm:w-4 sm:h-4 transition-transform ${wizardPanelCollapsed ? 'rotate-180' : ''}`} />
                       </button>
-                      {selectedStep < 6 && (
+                      {nextWizardStep && (
                         <button
-                          onClick={() => setSelectedStep(selectedStep + 1)}
+                          onClick={() => handleOpenStep(nextWizardStep.step)}
                           disabled={!canContinueStep}
                           className={`h-8 w-8 sm:h-9 sm:w-9 xl:w-auto xl:px-3 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
                             canContinueStep
                               ? 'bg-blue-600 text-white hover:bg-blue-700'
                               : 'bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500'
                           }`}
-                          title={getContinueLabel(selectedStep)}
-                          aria-label={getContinueLabel(selectedStep)}
+                          title={continueButtonLabel}
+                          aria-label={continueButtonLabel}
                         >
                           <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 xl:hidden" />
-                          <span className="hidden xl:inline">{getContinueLabel(selectedStep)}</span>
+                          <span className="hidden xl:inline">{continueButtonLabel}</span>
                         </button>
                       )}
-                      {selectedStep === 6 && (
+                      {lastWizardStep?.step === selectedStep && (
                         <button
                           onClick={() => submitOrderRef.current?.()}
                           disabled={!canSubmitStep || isSubmittingOrder}
@@ -3288,9 +4444,9 @@ export default function OrdersMainPage() {
                       {draftOverrideId && (
                         <button
                           onClick={handleDiscardContract}
-                          disabled={selectedStep === 6 && isSubmittingOrder}
+                          disabled={lastWizardStep?.step === selectedStep && isSubmittingOrder}
                           className={`h-8 w-8 sm:h-9 sm:w-9 xl:w-auto xl:px-3 rounded-lg border border-red-200 text-red-600 bg-white/80 dark:bg-gray-900/80 dark:border-red-900/60 dark:text-red-300 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
-                            selectedStep === 6 && isSubmittingOrder
+                            lastWizardStep?.step === selectedStep && isSubmittingOrder
                               ? 'opacity-60 cursor-not-allowed'
                               : 'hover:bg-red-50/60 dark:hover:bg-red-900/30'
                           }`}
@@ -3329,6 +4485,7 @@ export default function OrdersMainPage() {
                         }}
                         onSubmitStateChange={setIsSubmittingOrder}
                         mapSelectionEvent={mapSelectionEvent}
+                        selectedFieldTargets={selectedWizardFieldTargets}
                         onFieldFocusRequest={handleWizardFieldFocus}
                         onClearSelectionRequest={handleMapBackgroundClick}
                         onStepReadinessChange={setStepReadiness}
@@ -3347,9 +4504,12 @@ export default function OrdersMainPage() {
 
             {showCompactFieldPanelExpanded && (
               <div className="pointer-events-auto xl:hidden absolute bottom-0 left-0 right-0 rounded-xl shadow-2xl overflow-hidden backdrop-blur-2xl bg-white/70 dark:bg-gray-900/70 border border-gray-200/50 dark:border-gray-700/50">
-                <div className={`px-2 pb-2 pt-2 sm:px-3 sm:pb-2.5 sm:pt-2.5 overflow-x-auto overflow-y-hidden ${compactFieldPanelHeightClass} scrollbar-modern`}>
-                  <div className="flex h-full items-start gap-1.5 pr-1 snap-x snap-mandatory">
-                    {renderFieldCards(false, true)}
+                <div
+                  ref={compactFieldPanelScrollRef}
+                  className={`px-2 pb-2 pt-2 sm:px-3 sm:pb-2.5 sm:pt-2.5 overflow-x-auto overflow-y-visible select-none cursor-grab ${compactFieldPanelHeightClass} scrollbar-modern`}
+                >
+                  <div className="flex min-h-full items-stretch gap-1.5 pr-1 snap-x snap-mandatory">
+                    {renderFieldCards(!usesDesktopFieldSidebar, true)}
                   </div>
                 </div>
               </div>
@@ -3358,21 +4518,42 @@ export default function OrdersMainPage() {
         )}
 
         {showCompactFieldPanel && (
-          <button
-            type="button"
-            onClick={() => setCompactFieldPanelCollapsed((prev) => !prev)}
-            className="pointer-events-auto xl:hidden absolute right-2 bottom-2 sm:right-3 sm:bottom-3 z-[4002] h-11 w-11 rounded-2xl border border-gray-200/60 dark:border-gray-700/60 bg-white/85 dark:bg-gray-900/85 shadow-xl backdrop-blur-xl flex items-center justify-center text-gray-700 dark:text-gray-200"
-            title={`${compactFieldPanelCollapsed ? t('common.expand') : t('common.collapse')} ${t('orders.fieldBoundaries')}`}
-            aria-label={`${compactFieldPanelCollapsed ? t('common.expand') : t('common.collapse')} ${t('orders.fieldBoundaries')}`}
-          >
-            <FileText className="h-5 w-5" />
-            <span className="absolute -top-1 -right-1 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-blue-600 text-white text-[9px] font-semibold leading-[1.1rem] text-center">
-              {combinedFields.length}
-            </span>
-            <span className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-white dark:bg-gray-900 border border-gray-200/70 dark:border-gray-700/70 flex items-center justify-center transition-transform ${compactFieldPanelCollapsed ? 'rotate-180' : ''}`}>
-              <ChevronDown className="h-3 w-3" />
-            </span>
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={handleOpenBagCodesModal}
+              disabled={!canManageSelectedFieldBagCodes}
+              className={`pointer-events-auto xl:hidden absolute right-16 bottom-2 sm:right-[4.5rem] sm:bottom-3 z-[4002] h-11 min-w-[3rem] rounded-2xl border shadow-xl backdrop-blur-xl flex items-center justify-center px-3 ${
+                canManageSelectedFieldBagCodes
+                  ? 'border-amber-200/60 bg-amber-50/90 text-amber-700 dark:border-amber-800/60 dark:bg-amber-900/40 dark:text-amber-200'
+                  : 'border-gray-200/60 bg-white/60 text-gray-400 cursor-not-allowed dark:border-gray-700/60 dark:bg-gray-900/60 dark:text-gray-500'
+              }`}
+              title={bagCodesButtonTitle}
+              aria-label={bagCodesButtonTitle}
+            >
+              <Tag className="h-4 w-4" />
+              {selectedBagCodes.length > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-amber-600 text-white text-[9px] font-semibold leading-[1.1rem] text-center">
+                  {selectedBagCodes.length}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setCompactFieldPanelCollapsed((prev) => !prev)}
+              className="pointer-events-auto xl:hidden absolute right-2 bottom-2 sm:right-3 sm:bottom-3 z-[4002] h-11 w-11 rounded-2xl border border-gray-200/60 dark:border-gray-700/60 bg-white/85 dark:bg-gray-900/85 shadow-xl backdrop-blur-xl flex items-center justify-center text-gray-700 dark:text-gray-200"
+              title={`${compactFieldPanelCollapsed ? t('common.expand') : t('common.collapse')} ${t('orders.fieldBoundaries')}`}
+              aria-label={`${compactFieldPanelCollapsed ? t('common.expand') : t('common.collapse')} ${t('orders.fieldBoundaries')}`}
+            >
+              <FileText className="h-5 w-5" />
+              <span className="absolute -top-1 -right-1 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-blue-600 text-white text-[9px] font-semibold leading-[1.1rem] text-center">
+                {combinedFields.length}
+              </span>
+              <span className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-white dark:bg-gray-900 border border-gray-200/70 dark:border-gray-700/70 flex items-center justify-center transition-transform ${compactFieldPanelCollapsed ? 'rotate-180' : ''}`}>
+                <ChevronDown className="h-3 w-3" />
+              </span>
+            </button>
+          </>
         )}
 
         {/* Right sidebar - Fields list (desktop) */}
@@ -3391,6 +4572,21 @@ export default function OrdersMainPage() {
                   {combinedFields.length} {t('orders.fields')}
                 </div>
               </div>
+              {!fieldsSidebarCollapsed && (
+                <button
+                  type="button"
+                  onClick={handleOpenBagCodesModal}
+                  disabled={!canManageSelectedFieldBagCodes}
+                  className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    canManageSelectedFieldBagCodes
+                      ? 'border-amber-200/70 bg-amber-50/80 text-amber-700 hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-900/30 dark:text-amber-200 dark:hover:bg-amber-900/50'
+                      : 'border-gray-200/70 bg-gray-100/70 text-gray-400 cursor-not-allowed dark:border-gray-700/60 dark:bg-gray-800/50 dark:text-gray-500'
+                  }`}
+                  title={bagCodesButtonTitle}
+                >
+                  {t('orders.bagCodes.openShort', { defaultValue: 'Bag Codes' })}
+                </button>
+              )}
               <button
                 onClick={() => setFieldsSidebarCollapsed((prev) => !prev)}
                 className="ml-auto p-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100/50 dark:hover:bg-gray-800/50 transition-colors"
@@ -3401,9 +4597,145 @@ export default function OrdersMainPage() {
             </div>
             {!fieldsSidebarCollapsed && (
               <div ref={fieldsListRef} className="p-3 space-y-2 overflow-y-auto max-h-[calc(100vh-10rem)] scrollbar-modern">
-                {renderFieldCards(true)}
+                {renderFieldCards(usesDesktopFieldSidebar)}
               </div>
             )}
+          </div>
+        )}
+
+        {showBagCodesModal && selectedBagCodeField && (
+          <div className="absolute inset-0 z-[5002] flex items-center justify-center bg-black/25 backdrop-blur-sm p-4">
+            <div className="w-full max-w-xl rounded-xl shadow-2xl overflow-hidden bg-white/95 dark:bg-gray-900/95 border border-gray-200/50 dark:border-gray-700/50">
+              <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-gray-200/50 dark:border-gray-700/50">
+                <div className="min-w-0">
+                  <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    {t('orders.bagCodes.title', { defaultValue: 'Bag Codes' })}
+                  </div>
+                  <div className="text-lg font-semibold text-gray-900 dark:text-white truncate">
+                    {selectedBagCodeField.baseName || selectedBagCodeField.baseId}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                    {t('orders.fieldIdLabel', {
+                      id: selectedBagCodeField.baseId,
+                      defaultValue: `ID: ${selectedBagCodeField.baseId}`,
+                    })}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeBagCodesModal}
+                  className="rounded-lg p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100/70 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-gray-800/60 transition-colors"
+                  aria-label={t('common.close')}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                <div className="rounded-lg border border-amber-200/70 bg-amber-50/70 dark:border-amber-800/50 dark:bg-amber-900/20 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+                  {t('orders.bagCodes.scanHint', {
+                    defaultValue: 'Scanners in keyboard mode can write directly into this input. You can also type a code manually and press Enter.',
+                  })}
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    ref={bagCodeInputRef}
+                    className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-gray-900/80 px-3 py-2.5 text-sm text-gray-900 dark:text-white"
+                    placeholder={t('orders.bagCodes.inputPlaceholder', { defaultValue: 'Scan or enter a bag code' })}
+                    value={bagCodeInput}
+                    onChange={(event) => setBagCodeInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void handleSubmitBagCode();
+                      }
+                    }}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { void handleSubmitBagCode(); }}
+                    className="rounded-lg bg-amber-600 hover:bg-amber-700 text-white px-4 py-2.5 text-sm font-semibold transition-colors"
+                  >
+                    {editingBagCodeIndex == null
+                      ? t('orders.bagCodes.addAction', { defaultValue: 'Add code' })
+                      : t('orders.bagCodes.replaceAction', { defaultValue: 'Replace code' })}
+                  </button>
+                </div>
+
+                {editingBagCodeIndex != null && (
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-200/70 bg-blue-50/70 dark:border-blue-800/50 dark:bg-blue-900/20 px-3 py-2 text-xs text-blue-800 dark:text-blue-200">
+                    <span>
+                      {t('orders.bagCodes.editingHint', { defaultValue: 'Editing selected code. Save to replace it or cancel to keep the current value.' })}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingBagCodeIndex(null);
+                        setBagCodeInput('');
+                      }}
+                      className="shrink-0 rounded-md border border-blue-200/80 dark:border-blue-700/60 px-2 py-1 font-semibold hover:bg-white/70 dark:hover:bg-gray-900/40"
+                    >
+                      {t('common.cancel')}
+                    </button>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                      {t('orders.bagCodes.listTitle', { count: selectedBagCodes.length, defaultValue: 'Assigned codes' })}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      {t('orders.bagCodes.countLabel', {
+                        count: selectedBagCodes.length,
+                        defaultValue: `${selectedBagCodes.length} total`,
+                      })}
+                    </div>
+                  </div>
+
+                  {selectedBagCodes.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-700 px-4 py-5 text-sm text-gray-500 dark:text-gray-400 text-center">
+                      {t('orders.bagCodes.emptyState', { defaultValue: 'No bag codes assigned to this field yet.' })}
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-[18rem] overflow-y-auto scrollbar-modern pr-1">
+                      {selectedBagCodes.map((code, index) => (
+                        <div key={`${selectedBagCodeField.key}-barcode-${code}-${index}`} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/60 px-3 py-2.5 flex items-center gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-semibold text-gray-900 dark:text-white truncate">{code}</div>
+                            {index === 0 && (
+                              <div className="text-[11px] uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                                {t('orders.bagCodes.primaryLabel', { defaultValue: 'Primary export code' })}
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleEditBagCode(index)}
+                            className="rounded-lg border border-gray-200/70 dark:border-gray-700/70 bg-white/70 dark:bg-gray-900/70 px-2.5 py-1.5 text-xs font-semibold text-blue-700 dark:text-blue-200 hover:bg-white dark:hover:bg-gray-900"
+                          >
+                            {t('common.edit')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { void handleDeleteBagCode(index); }}
+                            className="rounded-lg border border-red-200/70 dark:border-red-900/60 bg-red-50/80 dark:bg-red-950/30 px-2.5 py-1.5 text-xs font-semibold text-red-700 dark:text-red-200 hover:bg-red-100 dark:hover:bg-red-950/50"
+                          >
+                            {t('common.delete')}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -3711,7 +5043,7 @@ export default function OrdersMainPage() {
                   <label className="text-xs font-semibold text-gray-600 dark:text-gray-300">
                     {t('orders.contractLabLabel')}
                   </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-center">
+                  <div className="grid grid-cols-1 gap-2 text-center sm:grid-cols-2">
                     <button
                       type="button"
                       onClick={() => setNewContractLabProvider('agrolab')}
@@ -3738,6 +5070,32 @@ export default function OrdersMainPage() {
                         {t('orders.labOptionLufaNrw')}
                       </div>
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewContractLabProvider('pbs')}
+                      className={`rounded-lg border px-3 py-3 transition-all ${
+                        newContractLabProvider === 'pbs'
+                          ? 'border-blue-500 bg-blue-50/80 dark:bg-blue-900/30'
+                          : 'border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/50 hover:border-blue-300'
+                      }`}
+                    >
+                      <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                        {t('orders.labOptionPbs', { defaultValue: 'PBS' })}
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewContractLabProvider('documentation_only')}
+                      className={`rounded-lg border px-3 py-3 transition-all ${
+                        newContractLabProvider === 'documentation_only'
+                          ? 'border-blue-500 bg-blue-50/80 dark:bg-blue-900/30'
+                          : 'border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-900/50 hover:border-blue-300'
+                      }`}
+                    >
+                      <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                        {t('orders.labOptionDocumentationOnly')}
+                      </div>
+                    </button>
                   </div>
                 </div>
                 {newContractLabProvider === 'lufa_nrw' && (
@@ -3752,6 +5110,26 @@ export default function OrdersMainPage() {
                     >
                       <option value="DED">{t('orders.lufaScopeDed')}</option>
                       <option value="Nmin">{t('orders.lufaScopeNmin')}</option>
+                    </select>
+                  </div>
+                )}
+                {newContractLabProvider === 'pbs' && (
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-gray-600 dark:text-gray-300">
+                      {t('orders.contractPbsProfileLabel', { defaultValue: 'PBS workflow' })}
+                    </label>
+                    <select
+                      className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
+                      value={newContractPbsProfile}
+                      onChange={(event) => setNewContractPbsProfile(event.target.value as PbsProfile)}
+                    >
+                      {(['boden', 'nmin', 'n306090'] as PbsProfile[]).map((profile) => (
+                        <option key={profile} value={profile}>
+                          {t(`orders.pbsProfile${profile.charAt(0).toUpperCase()}${profile.slice(1)}`, {
+                            defaultValue: getPbsProfileDefinition(profile).label,
+                          })}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 )}

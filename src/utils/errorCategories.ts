@@ -40,7 +40,7 @@ export function categorizeError(
   let isRetriable = false;
   let shouldNotifyUser = true;
   let userMessage = t?.('error.categories.unexpectedError') || 'An unexpected error occurred';
-  let message = error?.message || String(error);
+  const message = error?.message || String(error);
 
   // Network errors
   if (

@@ -1,0 +1,38 @@
+FILE: src/components/Web/Orders/OrderWizard.tsx
+  L835: React Hook useEffect has a missing dependency: 'applySourceFields'. Either include it or remove the dependency array.
+  L853: React Hook useEffect has a missing dependency: 'applySourceFields'. Either include it or remove the dependency array.
+  L921: React Hook useEffect has a missing dependency: 'draft'. Either include it or remove the dependency array.
+  L1926: The 'buildFieldsFromSource' function makes the dependencies of useCallback Hook (at line 2742) change on every render. To fix this, wrap the definition of 'buildFieldsFromSource' in its own useCallback() Hook.
+  L2156: React Hook useCallback has a missing dependency: 'buildFieldsFromSource'. Either include it or remove the dependency array.
+  L2166: React Hook useCallback has a missing dependency: 'buildFieldsFromSource'. Either include it or remove the dependency array.
+  L2282: React Hook useEffect has a missing dependency: 'draft'. Either include it or remove the dependency array.
+  L2314: React Hook useEffect has a missing dependency: 'draft'. Either include it or remove the dependency array.
+  L2561: The 'applySourceFields' function makes the dependencies of useCallback Hook (at line 1724) change on every render. To fix this, wrap the definition of 'applySourceFields' in its own useCallback() Hook.
+  L2980: The 'submitOrder' function makes the dependencies of useEffect Hook (at line 3166) change on every render. Move it inside the useEffect callback. Alternatively, wrap the definition of 'submitOrder' in its own useCallback() Hook.
+
+FILE: src/components/Web/Orders/OrdersMapView.tsx
+  L505: React Hook useEffect has a missing dependency: 'trackingCenterDoneRef'. Either include it or remove the dependency array.
+  L535: React Hook useEffect has missing dependencies: 'boundaryFocusDoneRef' and 'lastFocusedBoundaryIdRef'. Either include them or remove the dependency array.
+  L590: React Hook useEffect has missing dependencies: 'lastFocusedTrackIdRef' and 'trackFocusDoneRef'. Either include them or remove the dependency array.
+  L636: React Hook useEffect has a missing dependency: 'hasZoomedRef'. Either include it or remove the dependency array.
+  L1478: The ref value 'featureGroupRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'featureGroupRef.current' to a variable inside the effect, and use that variable in the cleanup function.
+  L1591: React Hook useCallback has a missing dependency: 't'. Either include it or remove the dependency array.
+  L1647: React Hook useCallback has an unnecessary dependency: 'onlineTileUrl'. Either exclude it or remove the dependency array. Outer scope values like 'onlineTileUrl' aren't valid dependencies because mutating them doesn't re-render the component.
+  L1907: React Hook useMemo has an unnecessary dependency: 'currentZoom'. Either exclude it or remove the dependency array.
+  L2027: React Hook useEffect has a missing dependency: 't'. Either include it or remove the dependency array. Outer scope values like 'offlinePmtilesUrl' aren't valid dependencies because mutating them doesn't re-render the component.
+  L2092: React Hook useCallback has a missing dependency: 'isOnline'. Either include it or remove the dependency array.
+  L2150: React Hook useEffect has a missing dependency: 't'. Either include it or remove the dependency array.
+  L2203: React Hook useEffect has a missing dependency: 'centerOnCurrentLocation'. Either include it or remove the dependency array.
+  L3272: React Hook useMemo has an unnecessary dependency: 'focusedBoundaryId'. Either exclude it or remove the dependency array.
+
+FILE: src/components/Web/Orders/OrdersMainPage.tsx
+  L861: React Hook useCallback has a missing dependency: 'user'. Either include it or remove the dependency array.
+  L1487: React Hook useCallback has a missing dependency: 'nextConfirmationQuip'. Either include it or remove the dependency array.
+  L2014: React Hook useCallback has unnecessary dependencies: 'area' and 'drawnFields'. Either exclude them or remove the dependency array. Outer scope values like 'area' aren't valid dependencies because mutating them doesn't re-render the component.
+  L2068: React Hook useCallback has an unnecessary dependency: 'drawnFields'. Either exclude it or remove the dependency array.
+  L2118: React Hook useCallback has an unnecessary dependency: 'drawnFields'. Either exclude it or remove the dependency array.
+  L2190: React Hook useCallback has an unnecessary dependency: 'db'. Either exclude it or remove the dependency array. Outer scope values like 'db' aren't valid dependencies because mutating them doesn't re-render the component.
+  L2319: React Hook useCallback has a missing dependency: 'selectedContractId'. Either include it or remove the dependency array. Outer scope values like 'db' aren't valid dependencies because mutating them doesn't re-render the component.
+  L2855: React Hook useCallback has an unnecessary dependency: 'db'. Either exclude it or remove the dependency array. Outer scope values like 'db' aren't valid dependencies because mutating them doesn't re-render the component.
+  L2901: React Hook useCallback has an unnecessary dependency: 'db'. Either exclude it or remove the dependency array. Outer scope values like 'db' aren't valid dependencies because mutating them doesn't re-render the component.
+

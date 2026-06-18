@@ -5,7 +5,7 @@ import { Capacitor } from '@capacitor/core';
 import 'leaflet-draw';
 import { getCurrentPosition } from '../../utils/geolocation';
 import { hasInternetAccess } from '../../utils/networkDetection';
-import { getBlankTileUrl, getBundledGermanyPmtilesUrl, getGermanyBounds } from '../../utils/tileUtils';
+import { getBlankTileUrl, getBundledGermanyPmtilesUrl, getGermanyBounds, getTileLayerCrossOrigin } from '../../utils/tileUtils';
 import PMTilesVectorLayer from './PMTilesVectorLayer';
 
 // Check for Germany offline tiles at runtime
@@ -57,7 +57,7 @@ function calculateCentroid(coordinates: number[][][]): [number, number] | null {
 import { useNavigate, useParams } from 'react-router-dom';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useDarkMode } from '../../hooks/useDarkMode';
-import { Save, ArrowLeft, Trash2, User, LogOut, Camera, Moon, Sun, Globe, Upload, ChevronRight, ChevronDown, Square, Edit3, MousePointer, Maximize2, RotateCcw, Layers, Check, X } from 'lucide-react';
+import { Save, ArrowLeft, Trash2, User, LogOut, Camera, Moon, Sun, Globe, Upload, ChevronRight, ChevronDown, Edit3, MousePointer, Maximize2, RotateCcw, Layers, Check, X } from 'lucide-react';
 import { hybridDB } from '../../services/hybridDatabase';
 import { GpsFieldBoundary } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -174,20 +174,8 @@ const FieldBoundaryEditor: React.FC<FieldBoundaryEditorProps> = () => {
       navigate('/gps');
     }
   }, [paramProjectId, navigate]);
-  
-  // Show loading state while redirecting
-  if (!paramProjectId) {
-    return (
-      <div className="fixed inset-0 flex items-center justify-center bg-gray-900/20 backdrop-blur-sm">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className={isDarkMode ? 'text-white' : 'text-gray-900'}>No project selected. Redirecting...</p>
-        </div>
-      </div>
-    );
-  }
-  
-  const projectId = paramProjectId;
+
+  const projectId = paramProjectId ?? '';
   
   const [boundaries, setBoundaries] = useState<GpsFieldBoundary[]>([]);
   const [newBoundaries, setNewBoundaries] = useState<NewBoundary[]>([]);
@@ -202,7 +190,7 @@ const FieldBoundaryEditor: React.FC<FieldBoundaryEditorProps> = () => {
   const [editingBoundaryId, setEditingBoundaryId] = useState<number | null>(null);
   const [boundaryDrafts, setBoundaryDrafts] = useState<Record<string, BoundaryDraft>>({});
 
-  const normalizeBoundaryProperties = (boundary: GpsFieldBoundary): GpsFieldBoundary => {
+  const normalizeBoundaryProperties = useCallback((boundary: GpsFieldBoundary): GpsFieldBoundary => {
     let rawProps: any = boundary.properties || {};
     if (typeof rawProps === 'string') {
       try {
@@ -222,10 +210,10 @@ const FieldBoundaryEditor: React.FC<FieldBoundaryEditorProps> = () => {
       if (props.uid === undefined && (normalizedKey === 'uid' || normalizedKey === 'uuid')) props.uid = value;
     }
     return { ...boundary, properties: props };
-  };
+  }, []);
   
   // Initialize and update Leaflet Draw localization
-  const initializeDrawLocalization = () => {
+  const initializeDrawLocalization = useCallback(() => {
     // Initialize L.drawLocal if it doesn't exist
     if (!(L as any).drawLocal) {
       (L as any).drawLocal = {
@@ -244,10 +232,10 @@ const FieldBoundaryEditor: React.FC<FieldBoundaryEditorProps> = () => {
         }
       };
     }
-  };
+  }, []);
 
   // Update Leaflet Draw localization when language changes
-  const updateDrawLocalization = () => {
+  const updateDrawLocalization = useCallback(() => {
     // Ensure localization object exists
     initializeDrawLocalization();
     
@@ -269,13 +257,13 @@ const FieldBoundaryEditor: React.FC<FieldBoundaryEditorProps> = () => {
     drawLocal.draw.handlers.polygon.tooltip.cont = t('gps.drawingHelpers.polygonContinue') || 'Click to continue drawing shape';
     drawLocal.draw.handlers.polygon.tooltip.end = t('gps.drawingHelpers.polygonEnd') || 'Click first point to close this shape';
     drawLocal.draw.handlers.rectangle.tooltip.start = t('gps.drawingHelpers.rectangleStart') || 'Click and drag to draw rectangle';
-  };
+  }, [initializeDrawLocalization, t]);
 
   // Initialize localization on mount and update when language changes
   useEffect(() => {
     initializeDrawLocalization();
     updateDrawLocalization();
-  }, [language]); // Remove 't' dependency to prevent re-runs
+  }, [language, initializeDrawLocalization, updateDrawLocalization]);
   
   // Detect online/offline state with actual internet connectivity check
   useEffect(() => {
@@ -336,7 +324,7 @@ const FieldBoundaryEditor: React.FC<FieldBoundaryEditorProps> = () => {
   const [drawingMode, setDrawingMode] = useState<'none' | 'rectangle' | 'polygon'>('none');
   const [drawingLayer, setDrawingLayer] = useState<L.Layer | null>(null);
   // Rectangle drawing state (use React state instead of closure variables)
-  const [rectangleState, setRectangleState] = useState<{
+  const [, setRectangleState] = useState<{
     isDrawing: boolean;
     startPoint: L.LatLng | null;
     isDragging: boolean;
@@ -626,7 +614,7 @@ const FieldBoundaryEditor: React.FC<FieldBoundaryEditorProps> = () => {
     if (projectId) {
       loadBoundaries();
     }
-  }, [projectId]);
+  }, [projectId, loadBoundaries]);
 
   // Cleanup rectangle drawing when switching away from rectangle mode
   useEffect(() => {
@@ -662,7 +650,7 @@ const FieldBoundaryEditor: React.FC<FieldBoundaryEditorProps> = () => {
     };
   }, []);
 
-  const loadBoundaries = async () => {
+  const loadBoundaries = useCallback(async () => {
     if (!projectId) return;
 
     setIsLoading(true);
@@ -696,7 +684,7 @@ const FieldBoundaryEditor: React.FC<FieldBoundaryEditorProps> = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [projectId, normalizeBoundaryProperties]);
 
   // Handle completed drawings
   const handleDrawingComplete = (layer: L.Layer) => {
@@ -1331,6 +1319,17 @@ const FieldBoundaryEditor: React.FC<FieldBoundaryEditorProps> = () => {
     navigate(-1);
   };
 
+  if (!paramProjectId) {
+    return (
+      <div className="fixed inset-0 flex items-center justify-center bg-gray-900/20 backdrop-blur-sm">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className={isDarkMode ? 'text-white' : 'text-gray-900'}>No project selected. Redirecting...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 overflow-hidden">
       {/* Offline Indicator */}
@@ -1404,7 +1403,7 @@ const FieldBoundaryEditor: React.FC<FieldBoundaryEditorProps> = () => {
                   maxNativeZoom={12}
                   attribution='Offline Maps - Germany Base Map'
                   errorTileUrl={BLANK_TILE_URL}
-                  crossOrigin="anonymous"
+                  crossOrigin={getTileLayerCrossOrigin('/tiles/germany/{z}/{x}/{y}.png')}
                 />
                 {usePmtilesVector && offlinePmtilesUrl && <PMTilesVectorLayer url={offlinePmtilesUrl} schema="openmaptiles" />}
               </>
@@ -1418,7 +1417,7 @@ const FieldBoundaryEditor: React.FC<FieldBoundaryEditorProps> = () => {
                 url={onlineTileUrl}
                 maxZoom={20}
                 attribution='&copy; Online Tiles'
-                crossOrigin="anonymous"
+                crossOrigin={getTileLayerCrossOrigin(onlineTileUrl)}
               />
             );
           }
@@ -1429,7 +1428,7 @@ const FieldBoundaryEditor: React.FC<FieldBoundaryEditorProps> = () => {
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               maxZoom={20}
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              crossOrigin="anonymous"
+              crossOrigin={getTileLayerCrossOrigin('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')}
               tileSize={256}
             />
           );

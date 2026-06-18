@@ -14,7 +14,7 @@ export async function refreshAuthToken(): Promise<void> {
   
   try {
     // Force refresh the ID token
-    const token = await user.getIdToken(true); // true = force refresh
+    await user.getIdToken(true); // true = force refresh
     console.log('✅ Token refreshed successfully');
     
     // Get the token result to see custom claims

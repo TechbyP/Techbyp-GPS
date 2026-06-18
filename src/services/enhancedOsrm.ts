@@ -54,6 +54,11 @@ class EnhancedOSRMService {
   private readonly CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
   private readonly MAX_RETRIES = 3;
   private readonly RETRY_DELAYS = [1000, 2000, 4000]; // Progressive backoff
+  private readonly MIN_REQUEST_INTERVAL_MS = 2500;
+  private readonly RATE_LIMIT_COOLDOWN_MS = 8000;
+  private readonly inFlightRequests: Map<string, Promise<OSRMResponse>> = new Map();
+  private lastRequestAt = 0;
+  private rateLimitedUntil = 0;
 
   constructor() {
     // Load cached routes from localStorage on initialization
@@ -132,6 +137,31 @@ class EnhancedOSRMService {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  private isRateLimitError(error: any): boolean {
+    const message = String(error?.message || '').toLowerCase();
+
+    return error?.response?.status === 429
+      || message.includes('429')
+      || message.includes('too many requests')
+      || message.includes('rate limit')
+      || message.includes('violat');
+  }
+
+  private async waitForRequestSlot(): Promise<void> {
+    const now = Date.now();
+    const waitMs = Math.max(
+      this.rateLimitedUntil - now,
+      this.MIN_REQUEST_INTERVAL_MS - (now - this.lastRequestAt),
+      0
+    );
+
+    if (waitMs > 0) {
+      await this.delay(waitMs);
+    }
+
+    this.lastRequestAt = Date.now();
+  }
+
   private getErrorMessage(error: any): string {
     if (error.code === 'ECONNABORTED') {
       return 'Request timeout - server is taking too long to respond';
@@ -139,6 +169,10 @@ class EnhancedOSRMService {
     
     if (error.code === 'ENETUNREACH' || error.code === 'ENOTFOUND') {
       return 'Network unavailable - check your internet connection';
+    }
+
+    if (this.isRateLimitError(error)) {
+      return 'Routing service busy - please wait a moment before requesting another route';
     }
     
     if (error.response?.status === 429) {
@@ -177,117 +211,139 @@ class EnhancedOSRMService {
   ): Promise<OSRMResponse> {
     const { alternatives = true, profile = 'driving' } = options;
     const cacheKey = this.getCacheKey(start, end, options);
-    
-    // Check cache first
-    const cached = this.getCachedRouteInternal(cacheKey);
-    if (cached) {
-      return cached;
+    const inFlightRequest = this.inFlightRequests.get(cacheKey);
+    if (inFlightRequest) {
+      return inFlightRequest;
     }
 
-    // Check if we're offline
-    if (!navigator.onLine) {
-      throw new Error('No internet connection available for route calculation');
-    }
-    
-    let lastError: any;
-    
-    for (let attempt = 0; attempt < this.MAX_RETRIES; attempt++) {
-      try {
-        // Use GraphHopper API with proper parameters
-        const url = new URL(ROUTING_ENDPOINT);
-        // Use append instead of set to add multiple point parameters
-        url.searchParams.append('point', `${start[0]},${start[1]}`);
-        url.searchParams.append('point', `${end[0]},${end[1]}`);
-        url.searchParams.set('vehicle', 'car');
-        url.searchParams.set('locale', language === 'de' ? 'de' : 'en');
-        url.searchParams.set('instructions', 'true');
-        url.searchParams.set('points_encoded', 'false');
-        if (alternatives) url.searchParams.set('algorithm', 'alternative_route');
-        url.searchParams.set('key', GRAPHHOPPER_API_KEY);
+    const requestPromise = (async (): Promise<OSRMResponse> => {
+      const cached = this.getCachedRouteInternal(cacheKey);
+      if (cached) {
+        return cached;
+      }
 
-        console.log(`🌐 GraphHopper Request (attempt ${attempt + 1}/${this.MAX_RETRIES}):`, {
-          from: `${start[0]},${start[1]}`,
-          to: `${end[0]},${end[1]}`
-        });
+      if (!navigator.onLine) {
+        throw new Error('No internet connection available for route calculation');
+      }
 
-        const response = await fetch(url.toString(), {
-          method: 'GET',
-          signal: AbortSignal.timeout(10000)
-        });
+      let lastError: any;
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('❌ GraphHopper Error:', {
-            status: response.status,
-            statusText: response.statusText,
-            body: errorText
+      for (let attempt = 0; attempt < this.MAX_RETRIES; attempt++) {
+        try {
+          await this.waitForRequestSlot();
+
+          const vehicle = profile === 'walking'
+            ? 'foot'
+            : profile === 'cycling'
+              ? 'bike'
+              : 'car';
+
+          const url = new URL(ROUTING_ENDPOINT);
+          url.searchParams.append('point', `${start[0]},${start[1]}`);
+          url.searchParams.append('point', `${end[0]},${end[1]}`);
+          url.searchParams.set('vehicle', vehicle);
+          url.searchParams.set('locale', language === 'de' ? 'de' : 'en');
+          url.searchParams.set('instructions', 'true');
+          url.searchParams.set('points_encoded', 'false');
+          if (alternatives) url.searchParams.set('algorithm', 'alternative_route');
+          url.searchParams.set('key', GRAPHHOPPER_API_KEY);
+
+          console.log(`🌐 GraphHopper Request (attempt ${attempt + 1}/${this.MAX_RETRIES}):`, {
+            from: `${start[0]},${start[1]}`,
+            to: `${end[0]},${end[1]}`,
+            vehicle
           });
-          throw new Error(`HTTP ${response.status}: ${errorText}`);
-        }
 
-        const data = await response.json();
+          const response = await fetch(url.toString(), {
+            method: 'GET',
+            signal: AbortSignal.timeout(10000)
+          });
 
-        console.log('📡 GraphHopper Response:', {
-          hasPaths: !!data.paths,
-          numPaths: data.paths?.length || 0,
-          fullResponse: data
-        });
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error('❌ GraphHopper Error:', {
+              status: response.status,
+              statusText: response.statusText,
+              body: errorText
+            });
 
-        if (!data.paths?.[0]) {
-          console.error('❌ No paths in GraphHopper response:', data);
-          throw new Error('No route found');
-        }
+            if (response.status === 429) {
+              throw new Error('HTTP 429: Too many requests');
+            }
 
-        // Convert GraphHopper response to OSRM-compatible format
-        const path = data.paths[0];
-        
-        const processedResponse: OSRMResponse = {
-          code: 'Ok',
-          routes: [{
-            distance: path.distance,
-            duration: path.time / 1000, // ms to seconds
-            geometry: {
-              type: 'LineString',
-              coordinates: path.points.coordinates // Already [lon,lat]
-            },
-            steps: (path.instructions || []).map((instr: any) => ({
-              distance: instr.distance,
-              duration: instr.time / 1000,
-              instruction: instr.text || 'Continue',
-              name: instr.street_name || 'Unnamed road',
-              maneuver: { type: instr.sign?.toString() || 'turn', location: [0, 0] }
-            }))
-          }],
-          waypoints: []
-        };
+            throw new Error(`HTTP ${response.status}: ${errorText}`);
+          }
 
-        // Cache successful response
-        this.cacheRoute(cacheKey, processedResponse);
-        
-        // Clear any existing error toasts
-        toast.dismiss('routing-error');
-        
-        return processedResponse;
+          const data = await response.json();
 
-      } catch (error: any) {
-        lastError = error;
-        console.error(`❌ Routing error (attempt ${attempt + 1}):`, error);
+          console.log('📡 GraphHopper Response:', {
+            hasPaths: !!data.paths,
+            numPaths: data.paths?.length || 0,
+            fullResponse: data
+          });
 
-        const errorMessage = this.getErrorMessage(error);
-        const isLastAttempt = attempt === this.MAX_RETRIES - 1;
-        
-        // Wait before retrying (progressive backoff)
-        if (!isLastAttempt) {
-          this.showErrorToast(errorMessage, true);
-          await this.delay(this.RETRY_DELAYS[attempt]);
-        } else {
-          this.showErrorToast(`Route calculation failed: ${errorMessage}`);
+          if (!data.paths?.[0]) {
+            console.error('❌ No paths in GraphHopper response:', data);
+            throw new Error('No route found');
+          }
+
+          const path = data.paths[0];
+          const processedResponse: OSRMResponse = {
+            code: 'Ok',
+            routes: [{
+              distance: path.distance,
+              duration: path.time / 1000,
+              geometry: {
+                type: 'LineString',
+                coordinates: path.points.coordinates
+              },
+              steps: (path.instructions || []).map((instr: any) => ({
+                distance: instr.distance,
+                duration: instr.time / 1000,
+                instruction: instr.text || 'Continue',
+                name: instr.street_name || 'Unnamed road',
+                maneuver: { type: instr.sign?.toString() || 'turn', location: [0, 0] }
+              }))
+            }],
+            waypoints: []
+          };
+
+          this.cacheRoute(cacheKey, processedResponse);
+          toast.dismiss('routing-error');
+
+          return processedResponse;
+        } catch (error: any) {
+          lastError = error;
+          console.error(`❌ Routing error (attempt ${attempt + 1}):`, error);
+
+          const isRateLimited = this.isRateLimitError(error);
+          if (isRateLimited) {
+            this.rateLimitedUntil = Date.now() + this.RATE_LIMIT_COOLDOWN_MS;
+            break;
+          }
+
+          const errorMessage = this.getErrorMessage(error);
+          const isLastAttempt = attempt === this.MAX_RETRIES - 1;
+
+          if (!isLastAttempt) {
+            this.showErrorToast(errorMessage, true);
+            await this.delay(this.RETRY_DELAYS[attempt]);
+          } else {
+            this.showErrorToast(`Route calculation failed: ${errorMessage}`);
+          }
         }
       }
-    }
 
-    // All retries failed
-    throw lastError || new Error('Route calculation failed after all retry attempts');
+      throw lastError || new Error('Route calculation failed after all retry attempts');
+    })();
+
+    this.inFlightRequests.set(cacheKey, requestPromise);
+
+    try {
+      return await requestPromise;
+    } finally {
+      this.inFlightRequests.delete(cacheKey);
+    }
   }
 
   /**

@@ -13,6 +13,7 @@ export const AnimatedLoader: React.FC<AnimatedLoaderProps> = ({
 }) => {
   const [isDark] = useDarkMode();
   const { t } = useTranslation();
+  const appName = t('app.name') || 'TECHBYP - GPS Pro';
 
   // Use provided message or default to translated "Loading"
   const displayMessage = message || t('common.loadingApp') || 'Loading';
@@ -81,7 +82,7 @@ export const AnimatedLoader: React.FC<AnimatedLoaderProps> = ({
           {/* App Logo */}
           <img
             src="/app-logo.png"
-            alt={t('gps.gpsTracker')}
+            alt={appName}
             style={{
               position: 'absolute',
               inset: '0',
@@ -142,7 +143,7 @@ export const AnimatedLoader: React.FC<AnimatedLoaderProps> = ({
             animation: 'slideUpSplash 0.8s cubic-bezier(0.34,1.56,0.64,1) 0.2s both',
           }}
         >
-          {t('gps.gpsTracker')}
+          {appName}
         </h1>
 
         {/* Loading text with animated dots */}

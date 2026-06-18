@@ -23,7 +23,7 @@ export async function hasInternetAccess(): Promise<boolean> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second timeout
     
-    const response = await fetch('https://cloudflare.com/cdn-cgi/trace', {
+    await fetch('https://cloudflare.com/cdn-cgi/trace', {
       method: 'GET', // GET for trace endpoint
       signal: controller.signal,
       cache: 'no-cache', // Don't use cached response

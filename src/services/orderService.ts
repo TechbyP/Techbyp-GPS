@@ -1,6 +1,7 @@
 import { collection, doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { OrderDraft } from '../types';
+import { getFieldBarcodeList } from '../utils/orderBarcodes';
 
 // Helper to get the collection path for a user's projects
 const getProjectsCollectionPath = (uid: string): string => {
@@ -94,21 +95,33 @@ const buildFieldSummariesForPersistence = (draft: OrderDraft) => {
   return summaries;
 };
 
-const compactField = (field: any) => ({
-  fieldId: field?.fieldId,
-  fieldName: field?.fieldName,
-  baseId: field?.baseId,
-  baseName: field?.baseName,
-  areaHa: field?.areaHa,
-  status: field?.status,
-  samplingDepthCm: field?.samplingDepthCm,
-  services: Array.isArray(field?.services) ? field.services : undefined,
-  parameters: field?.parameters,
-  cropYield: field?.cropYield,
-  labAttributes: field?.labAttributes,
-  samplingCell: field?.samplingCell,
-  exportMapping: field?.exportMapping
-});
+const compactField = (field: any) => {
+  const barcodes = getFieldBarcodeList(field);
+
+  return {
+    fieldId: field?.fieldId,
+    fieldName: field?.fieldName,
+    baseId: field?.baseId,
+    baseName: field?.baseName,
+    areaHa: field?.areaHa,
+    status: field?.status,
+    samplingDepthCm: field?.samplingDepthCm,
+    services: Array.isArray(field?.services) ? field.services : undefined,
+    parameters: field?.parameters,
+    cropYield: field?.cropYield,
+    labAttributes: field?.labAttributes,
+    transportTracking: field?.transportTracking,
+    soilType: field?.soilType,
+    humusClass: field?.humusClass,
+    barcode: barcodes[0],
+    barcodes,
+    sampleCount: field?.sampleCount,
+    notSampleable: field?.notSampleable,
+    note: field?.note,
+    samplingCell: field?.samplingCell,
+    exportMapping: field?.exportMapping
+  };
+};
 
 // Helper to serialize drafts for Firestore (avoid large geometry payloads)
 const serializeForFirestore = (draft: OrderDraft): any => {

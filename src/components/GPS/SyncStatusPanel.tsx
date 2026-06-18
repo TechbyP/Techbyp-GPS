@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Wifi, WifiOff, AlertCircle, CheckCircle, Clock } from 'lucide-react';
 import { firebaseGPS } from '../../services/firebaseSync';
 import { hybridDB } from '../../services/hybridDatabase';
@@ -33,7 +33,7 @@ export default function SyncStatusPanel() {
 
   const [expanded, setExpanded] = useState(false);
 
-  const checkStatus = async () => {
+  const checkStatus = useCallback(async () => {
     const errors: string[] = [];
     
     try {
@@ -88,7 +88,7 @@ export default function SyncStatusPanel() {
         errors: [...prev.errors, t('gps.syncStatus.statusCheckFailed', { error: e.message })]
       }));
     }
-  };
+  }, [t]);
 
   const forcSync = async () => {
     setStatus(prev => ({ ...prev, syncInProgress: true, errors: [] }));
@@ -148,7 +148,7 @@ export default function SyncStatusPanel() {
     checkStatus();
     const interval = setInterval(checkStatus, 30000); // Check every 30 seconds
     return () => clearInterval(interval);
-  }, []);
+  }, [checkStatus]);
 
   const getStatusIcon = () => {
     if (status.syncInProgress) return <RefreshCw className="w-4 h-4 animate-spin" />;

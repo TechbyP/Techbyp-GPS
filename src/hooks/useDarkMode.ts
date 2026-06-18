@@ -7,7 +7,7 @@ function readStoredDark(): boolean {
   try {
     if (raw === 'true' || raw === 'false') return raw === 'true';
     return Boolean(JSON.parse(raw));
-  } catch (_) {
+  } catch {
     return true;
   }
 }
@@ -38,7 +38,7 @@ export function useDarkMode(): [boolean, () => void] {
         if (typeof next === 'boolean') {
           setIsDark(next);
         }
-      } catch (_) {
+      } catch {
         // ignore parse errors
       }
     };

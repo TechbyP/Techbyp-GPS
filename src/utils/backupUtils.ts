@@ -11,7 +11,6 @@
  */
 
 import { logger } from '../services/logger';
-import { EXPORT_FORMATS } from '../config/constants';
 
 export interface BackupMetadata {
   version: string;

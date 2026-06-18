@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Target } from 'lucide-react';
+import { Search, Target, X } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import L from 'leaflet';
 import toast from 'react-hot-toast';
@@ -26,6 +26,7 @@ interface NavigationPanelProps {
   currentPosition: GpsPosition | null;
   fieldBoundaries: GpsFieldBoundary[];
   projectName?: string;
+  isCompactLandscapeLayout?: boolean;
 }
 
 interface NavigationState {
@@ -65,6 +66,7 @@ export default function NavigationPanel({
   currentPosition,
   fieldBoundaries,
   projectName,
+  isCompactLandscapeLayout = false,
 }: NavigationPanelProps) {
   const [isDarkMode] = useDarkMode();
   const { t, language } = useLanguage();
@@ -92,6 +94,8 @@ export default function NavigationPanel({
   const rerouteInFlightRef = useRef(false);
   const lastRouteStartRef = useRef<[number, number] | null>(null);
   const lastPreviewRecalcRef = useRef<number>(0);
+  const geocodeAbortRef = useRef<AbortController | null>(null);
+  const lastGeocodeRequestAtRef = useRef<number>(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<Array<{ displayName: string; lat: number; lon: number }>>([]);
   const [navRecenterToken, setNavRecenterToken] = useState(0);
@@ -211,6 +215,12 @@ export default function NavigationPanel({
     const interval = setInterval(updateCacheStats, 30000); // Update every 30 seconds
     
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      geocodeAbortRef.current?.abort();
+    };
   }, []);
 
   // Calculate distance between two points (Haversine formula) - memoized
@@ -411,7 +421,7 @@ export default function NavigationPanel({
         { id: toastId, icon: '🧭', duration: 5000 }
       );
     }
-  }, [currentPosition, t, calculateDistance, isOnline]);
+  }, [currentPosition, t, isOnline, translateInstruction, language]);
 
   // Refresh route preview if user moves significantly before starting navigation
   useEffect(() => {
@@ -432,38 +442,79 @@ export default function NavigationPanel({
 
   // Simple Nominatim geocoding with debounce
   const performGeocodeSearch = useCallback(async (query: string) => {
-    if (!query || query.length < 3) {
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery || trimmedQuery.length < 3) {
       setSearchResults([]);
       return;
     }
 
+    const boundaryResults = getBoundarySearchResults(trimmedQuery);
+
     // Skip geocoding when offline to prevent external requests
     if (!navigator.onLine) {
-      setSearchResults(getBoundarySearchResults(query));
+      setSearchResults(boundaryResults);
       return;
     }
 
+    const elapsedSinceLastRequest = Date.now() - lastGeocodeRequestAtRef.current;
+    if (elapsedSinceLastRequest < 1100) {
+      await new Promise(resolve => setTimeout(resolve, 1100 - elapsedSinceLastRequest));
+    }
+
+    geocodeAbortRef.current?.abort();
+    const controller = new AbortController();
+    geocodeAbortRef.current = controller;
+    lastGeocodeRequestAtRef.current = Date.now();
+
+    let timeoutId: number | null = null;
+
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000);
-      const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`, {
+      timeoutId = window.setTimeout(() => controller.abort(), 4000);
+      const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(trimmedQuery)}&limit=5`, {
         signal: controller.signal
       });
-      clearTimeout(timeoutId);
+
+      if (!resp.ok) {
+        const errorText = await resp.text();
+        if (resp.status === 429 || /too many requests|rate limit|violat|usage policy/i.test(errorText)) {
+          toast(t('gps.searchRateLimited') || 'Search service busy. Please wait a moment.', {
+            id: 'navigation-search-rate-limit',
+            duration: 3000,
+            icon: '⌛'
+          });
+          setSearchResults(boundaryResults);
+          return;
+        }
+
+        throw new Error(`HTTP ${resp.status}: ${errorText}`);
+      }
+
       const data = await resp.json();
       const results = (data || []).map((item: any) => ({
         displayName: item.display_name,
         lat: parseFloat(item.lat),
         lon: parseFloat(item.lon),
       }));
-      setSearchResults(results.length > 0 ? results : getBoundarySearchResults(query));
+      setSearchResults(results.length > 0 ? results : boundaryResults);
     } catch (error) {
-      console.error('Geocoding failed:', error);
-      setSearchResults(getBoundarySearchResults(query));
-    }
-  }, [getBoundarySearchResults]);
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
 
-  const debouncedGeocodeSearch = useDebounce(performGeocodeSearch, 300);
+      console.error('Geocoding failed:', error);
+      setSearchResults(boundaryResults);
+    } finally {
+      if (timeoutId != null) {
+        window.clearTimeout(timeoutId);
+      }
+
+      if (geocodeAbortRef.current === controller) {
+        geocodeAbortRef.current = null;
+      }
+    }
+  }, [getBoundarySearchResults, t]);
+
+  const debouncedGeocodeSearch = useDebounce(performGeocodeSearch, 1000);
 
   const snapToRoad = useCallback(async (lat: number, lon: number): Promise<[number, number]> => {
     // Skip snap-to-road when offline to prevent external requests
@@ -502,7 +553,7 @@ export default function NavigationPanel({
       lastInstructionRef.current = null;
       toast.success(t('gps.navigationStarted') || 'Navigation started');
     }
-  }, [navState.selectedRoute]);
+  }, [navState.selectedRoute, t]);
 
   const handleEndNavigation = useCallback(() => {
     setNavState({
@@ -537,13 +588,13 @@ export default function NavigationPanel({
       setNavRecenterToken(prev => prev + 1);
       toast.success(t('gps.mapRecentered') || 'Map recentered', { duration: 1500 });
     }
-  }, [currentPosition, navState.stage]);
+  }, [currentPosition, navState.stage, t]);
 
   // Error handler for navigation components
   const handleNavigationError = useCallback((error: Error) => {
     console.error('Navigation component error:', error);
     toast.error(t('gps.navigationError') || 'Navigation error occurred - please try again');
-  }, []);
+  }, [t]);
 
   // --- Navigation progress tracking ---
   const speakInstruction = useCallback(async (text: string) => {
@@ -752,17 +803,12 @@ export default function NavigationPanel({
 
     // Find nearest segment to current position
     let nearestDistance = Infinity;
-    let traveledOnSegment = 0;
     let cumulative = 0;
     let nearestCumulative = 0;
-    let nearestSegLength = 0;
-
     for (let i = 0; i < coords.length - 1; i++) {
       const a = coords[i];
       const b = coords[i + 1];
       const segLength = calculateDistance(a[0], a[1], b[0], b[1]) * 1000; // meters
-      const distToA = calculateDistance(position.latitude, position.longitude, a[0], a[1]) * 1000;
-      const distToB = calculateDistance(position.latitude, position.longitude, b[0], b[1]) * 1000;
 
       // Approximate perpendicular distance using triangle inequality
       const proj = Math.max(0, Math.min(1, ((position.latitude - a[0]) * (b[0] - a[0]) + (position.longitude - a[1]) * (b[1] - a[1])) / ((b[0] - a[0])**2 + (b[1] - a[1])**2)));
@@ -773,8 +819,6 @@ export default function NavigationPanel({
       if (distToProj < nearestDistance) {
         nearestDistance = distToProj;
         nearestCumulative = cumulative + proj * segLength;
-        nearestSegLength = segLength;
-        traveledOnSegment = proj * segLength;
       }
 
       cumulative += segLength;
@@ -953,17 +997,248 @@ export default function NavigationPanel({
     }
   }, [navState.stage, navState.selectedRoute, currentPosition, computeProgress, speakInstruction, isOnline, rerouteFromCurrentPosition, t]);
 
+  const panelShellClass = isCompactLandscapeLayout
+    ? 'gps-navigation-panel fixed right-2 top-2 bottom-2 w-[min(18rem,calc(100vw-1rem))] rounded-xl'
+    : 'gps-navigation-panel fixed right-0 md:right-4 top-4 bottom-0 md:bottom-4 w-full md:w-[420px] lg:w-[480px] md:rounded-2xl';
+  const mapViewportClass = isCompactLandscapeLayout ? 'flex-1 relative overflow-hidden min-h-[260px]' : 'flex-1 relative overflow-hidden min-h-[320px]';
+  const bottomPanelPaddingClass = isCompactLandscapeLayout ? 'p-2.5' : 'p-3 md:p-4';
+  const selectStateCardClass = isCompactLandscapeLayout
+    ? 'flex items-center gap-2 p-1.5 rounded-lg'
+    : 'flex items-center gap-2 md:gap-3 p-2 rounded-xl';
+  const selectStateIconWrapClass = isCompactLandscapeLayout ? 'p-1.5 rounded-full bg-blue-500 flex-shrink-0' : 'p-1.5 md:p-2 rounded-full bg-blue-500 flex-shrink-0';
+  const selectStateIconClass = isCompactLandscapeLayout ? 'w-3 h-3 text-white' : 'w-3 h-3 md:w-4 md:h-4 text-white';
+  const selectStateTitleClass = isCompactLandscapeLayout ? 'font-semibold text-[11px] text-gray-900 dark:text-white' : 'font-semibold text-xs md:text-sm text-gray-900 dark:text-white';
+  const selectStateBodyClass = isCompactLandscapeLayout ? 'text-[11px] mt-0.5 text-gray-600 dark:text-gray-400' : 'text-xs mt-0.5 text-gray-600 dark:text-gray-400';
+  const selectStatePanelClass = isCompactLandscapeLayout ? 'mt-2 space-y-1.5' : 'mt-3 space-y-2';
+  const searchInputClass = isCompactLandscapeLayout
+    ? `min-w-0 flex-1 px-2 py-1 rounded-lg border text-[11px] leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 ${isDarkMode ? 'bg-gray-800 border-gray-700 text-white placeholder:text-gray-500' : 'bg-white border-gray-300 text-gray-900 placeholder:text-gray-400'}`
+    : `flex-1 px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${isDarkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'}`;
+  const searchResultsClass = `${isDarkMode ? 'bg-gray-800' : 'bg-white'} rounded-lg border ${isDarkMode ? 'border-gray-700' : 'border-gray-200'} ${isCompactLandscapeLayout ? 'max-h-32' : 'max-h-40'} overflow-auto`;
+  const arrivedPanelClass = isCompactLandscapeLayout ? 'p-3 text-center' : 'p-4 text-center';
+  const arrivedIconWrapClass = isCompactLandscapeLayout
+    ? 'w-16 h-16 mx-auto bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center'
+    : 'w-20 h-20 mx-auto bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center';
+  const arrivedIconClass = isCompactLandscapeLayout ? 'w-8 h-8 text-green-600 dark:text-green-400' : 'w-10 h-10 text-green-600 dark:text-green-400';
+  const arrivedTitleClass = isCompactLandscapeLayout ? 'text-xl font-bold text-gray-900 dark:text-white mb-2' : 'text-2xl font-bold text-gray-900 dark:text-white mb-2';
+  const compactNavigationShellClass = 'gps-navigation-shell fixed inset-0 z-50 flex items-stretch animate-in fade-in duration-300';
+  const compactMapViewportClass = 'relative flex-1 min-w-0 overflow-hidden';
+  const compactNavigationRailClass = `gps-navigation-panel pointer-events-auto relative z-[60] my-2 mr-2 w-[clamp(13rem,28vw,15rem)] rounded-xl shadow-lg flex flex-col overflow-hidden glass-panel animate-in fade-in slide-in-from-right-8 duration-500 ${
+    isDarkMode ? 'glass-panel-dark' : 'glass-panel-light'
+  }`;
+  const compactNavigationRailContentClass = `flex-1 min-h-0 overflow-y-auto ${bottomPanelPaddingClass} border-t backdrop-blur-2xl ${
+    isDarkMode ? 'glass-panel-dark border-gray-700/50' : 'glass-panel-light border-gray-200/50'
+  }`;
+  const compactRailFooterClass = `${bottomPanelPaddingClass} border-t backdrop-blur-2xl ${
+    isDarkMode ? 'glass-panel-dark border-gray-700/50' : 'glass-panel-light border-gray-200/50'
+  }`;
+  const compactRailCloseButtonClass = `w-full inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 pointer-events-auto shadow-lg backdrop-blur-xl transition-colors ${
+    isDarkMode
+      ? 'bg-gray-900/75 text-gray-100 border border-gray-700/70 hover:bg-gray-800/85'
+      : 'bg-white/80 text-gray-800 border border-gray-200/80 hover:bg-white'
+  }`;
+
   if (!isOpen) return null;
+
+  if (isCompactLandscapeLayout) {
+    return (
+      <NavigationErrorBoundary onError={handleNavigationError}>
+        <div className={compactNavigationShellClass} data-nav-panel={isOpen ? 'true' : 'false'}>
+          <div className={compactMapViewportClass}>
+            <OfflineIndicator
+              isOnline={isOnline}
+              hasGPSSignal={!!currentPosition}
+              cachedRoutesCount={cachedRoutesCount}
+            />
+
+            <NavigationErrorBoundary
+              fallback={
+                <div className="flex items-center justify-center h-full bg-gray-100 dark:bg-gray-800">
+                  <p className="text-gray-600 dark:text-gray-400">{t('gps.mapUnavailable') || 'Map temporarily unavailable'}</p>
+                </div>
+              }
+            >
+              <NavigationMap
+                currentPosition={currentPosition}
+                fieldBoundaries={fieldBoundaries}
+                destination={navState.destination}
+                selectedRoute={navState.selectedRoute}
+                routes={navState.routes}
+                navStage={navState.stage}
+                isOnline={isOnline}
+                onMapClick={debouncedMapClick}
+                mapRef={mapRef}
+                recenterToken={navRecenterToken}
+              />
+            </NavigationErrorBoundary>
+          </div>
+
+          <div
+            className={compactNavigationRailClass}
+            style={{
+              WebkitBackdropFilter: 'blur(12px)',
+              backdropFilter: 'blur(12px)',
+              WebkitTransform: 'translateZ(0)',
+              transform: 'translateZ(0)'
+            }}
+          >
+            <NavigationHeader
+              projectName={projectName}
+              onClose={onClose}
+              compact={true}
+              showClose={false}
+            />
+
+            {navState.stage === 'navigating' ? (
+              <div className="flex-1 min-h-0">
+                <NavigationControls
+                  selectedRoute={navState.selectedRoute}
+                  onRecenter={handleRecenterMap}
+                  onEndNavigation={handleEndNavigation}
+                  distanceToNext={navState.distanceToNext}
+                  etaSeconds={navState.etaSeconds}
+                  nextInstruction={navState.nextInstruction}
+                  currentSpeed={navState.currentSpeed}
+                  progressPercent={navState.progressPercent}
+                  compact={true}
+                  layout="side"
+                />
+              </div>
+            ) : (
+              <div className={compactNavigationRailContentClass}>
+                {navState.stage === 'select-destination' && (
+                  <div className={selectStateCardClass} style={{
+                    background: isDarkMode ? 'rgba(59, 130, 246, 0.1)' : 'rgba(59, 130, 246, 0.08)'
+                  }}>
+                    <div className={selectStateIconWrapClass}>
+                      <Target className={selectStateIconClass} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={selectStateTitleClass}>
+                        {t('gps.selectDestination') || 'Select Destination'}
+                      </p>
+                      <p className={selectStateBodyClass}>
+                        {navState.isCalculatingRoute
+                          ? (t('gps.calculatingRoute') || 'Calculating route...')
+                          : (t('gps.tapOnField') || 'Tap on map to set destination')
+                        }
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {navState.stage === 'select-destination' && (
+                  <div className={selectStatePanelClass}>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        value={searchTerm}
+                        onChange={(e) => {
+                          setSearchTerm(e.target.value);
+                          debouncedGeocodeSearch(e.target.value);
+                        }}
+                        placeholder={t('gps.searchDestination') || 'Search address or place'}
+                        className={searchInputClass}
+                      />
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          void performGeocodeSearch(searchTerm);
+                        }}
+                        size="sm"
+                        className="h-8 w-8 flex-shrink-0 px-0 py-0"
+                        aria-label={t('common.search') || 'Search'}
+                        title={t('common.search') || 'Search'}
+                      >
+                        <Search className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+
+                    {searchResults.length > 0 && (
+                      <div className={searchResultsClass}>
+                        {searchResults.map((result, idx) => (
+                          <button
+                            key={`${result.displayName}-${idx}`}
+                            className="w-full text-left hover:bg-blue-50 dark:hover:bg-gray-700 px-2.5 py-1.5 text-xs"
+                            onClick={async () => {
+                              if (navState.isCalculatingRoute) {
+                                return;
+                              }
+                              const snapped = await snapToRoad(result.lat, result.lon);
+                              const destination: [number, number] = snapped;
+                              setNavState(prev => ({ ...prev, destination }));
+                              calculateRoute(destination);
+                              setSearchResults([]);
+                            }}
+                          >
+                            {result.displayName}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {navState.stage === 'route-preview' && navState.selectedRoute && (
+                  <RouteSelector
+                    routes={navState.routes}
+                    selectedRoute={navState.selectedRoute}
+                    onRouteSelect={handleRouteSelect}
+                    onStartNavigation={handleStartNavigation}
+                    isLoading={navState.isCalculatingRoute}
+                    compact={true}
+                  />
+                )}
+
+                {navState.stage === 'arrived' && (
+                  <div className={arrivedPanelClass}>
+                    <div className="mb-4">
+                      <div className={arrivedIconWrapClass}>
+                        <Target className={arrivedIconClass} />
+                      </div>
+                    </div>
+                    <h3 className={arrivedTitleClass}>
+                      {t('gps.arrivedAtDestination') || 'You have arrived!'}
+                    </h3>
+                    <p className="text-gray-600 dark:text-gray-400 mb-4">
+                      {t('gps.destinationReached') || 'You have reached your destination'}
+                    </p>
+                    <Button
+                      variant="primary"
+                      onClick={handleEndNavigation}
+                      className="w-full"
+                    >
+                      {t('gps.newRoute') || 'Start New Route'}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className={compactRailFooterClass}>
+              <button
+                type="button"
+                onClick={onClose}
+                className={compactRailCloseButtonClass}
+                title={t('common.close') || 'Close'}
+              >
+                <X className="w-4 h-4" />
+                <span className="text-xs font-semibold">{t('common.close') || 'Close'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </NavigationErrorBoundary>
+    );
+  }
 
   return (
     <NavigationErrorBoundary onError={handleNavigationError}>
       <div
-        className={`fixed right-0 md:right-4 top-4 bottom-0 md:bottom-4 w-full md:w-[420px] lg:w-[480px] transition-all duration-500 ease-in-out z-50 md:rounded-2xl shadow-lg flex flex-col overflow-hidden glass-panel animate-in fade-in slide-in-from-right-8 duration-500 ${
+        className={`${panelShellClass} transition-all duration-500 ease-in-out z-50 shadow-lg flex flex-col overflow-hidden glass-panel animate-in fade-in slide-in-from-right-8 duration-500 ${
           isDarkMode ? 'glass-panel-dark' : 'glass-panel-light'
         }`}
         data-nav-panel={isOpen ? 'true' : 'false'}
         style={{ 
-          maxWidth: 'calc(100vw)',
+          maxWidth: isCompactLandscapeLayout ? 'calc(100vw - 1rem)' : 'calc(100vw)',
           WebkitBackdropFilter: 'blur(12px)',
           backdropFilter: 'blur(12px)',
           WebkitTransform: 'translateZ(0)',
@@ -974,10 +1249,11 @@ export default function NavigationPanel({
         <NavigationHeader 
           projectName={projectName} 
           onClose={onClose} 
+          compact={isCompactLandscapeLayout}
         />
 
         {/* Map - Full size with overlays */}
-        <div className="flex-1 relative overflow-hidden min-h-[320px]">
+        <div className={mapViewportClass}>
           {/* Offline/Connection Indicator */}
           <OfflineIndicator 
             isOnline={isOnline}
@@ -996,6 +1272,7 @@ export default function NavigationPanel({
               nextInstruction={navState.nextInstruction}
               currentSpeed={navState.currentSpeed}
               progressPercent={navState.progressPercent}
+              compact={isCompactLandscapeLayout}
             />
           )}
           
@@ -1024,21 +1301,21 @@ export default function NavigationPanel({
 
         {/* Bottom Panel - Instructions/Controls (only for non-navigating states) */}
         {navState.stage !== 'navigating' && (
-          <div className={`flex-shrink-0 p-3 md:p-4 border-t backdrop-blur-2xl ${
+          <div className={`flex-shrink-0 ${bottomPanelPaddingClass} border-t backdrop-blur-2xl ${
             isDarkMode ? 'glass-panel-dark border-gray-700/50' : 'glass-panel-light border-gray-200/50'
           }`}>
             {navState.stage === 'select-destination' && (
-              <div className="flex items-center gap-2 md:gap-3 p-2 rounded-xl" style={{
+              <div className={selectStateCardClass} style={{
                 background: isDarkMode ? 'rgba(59, 130, 246, 0.1)' : 'rgba(59, 130, 246, 0.08)'
               }}>
-                <div className="p-1.5 md:p-2 rounded-full bg-blue-500 flex-shrink-0">
-                  <Target className="w-3 h-3 md:w-4 md:h-4 text-white" />
+                <div className={selectStateIconWrapClass}>
+                  <Target className={selectStateIconClass} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-xs md:text-sm text-gray-900 dark:text-white">
+                  <p className={selectStateTitleClass}>
                     {t('gps.selectDestination') || 'Select Destination'}
                   </p>
-                  <p className="text-xs mt-0.5 text-gray-600 dark:text-gray-400">
+                  <p className={selectStateBodyClass}>
                     {navState.isCalculatingRoute 
                       ? (t('gps.calculatingRoute') || 'Calculating route...')
                       : (t('gps.tapOnField') || 'Tap on map to set destination')
@@ -1049,7 +1326,7 @@ export default function NavigationPanel({
             )}
 
             {navState.stage === 'select-destination' && (
-              <div className="mt-3 space-y-2">
+              <div className={selectStatePanelClass}>
                 <div className="flex gap-2">
                   <input
                     value={searchTerm}
@@ -1058,23 +1335,30 @@ export default function NavigationPanel({
                       debouncedGeocodeSearch(e.target.value);
                     }}
                     placeholder={t('gps.searchDestination') || 'Search address or place'}
-                    className={`flex-1 px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${isDarkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+                    className={searchInputClass}
                   />
                   <Button
                     variant="secondary"
-                    onClick={() => debouncedGeocodeSearch(searchTerm)}
+                    onClick={() => {
+                      void performGeocodeSearch(searchTerm);
+                    }}
+                    size={isCompactLandscapeLayout ? 'sm' : 'md'}
+                    className={isCompactLandscapeLayout ? 'px-2.5 py-1.5 text-xs' : ''}
                   >
                     {t('common.search') || 'Search'}
                   </Button>
                 </div>
 
                 {searchResults.length > 0 && (
-                  <div className={`${isDarkMode ? 'bg-gray-800' : 'bg-white'} rounded-lg border ${isDarkMode ? 'border-gray-700' : 'border-gray-200'} max-h-40 overflow-auto`}> 
+                  <div className={searchResultsClass}> 
                     {searchResults.map((result, idx) => (
                       <button
                         key={`${result.displayName}-${idx}`}
-                        className="w-full text-left px-3 py-2 hover:bg-blue-50 dark:hover:bg-gray-700 text-sm"
+                        className={`w-full text-left hover:bg-blue-50 dark:hover:bg-gray-700 ${isCompactLandscapeLayout ? 'px-2.5 py-1.5 text-xs' : 'px-3 py-2 text-sm'}`}
                         onClick={async () => {
+                          if (navState.isCalculatingRoute) {
+                            return;
+                          }
                           const snapped = await snapToRoad(result.lat, result.lon);
                           const destination: [number, number] = snapped;
                           setNavState(prev => ({ ...prev, destination }));
@@ -1097,17 +1381,18 @@ export default function NavigationPanel({
                 onRouteSelect={handleRouteSelect}
                 onStartNavigation={handleStartNavigation}
                 isLoading={navState.isCalculatingRoute}
+                compact={isCompactLandscapeLayout}
               />
             )}
 
             {navState.stage === 'arrived' && (
-              <div className="p-4 text-center">
+              <div className={arrivedPanelClass}>
                 <div className="mb-4">
-                  <div className="w-20 h-20 mx-auto bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
-                    <Target className="w-10 h-10 text-green-600 dark:text-green-400" />
+                  <div className={arrivedIconWrapClass}>
+                    <Target className={arrivedIconClass} />
                   </div>
                 </div>
-                <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+                <h3 className={arrivedTitleClass}>
                   {t('gps.arrivedAtDestination') || 'You have arrived!'}
                 </h3>
                 <p className="text-gray-600 dark:text-gray-400 mb-4">

@@ -1,12 +1,10 @@
-import { useState, useEffect } from 'react';
-import { X, Layers, Eye, EyeOff, Info, Wifi, WifiOff, ChevronDown, ChevronUp } from 'lucide-react';
+import { useState } from 'react';
+import { X, Layers, Eye, EyeOff, Wifi, WifiOff, ChevronDown, ChevronUp } from 'lucide-react';
 import { useDarkMode } from '../../hooks/useDarkMode';
 import { useLanguage } from '../../hooks/useLanguage';
 import { 
   AGRICULTURAL_LAYERS, 
   LAYER_PRESETS, 
-  MapLayer,
-  agriculturalLayersService 
 } from '../../services/agriculturalLayers';
 import Button from '../ui/Button';
 

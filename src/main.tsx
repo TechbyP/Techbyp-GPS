@@ -5,7 +5,6 @@
 const getErrorText = (key: string, fallback: string) => {
   try {
     // Try to get from localStorage if i18n was initialized
-    const lang = localStorage.getItem('i18nextLng') || 'en';
     // For simplicity, we'll use English fallbacks as global errors happen before i18n loads
     const translations = {
       'error.global.initializationTitle': '⚠️ App Initialization Error',
@@ -74,7 +73,7 @@ import { environmentConfig } from './config/environment';
 import { getDeviceInfo } from './utils/deviceDetection';
 
 // Log device capabilities
-const deviceInfo = getDeviceInfo();
+getDeviceInfo();
 
 // Debug utilities - available in dev mode
 if (import.meta.env.DEV) {

@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<import>
+  <kundeninformation>
+    <kunde adrnr="100000"/>
+    <auftrag standarduntersuchungsumfang="Nmin">
+      <auftraggeber adrnr="100000/35"/>
+      <kostentraeger adrnr="100000"/>
+      <durchschriftenempfaenger adrnr="100000/97"/>
+      <probe fremdkennung="318178001000024016">
+        <kennzeichnung_probe element="piafKennung" wertlang="3181780010000249"/>
+        <kennzeichnung_probe element="Ort" wertlang="Testhausen"/>
+        <kennzeichnung_probe element="Serie" wertlang="Testserie 1"/>
+        <kennzeichnung_probe element="Termin" wertlang="Testtermin 1"/>
+        <kennzeichnung_probe element="Bezeichnung" wertlang="Kontrolle"/>
+        <kennzeichnung_probe element="Gruppe" wertlang="1"/>
+        <kennzeichnung_probe element="Nr" wertlang="1"/>
+        <kennzeichnung_probe element="Schicht von" wertlang="0"/>
+        <kennzeichnung_probe element="Schicht bis" wertlang="30"/>
+        <kennzeichnung_probe element="Wdh" wertlang="1"/>
+        <kennzeichnung_probe element="Kürzel" wertlang="1/*"/>
+        <kennzeichnung_probe element="Gruppenart" wertlang="A"/>
+        <kennzeichnung_probe element="Objekt" wertlang="BO"/>
+        <kennzeichnung_probe element="Schicht" wertlang="0-30"/>
+      </probe>
+      <probe fremdkennung="318178001000024023">
+        <kennzeichnung_probe element="piafKennung" wertlang="3181780010000249"/>
+        <kennzeichnung_probe element="Ort" wertlang="Testhausen"/>
+        <kennzeichnung_probe element="Serie" wertlang="Testserie 1"/>
+        <kennzeichnung_probe element="Termin" wertlang="Testtermin 1"/>
+        <kennzeichnung_probe element="Bezeichnung" wertlang="Kontrolle"/>
+        <kennzeichnung_probe element="Gruppe" wertlang="1"/>
+        <kennzeichnung_probe element="Nr" wertlang="2"/>
+        <kennzeichnung_probe element="Schicht von" wertlang="30"/>
+        <kennzeichnung_probe element="Schicht bis" wertlang="60"/>
+        <kennzeichnung_probe element="Wdh" wertlang="1"/>
+        <kennzeichnung_probe element="Kürzel" wertlang="1/*"/>
+        <kennzeichnung_probe element="Gruppenart" wertlang="A"/>
+        <kennzeichnung_probe element="Objekt" wertlang="BO"/>
+        <kennzeichnung_probe element="Schicht" wertlang="30-60"/>
+      </probe>
+      <probe fremdkennung="318178001000024030">
+        <kennzeichnung_probe element="piafKennung" wertlang="3181780010000249"/>
+        <kennzeichnung_probe element="Ort" wertlang="Testhausen"/>
+        <kennzeichnung_probe element="Serie" wertlang="Testserie 1"/>
+        <kennzeichnung_probe element="Termin" wertlang="Testtermin 1"/>
+        <kennzeichnung_probe element="Bezeichnung" wertlang="Kontrolle"/>
+        <kennzeichnung_probe element="Gruppe" wertlang="1"/>
+        <kennzeichnung_probe element="Nr" wertlang="3"/>
+        <kennzeichnung_probe element="Schicht von" wertlang="60"/>
+        <kennzeichnung_probe element="Schicht bis" wertlang="90"/>
+        <kennzeichnung_probe element="Wdh" wertlang="1"/>
+        <kennzeichnung_probe element="Kürzel" wertlang="1/*"/>
+        <kennzeichnung_probe element="Gruppenart" wertlang="A"/>
+        <kennzeichnung_probe element="Objekt" wertlang="BO"/>
+        <kennzeichnung_probe element="Schicht" wertlang="60-90"/>
+      </probe>
+    </auftrag>
+    <auftrag standarduntersuchungsumfang="Nmin">
+      <auftraggeber adrnr="100000/35"/>
+      <kostentraeger adrnr="100000"/>
+      <durchschriftenempfaenger adrnr="100000/8572"/>
+      <probe fremdkennung="318178002000024013">
+        <kennzeichnung_probe element="piafKennung" wertlang="3181780020000246"/>
+        <kennzeichnung_probe element="Ort" wertlang="Testhausen"/>
+        <kennzeichnung_probe element="Serie" wertlang="Testserie 1"/>
+        <kennzeichnung_probe element="Termin" wertlang="Testtermin 1"/>
+        <kennzeichnung_probe element="Bezeichnung" wertlang="Hacken EC 6"/>
+        <kennzeichnung_probe element="Gruppe" wertlang="2"/>
+        <kennzeichnung_probe element="Nr" wertlang="1"/>
+        <kennzeichnung_probe element="Schicht von" wertlang="0"/>
+        <kennzeichnung_probe element="Schicht bis" wertlang="30"/>
+        <kennzeichnung_probe element="Wdh" wertlang="1"/>
+        <kennzeichnung_probe element="Kürzel" wertlang="2/*"/>
+        <kennzeichnung_probe element="Gruppenart" wertlang="A"/>
+        <kennzeichnung_probe element="Objekt" wertlang="BO"/>
+        <kennzeichnung_probe element="Schicht" wertlang="0-30"/>
+      </probe>
+      <probe fremdkennung="318178002000024020">
+        <kennzeichnung_probe element="piafKennung" wertlang="3181780020000246"/>
+        <kennzeichnung_probe element="Ort" wertlang="Testhausen"/>
+        <kennzeichnung_probe element="Serie" wertlang="Testserie 1"/>
+        <kennzeichnung_probe element="Termin" wertlang="Testtermin 1"/>
+        <kennzeichnung_probe element="Bezeichnung" wertlang="Hacken EC 6"/>
+        <kennzeichnung_probe element="Gruppe" wertlang="2"/>
+        <kennzeichnung_probe element="Nr" wertlang="2"/>
+        <kennzeichnung_probe element="Schicht von" wertlang="30"/>
+        <kennzeichnung_probe element="Schicht bis" wertlang="60"/>
+        <kennzeichnung_probe element="Wdh" wertlang="1"/>
+        <kennzeichnung_probe element="Kürzel" wertlang="2/*"/>
+        <kennzeichnung_probe element="Gruppenart" wertlang="A"/>
+        <kennzeichnung_probe element="Objekt" wertlang="BO"/>
+        <kennzeichnung_probe element="Schicht" wertlang="30-60"/>
+      </probe>
+      <probe fremdkennung="318178002000024037">
+        <kennzeichnung_probe element="piafKennung" wertlang="3181780020000246"/>
+        <kennzeichnung_probe element="Ort" wertlang="Testhausen"/>
+        <kennzeichnung_probe element="Serie" wertlang="Testserie 1"/>
+        <kennzeichnung_probe element="Termin" wertlang="Testtermin 1"/>
+        <kennzeichnung_probe element="Bezeichnung" wertlang="Hacken EC 6"/>
+        <kennzeichnung_probe element="Gruppe" wertlang="2"/>
+        <kennzeichnung_probe element="Nr" wertlang="3"/>
+        <kennzeichnung_probe element="Schicht von" wertlang="60"/>
+        <kennzeichnung_probe element="Schicht bis" wertlang="90"/>
+        <kennzeichnung_probe element="Wdh" wertlang="1"/>
+        <kennzeichnung_probe element="Kürzel" wertlang="2/*"/>
+        <kennzeichnung_probe element="Gruppenart" wertlang="A"/>
+        <kennzeichnung_probe element="Objekt" wertlang="BO"/>
+        <kennzeichnung_probe element="Schicht" wertlang="60-90"/>
+      </probe>
+    </auftrag>
+    <auftrag standarduntersuchungsumfang="Nmin">
+      <auftraggeber adrnr="100000/35"/>
+      <kostentraeger adrnr="100000"/>
+      <durchschriftenempfaenger adrnr="100000/97"/>
+      <probe fremdkennung="318178003000024010">
+        <kennzeichnung_probe element="piafKennung" wertlang="3181780030000243"/>
+        <kennzeichnung_probe element="Ort" wertlang="Testhausen"/>
+        <kennzeichnung_probe element="Serie" wertlang="Testserie 1"/>
+        <kennzeichnung_probe element="Termin" wertlang="Testtermin 1"/>
+        <kennzeichnung_probe element="Bezeichnung" wertlang="Gülle früh"/>
+        <kennzeichnung_probe element="Gruppe" wertlang="3"/>
+        <kennzeichnung_probe element="Nr" wertlang="1"/>
+        <kennzeichnung_probe element="Schicht von" wertlang="0"/>
+        <kennzeichnung_probe element="Schicht bis" wertlang="30"/>
+        <kennzeichnung_probe element="Wdh" wertlang="1"/>
+        <kennzeichnung_probe element="Kürzel" wertlang="3/*"/>
+        <kennzeichnung_probe element="Gruppenart" wertlang="A"/>
+        <kennzeichnung_probe element="Objekt" wertlang="BO"/>
+        <kennzeichnung_probe element="Schicht" wertlang="0-30"/>
+      </probe>
+      <probe fremdkennung="318178003000024027">
+        <kennzeichnung_probe element="piafKennung" wertlang="3181780030000243"/>
+        <kennzeichnung_probe element="Ort" wertlang="Testhausen"/>
+        <kennzeichnung_probe element="Serie" wertlang="Testserie 1"/>
+        <kennzeichnung_probe element="Termin" wertlang="Testtermin 1"/>
+        <kennzeichnung_probe element="Bezeichnung" wertlang="Gülle früh"/>
+        <kennzeichnung_probe element="Gruppe" wertlang="3"/>
+        <kennzeichnung_probe element="Nr" wertlang="2"/>
+        <kennzeichnung_probe element="Schicht von" wertlang="30"/>
+        <kennzeichnung_probe element="Schicht bis" wertlang="60"/>
+        <kennzeichnung_probe element="Wdh" wertlang="1"/>
+        <kennzeichnung_probe element="Kürzel" wertlang="3/*"/>
+        <kennzeichnung_probe element="Gruppenart" wertlang="A"/>
+        <kennzeichnung_probe element="Objekt" wertlang="BO"/>
+        <kennzeichnung_probe element="Schicht" wertlang="30-60"/>
+      </probe>
+      <probe fremdkennung="318178003000024034">
+        <kennzeichnung_probe element="piafKennung" wertlang="3181780030000243"/>
+        <kennzeichnung_probe element="Ort" wertlang="Testhausen"/>
+        <kennzeichnung_probe element="Serie" wertlang="Testserie 1"/>
+        <kennzeichnung_probe element="Termin" wertlang="Testtermin 1"/>
+        <kennzeichnung_probe element="Bezeichnung" wertlang="Gülle früh"/>
+        <kennzeichnung_probe element="Gruppe" wertlang="3"/>
+        <kennzeichnung_probe element="Nr" wertlang="3"/>
+        <kennzeichnung_probe element="Schicht von" wertlang="60"/>
+        <kennzeichnung_probe element="Schicht bis" wertlang="90"/>
+        <kennzeichnung_probe element="Wdh" wertlang="1"/>
+        <kennzeichnung_probe element="Kürzel" wertlang="3/*"/>
+        <kennzeichnung_probe element="Gruppenart" wertlang="A"/>
+        <kennzeichnung_probe element="Objekt" wertlang="BO"/>
+        <kennzeichnung_probe element="Schicht" wertlang="60-90"/>
+      </probe>
+    </auftrag>
+    <auftrag standarduntersuchungsumfang="Nmin">
+      <auftraggeber adrnr="100000/35"/>
+      <kostentraeger adrnr="100000"/>
+      <durchschriftenempfaenger adrnr="100000/8572"/>
+      <probe fremdkennung="318178004000024017">
+        <kennzeichnung_probe element="piafKennung" wertlang="3181780040000240"/>
+        <kennzeichnung_probe element="Ort" wertlang="Testhausen"/>
+        <kennzeichnung_probe element="Serie" wertlang="Testserie 1"/>
+        <kennzeichnung_probe element="Termin" wertlang="Testtermin 1"/>
+        <kennzeichnung_probe element="Bezeichnung" wertlang="Gülle früh+Kieserit"/>
+        <kennzeichnung_probe element="Gruppe" wertlang="4"/>
+        <kennzeichnung_probe element="Nr" wertlang="1"/>
+        <kennzeichnung_probe element="Schicht von" wertlang="0"/>
+        <kennzeichnung_probe element="Schicht bis" wertlang="30"/>
+        <kennzeichnung_probe element="Wdh" wertlang="1"/>
+        <kennzeichnung_probe element="Kürzel" wertlang="4/*"/>
+        <kennzeichnung_probe element="Gruppenart" wertlang="A"/>
+        <kennzeichnung_probe element="Objekt" wertlang="BO"/>
+        <kennzeichnung_probe element="Schicht" wertlang="0-30"/>
+      </probe>
+      <probe fremdkennung="318178004000024024">
+        <kennzeichnung_probe element="piafKennung" wertlang="3181780040000240"/>
+        <kennzeichnung_probe element="Ort" wertlang="Testhausen"/>
+        <kennzeichnung_probe element="Serie" wertlang="Testserie 1"/>
+        <kennzeichnung_probe element="Termin" wertlang="Testtermin 1"/>
+        <kennzeichnung_probe element="Bezeichnung" wertlang="Gülle früh+Kieserit"/>
+        <kennzeichnung_probe element="Gruppe" wertlang="4"/>
+        <kennzeichnung_probe element="Nr" wertlang="2"/>
+        <kennzeichnung_probe element="Schicht von" wertlang="30"/>
+        <kennzeichnung_probe element="Schicht bis" wertlang="60"/>
+        <kennzeichnung_probe element="Wdh" wertlang="1"/>
+        <kennzeichnung_probe element="Kürzel" wertlang="4/*"/>
+        <kennzeichnung_probe element="Gruppenart" wertlang="A"/>
+        <kennzeichnung_probe element="Objekt" wertlang="BO"/>
+        <kennzeichnung_probe element="Schicht" wertlang="30-60"/>
+      </probe>
+      <probe fremdkennung="318178004000024031">
+        <kennzeichnung_probe element="piafKennung" wertlang="3181780040000240"/>
+        <kennzeichnung_probe element="Ort" wertlang="Testhausen"/>
+        <kennzeichnung_probe element="Serie" wertlang="Testserie 1"/>
+        <kennzeichnung_probe element="Termin" wertlang="Testtermin 1"/>
+        <kennzeichnung_probe element="Bezeichnung" wertlang="Gülle früh+Kieserit"/>
+        <kennzeichnung_probe element="Gruppe" wertlang="4"/>
+        <kennzeichnung_probe element="Nr" wertlang="3"/>
+        <kennzeichnung_probe element="Schicht von" wertlang="60"/>
+        <kennzeichnung_probe element="Schicht bis" wertlang="90"/>
+        <kennzeichnung_probe element="Wdh" wertlang="1"/>
+        <kennzeichnung_probe element="Kürzel" wertlang="4/*"/>
+        <kennzeichnung_probe element="Gruppenart" wertlang="A"/>
+        <kennzeichnung_probe element="Objekt" wertlang="BO"/>
+        <kennzeichnung_probe element="Schicht" wertlang="60-90"/>
+      </probe>
+    </auftrag>
+  </kundeninformation>
+</import>

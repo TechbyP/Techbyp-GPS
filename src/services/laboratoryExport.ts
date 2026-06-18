@@ -124,7 +124,7 @@ function generateAgrolabCSV(samples: GpsSample[], options: LaboratoryExportOptio
 /**
  * Generate LUFA CSV format
  */
-function generateLUFACSV(samples: GpsSample[], options: LaboratoryExportOptions): string {
+function generateLUFACSV(samples: GpsSample[], _options: LaboratoryExportOptions): string {
   const headers = [
     'Probennummer',
     'Schlagname',

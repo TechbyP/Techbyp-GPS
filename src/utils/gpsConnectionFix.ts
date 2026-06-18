@@ -29,7 +29,7 @@ export async function diagnoseGpsConnection(): Promise<GpsConnectionDiagnostics>
 
   try {
     // Try to check if GPS manager is available
-    const status = await GpsDeviceManager.getStatus();
+    await GpsDeviceManager.getStatus();
     diagnostics.hasGpsManager = true;
   } catch (error) {
     diagnostics.hasGpsManager = false;

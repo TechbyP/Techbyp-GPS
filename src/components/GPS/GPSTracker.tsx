@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import area from '@turf/area';
 import { useDarkMode } from '../../hooks/useDarkMode';
@@ -7,7 +6,7 @@ import { useLanguage } from '../../hooks/useLanguage';
 import toast from 'react-hot-toast';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
-import { Play, MapPin, Trash2, Upload, ChevronDown, ChevronRight, Satellite, User, LogOut, Camera, Moon, Sun, Globe, Loader2, Move, ArrowRight, X, Layers, Hand } from 'lucide-react';
+import { MapPin, Trash2, Upload, ChevronDown, ChevronRight, Satellite, User, LogOut, Camera, Moon, Sun, Globe, Loader2, ArrowRight, X, Hand, RefreshCw, Search, Check, Tag } from 'lucide-react';
 import { db } from '../../firebase';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { AnimatedLoader } from '../ui/AnimatedLoader';
@@ -26,19 +25,29 @@ import { useBoundaries } from '../../hooks/useBoundaries';
 import { useAuth } from '../../context/AuthContext';
 import { useConfirmation } from '../ui/ConfirmationProvider';
 import { isCapacitor } from '../../utils/geolocation';
-import { isCapacitorApp } from '../../utils/platform';
 import { useHybridPosition, type GpsSourcePreference, type GpsSourcePolicy } from '../../hooks/useHybridPosition';
-import { canTrackGPS, isWindowsTablet, getDeviceInfo } from '../../utils/deviceDetection';
-import { useWindowsGeolocation } from '../../hooks/useWindowsGeolocation';
+import { canTrackGPS, isCompactLandscapeScreen } from '../../utils/deviceDetection';
+import {
+  buildBoundarySamplingProperties,
+  deriveBoundarySamplingStatus,
+  getBoundarySamplingState,
+  isBoundarySamplingLocked,
+} from '../../utils/fieldSamplingState';
+import {
+  buildBoundaryBarcodeProperties,
+  getBoundaryBarcodeList,
+  normalizeBarcode,
+  normalizeBarcodeList,
+} from '../../utils/orderBarcodes';
 
 const NavigationPanel = lazy(() => import('./NavigationPanel'));
 const UnifiedDeviceManager = lazy(() => import('./UnifiedDeviceManager'));
 
-const HARDWARE_SAMPLE_TRIGGER_KEYS = new Set(['F13', 'ENTER', 'K']);
+const HARDWARE_SAMPLE_TRIGGER_KEYS = new Set(['F13', 'K', 'D']);
 
-const HARDWARE_SAMPLE_TRIGGER_CODES = new Set(['F13', 'ENTER', 'NUMPADENTER', 'KEYK']);
+const HARDWARE_SAMPLE_TRIGGER_CODES = new Set(['F13', 'KEYK', 'KEYD']);
 
-const HARDWARE_SAMPLE_TRIGGER_KEY_CODES = new Set([124, 13, 75]);
+const HARDWARE_SAMPLE_TRIGGER_KEY_CODES = new Set([124, 75, 68]);
 
 const HARDWARE_SAMPLE_DEBOUNCE_MS = 450;
 
@@ -47,7 +56,6 @@ export default function GPSTracker() {
   const [isDark, toggleDarkMode] = useDarkMode();
   const { t, language, changeLanguage } = useLanguage();
   const { showConfirmation } = useConfirmation();
-  const navigate = useNavigate();
   const lastSavedPosition = useRef<GpsPosition | null>(null);
   const lastPointSavedAtRef = useRef(0);
   const fieldListContainerRef = useRef<HTMLDivElement | null>(null);
@@ -60,6 +68,7 @@ export default function GPSTracker() {
   const [selectedOwnerId, setSelectedOwnerId] = useState<string | null>(null);
   const [userOptions, setUserOptions] = useState<{ id: string; name: string; email: string }[]>([]);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const [isRefreshingGps, setIsRefreshingGps] = useState(false);
   
   // Helper to extract field identifier by removing project name prefix (e.g., "Miercuri - 508067, 20" -> "508067, 20")
   const getFieldNumber = useCallback((fieldName: string): string => {
@@ -102,13 +111,13 @@ export default function GPSTracker() {
 
   // Network state
   const [isNetworkOnline, setIsNetworkOnline] = useState(true);
-  const [connectionType, setConnectionType] = useState<string>('unknown');
+  const [_connectionType, setConnectionType] = useState<string>('unknown');
 
   // Project and UI state
   const [projects, setProjects] = useState<GpsProject[]>([]);
   const [selectedProject, setSelectedProject] = useState<GpsProject | null>(null);
   const [loadingMessage, setLoadingMessage] = useState('');
-  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+  const [_isLoadingProjects, setIsLoadingProjects] = useState(false);
   const [isStartingTracking, setIsStartingTracking] = useState(false);
   const [isAddingSample, setIsAddingSample] = useState(false);
   
@@ -118,19 +127,26 @@ export default function GPSTracker() {
   const [showLanguageDropdown, setShowLanguageDropdown] = useState(false);
   const [showLanguageDropdownExpanded, setShowLanguageDropdownExpanded] = useState(false);
   const [showGpsSourceMenu, setShowGpsSourceMenu] = useState(false);
+  const [showGpsAdvancedControls, setShowGpsAdvancedControls] = useState(false);
   const [showNavigationPanel, setShowNavigationPanel] = useState(false);
   const [showDeviceManager, setShowDeviceManager] = useState(false);
   const [showDevicePopup, setShowDevicePopup] = useState(false);
   const [showManualSampleModal, setShowManualSampleModal] = useState(false);
+  const [showBagCodesModal, setShowBagCodesModal] = useState(false);
   const [showOutsideFieldConfirm, setShowOutsideFieldConfirm] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState<number | null>(null);
   const [showTrackAssignDropdown, setShowTrackAssignDropdown] = useState<number | null>(null);
-  const [dropdownPosition, setDropdownPosition] = useState<{top: number; left: number} | null>(null);
+  const [_dropdownPosition, setDropdownPosition] = useState<{top: number; left: number} | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<'fields' | 'projects'>('fields');
+  const [projectSearchQuery, setProjectSearchQuery] = useState('');
   const [showFieldScrollIndicator, setShowFieldScrollIndicator] = useState(false);
   const [showUnassignedScrollIndicator, setShowUnassignedScrollIndicator] = useState(false);
+  const [selectedBagCodeBoundaryId, setSelectedBagCodeBoundaryId] = useState<number | string | null>(null);
+  const [bagCodeInput, setBagCodeInput] = useState('');
+  const [editingBagCodeIndex, setEditingBagCodeIndex] = useState<number | null>(null);
   const lastHardwareSampleTriggerAtRef = useRef(0);
+  const bagCodeInputRef = useRef<HTMLInputElement | null>(null);
 
   const manualSamplesTrackPrefix = t('gps.manualSamplesTrackPrefix') || t('gps.manualSamples') || 'Manual Samples';
   const isManualSamplesTrackName = useCallback((trackName?: string) => {
@@ -143,6 +159,31 @@ export default function GPSTracker() {
   const toggleNavigationPanel = useCallback(() => {
     setShowNavigationPanel(prev => !prev);
   }, []);
+
+  const [isCompactLandscapeLayout, setIsCompactLandscapeLayout] = useState(() => isCompactLandscapeScreen());
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const updateCompactLandscapeLayout = () => {
+      setIsCompactLandscapeLayout(isCompactLandscapeScreen());
+    };
+
+    updateCompactLandscapeLayout();
+    window.addEventListener('resize', updateCompactLandscapeLayout);
+    window.addEventListener('orientationchange', updateCompactLandscapeLayout);
+
+    return () => {
+      window.removeEventListener('resize', updateCompactLandscapeLayout);
+      window.removeEventListener('orientationchange', updateCompactLandscapeLayout);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!showGpsSourceMenu) {
+      setShowGpsAdvancedControls(false);
+    }
+  }, [showGpsSourceMenu]);
 
   const handleSidebarHeaderClick = useCallback((event: { target: EventTarget | null }) => {
     const target = event.target as HTMLElement | null;
@@ -525,6 +566,7 @@ export default function GPSTracker() {
     isTracking,
     startTracking,
     stopTracking,
+    refreshPosition,
     isMockLocation,
     positionSource,
     isExternalFallback,
@@ -541,12 +583,66 @@ export default function GPSTracker() {
   const { fieldBoundaries, loadFieldBoundaries } = useBoundaries(selectedProject);
   const mapTracks = useMemo(() => [] as GpsTrackDetail[], []);
   const shouldShowGpsErrorBanner = Boolean(gpsError) && positionSource !== 'internal';
+  const gpsDetailsExpanded = true;
+
+  const filteredProjects = useMemo(() => {
+    const normalizedQuery = projectSearchQuery.trim().toLowerCase();
+    const matchingProjects = normalizedQuery.length === 0
+      ? projects
+      : projects.filter((project) => {
+          const haystacks = [project.name, project.description || ''];
+          return haystacks.some((value) => value.toLowerCase().includes(normalizedQuery));
+        });
+
+    return [...matchingProjects].sort((left, right) => {
+      if (selectedProject?.id === left.id) return -1;
+      if (selectedProject?.id === right.id) return 1;
+      return left.name.localeCompare(right.name);
+    });
+  }, [projects, projectSearchQuery, selectedProject?.id]);
+
+  const shouldShowProjectSearch = projects.length > 5 || projectSearchQuery.trim().length > 0;
+
+  const handleGpsRescan = useCallback(async () => {
+    if (isRefreshingGps) {
+      return;
+    }
+
+    setIsRefreshingGps(true);
+    refreshPosition();
+
+    const activeDevice = connectedDevice;
+
+    try {
+      if (activeDevice?.connection_type === 'wifi' || activeDevice?.connection_type === 'tcp') {
+        await tcpGPS.connect(activeDevice.address, activeDevice.config?.tcp_port ?? 9001);
+      } else if (activeDevice?.connection_type === 'bluetooth') {
+        await bluetoothGPS.connect(activeDevice.address, activeDevice.name);
+      } else if (activeDevice?.connection_type === 'usb' || activeDevice?.connection_type === 'serial') {
+        await serialGPS.autoConnect();
+      }
+
+      toast.success(t('gps.refreshingGps') || 'Refreshing GPS search...', {
+        duration: 2000,
+        id: 'gps-refreshing'
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      toast.error(`${t('gps.refreshGpsFailed') || 'GPS refresh failed'}: ${errorMessage}`, {
+        duration: 4000,
+        id: 'gps-refresh-failed'
+      });
+    } finally {
+      window.setTimeout(() => setIsRefreshingGps(false), 800);
+    }
+  }, [isRefreshingGps, refreshPosition, connectedDevice, tcpGPS, bluetoothGPS, serialGPS, t]);
 
   // Expanded boundaries and focus states
   const [expandedBoundaries, setExpandedBoundaries] = useState<Set<number>>(new Set());
   const [focusedBoundary, setFocusedBoundary] = useState<number | null>(null);
-  const [focusedTrack, setFocusedTrack] = useState<string | number | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [focusedBoundaryRequestId, setFocusedBoundaryRequestId] = useState(0);
+  const [_focusedTrack, setFocusedTrack] = useState<string | number | null>(null);
+  const [loading] = useState(false);
   const [recenterTrigger, setRecenterTrigger] = useState(0);
 
   const legacyTrackSamples = useMemo((): GpsFieldSample[] => {
@@ -584,8 +680,7 @@ export default function GPSTracker() {
     const merged = new Map<string, GpsFieldSample>();
 
     legacyTrackSamples.forEach((sample) => {
-      const key = `legacy:${sample.field_boundary_id}:${sample.latitude}:${sample.longitude}:${sample.timestamp || sample.sample_number}`;
-      merged.set(key, sample);
+      merged.set(String(sample.id), sample);
     });
 
     fieldSamples.forEach((sample) => {
@@ -609,7 +704,7 @@ export default function GPSTracker() {
     return counts;
   }, [tracks, isManualSamplesTrackName]);
 
-  const directFieldSampleCountByField = useMemo(() => {
+  const _directFieldSampleCountByField = useMemo(() => {
     const counts = new Map<string, number>();
 
     fieldSamples.forEach((sample) => {
@@ -630,6 +725,22 @@ export default function GPSTracker() {
 
     return counts;
   }, [effectiveFieldSamples]);
+
+  const boundarySamplingStateByField = useMemo(() => {
+    const states = new Map<string, { sampleCount: number; status: 'pending' | 'in_progress' | 'completed'; locked: boolean }>();
+
+    fieldBoundaries.forEach((boundary) => {
+      const fieldId = String(boundary.id);
+      const sampleCount = effectiveFieldSampleCountByField.get(fieldId) || 0;
+      states.set(fieldId, {
+        sampleCount,
+        status: deriveBoundarySamplingStatus(sampleCount, boundary),
+        locked: isBoundarySamplingLocked(boundary),
+      });
+    });
+
+    return states;
+  }, [effectiveFieldSampleCountByField, fieldBoundaries]);
 
   const boundaryAreaHaByField = useMemo(() => {
     const parseNumber = (value: unknown): number | null => {
@@ -830,11 +941,162 @@ export default function GPSTracker() {
     return effectiveFieldSamples.filter((sample) => String(sample.field_boundary_id) === activeFieldId).length;
   }, [focusedBoundary, sampleCount, effectiveFieldSamples]);
 
+  const getBagCodesForBoundary = useCallback((boundary?: GpsFieldBoundary | null) => {
+    if (!boundary) return [] as string[];
+    return getBoundaryBarcodeList(boundary.properties);
+  }, []);
+
+  const selectedBagCodeBoundary = useMemo(() => {
+    if (selectedBagCodeBoundaryId == null) return null;
+    return fieldBoundaries.find((boundary) => String(boundary.id) === String(selectedBagCodeBoundaryId)) || null;
+  }, [fieldBoundaries, selectedBagCodeBoundaryId]);
+
+  const selectedBagCodes = useMemo(() => (
+    getBagCodesForBoundary(selectedBagCodeBoundary)
+  ), [getBagCodesForBoundary, selectedBagCodeBoundary]);
+
+  const closeBagCodesModal = useCallback(() => {
+    setShowBagCodesModal(false);
+    setSelectedBagCodeBoundaryId(null);
+    setBagCodeInput('');
+    setEditingBagCodeIndex(null);
+  }, []);
+
+  const openBagCodesModal = useCallback((boundary: GpsFieldBoundary) => {
+    setFocusedBoundary(boundary.id as number);
+    setSelectedBagCodeBoundaryId(boundary.id);
+    setBagCodeInput('');
+    setEditingBagCodeIndex(null);
+    setShowBagCodesModal(true);
+  }, []);
+
+  useEffect(() => {
+    if (!showBagCodesModal) return;
+
+    const timeoutId = window.setTimeout(() => {
+      bagCodeInputRef.current?.focus();
+      bagCodeInputRef.current?.select();
+    }, 40);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [editingBagCodeIndex, showBagCodesModal]);
+
+  useEffect(() => {
+    if (!showBagCodesModal) return;
+    if (!selectedBagCodeBoundary) {
+      closeBagCodesModal();
+    }
+  }, [closeBagCodesModal, selectedBagCodeBoundary, showBagCodesModal]);
+
+  const findBagCodeConflict = useCallback((code: string, boundaryId: number | string) => {
+    const normalized = normalizeBarcode(code);
+    if (!normalized) return null;
+
+    for (const boundary of fieldBoundaries) {
+      if (String(boundary.id) === String(boundaryId)) continue;
+      const existing = getBoundaryBarcodeList(boundary.properties);
+      if (existing.includes(normalized)) {
+        return getFieldNumber(boundary.name);
+      }
+    }
+
+    return null;
+  }, [fieldBoundaries, getFieldNumber]);
+
+  const persistBagCodesForBoundary = useCallback(async (boundary: GpsFieldBoundary, codesInput: unknown) => {
+    const nextProperties = buildBoundaryBarcodeProperties(boundary.properties, codesInput);
+
+    await hybridDB.updateFieldBoundary(
+      String(boundary.id),
+      boundary.name,
+      undefined,
+      boundary.color,
+      nextProperties,
+    );
+
+    await loadFieldBoundaries();
+    setSelectedBagCodeBoundaryId(boundary.id);
+  }, [loadFieldBoundaries]);
+
+  const handleSubmitBagCode = useCallback(async () => {
+    if (!selectedBagCodeBoundary) return;
+
+    const nextCode = normalizeBarcode(bagCodeInput);
+    if (!nextCode) {
+      toast.error(t('gps.bagCodes.emptyInput') || 'Scan or enter a bag code first');
+      return;
+    }
+
+    const duplicateField = findBagCodeConflict(nextCode, selectedBagCodeBoundary.id);
+    if (duplicateField) {
+      toast.error(t('gps.bagCodes.duplicateConflict', {
+        code: nextCode,
+        field: duplicateField,
+      }) || `${nextCode} is already assigned to ${duplicateField}`);
+      return;
+    }
+
+    const nextCodes = editingBagCodeIndex == null
+      ? normalizeBarcodeList([...selectedBagCodes, nextCode])
+      : normalizeBarcodeList(selectedBagCodes.map((code, index) => (index === editingBagCodeIndex ? nextCode : code)));
+
+    try {
+      await persistBagCodesForBoundary(selectedBagCodeBoundary, nextCodes);
+      setBagCodeInput('');
+      setEditingBagCodeIndex(null);
+      toast.success(t(
+        editingBagCodeIndex == null ? 'gps.bagCodes.addedSuccess' : 'gps.bagCodes.replacedSuccess',
+        {
+          code: nextCode,
+          field: getFieldNumber(selectedBagCodeBoundary.name),
+        },
+      ) || `${nextCode} saved`);
+    } catch (error) {
+      logger.error('Failed to save bag codes', error, {
+        component: 'GPSTracker',
+        fieldBoundaryId: selectedBagCodeBoundary.id,
+      });
+      toast.error(t('gps.bagCodes.saveFailed') || 'Failed to save bag codes');
+    }
+  }, [bagCodeInput, editingBagCodeIndex, findBagCodeConflict, getFieldNumber, persistBagCodesForBoundary, selectedBagCodeBoundary, selectedBagCodes, t]);
+
+  const handleDeleteBagCode = useCallback(async (index: number) => {
+    if (!selectedBagCodeBoundary) return;
+
+    const removedCode = selectedBagCodes[index];
+    const nextCodes = selectedBagCodes.filter((_, entryIndex) => entryIndex !== index);
+
+    try {
+      await persistBagCodesForBoundary(selectedBagCodeBoundary, nextCodes);
+      if (editingBagCodeIndex === index) {
+        setEditingBagCodeIndex(null);
+        setBagCodeInput('');
+      }
+      toast.success(t('gps.bagCodes.deletedSuccess', {
+        code: removedCode,
+        field: getFieldNumber(selectedBagCodeBoundary.name),
+      }) || `${removedCode} removed`);
+    } catch (error) {
+      logger.error('Failed to delete bag code', error, {
+        component: 'GPSTracker',
+        fieldBoundaryId: selectedBagCodeBoundary.id,
+      });
+      toast.error(t('gps.bagCodes.saveFailed') || 'Failed to save bag codes');
+    }
+  }, [editingBagCodeIndex, getFieldNumber, persistBagCodesForBoundary, selectedBagCodeBoundary, selectedBagCodes, t]);
+
+  const handleEditBagCode = useCallback((index: number) => {
+    setEditingBagCodeIndex(index);
+    setBagCodeInput(selectedBagCodes[index] || '');
+  }, [selectedBagCodes]);
+
   // USB GPS connection tracking ref
   const usbGpsWasConnected = useRef(false);
 
   // Cache keys for localStorage
-  const cacheKeys = useMemo(() => ({
+  const _cacheKeys = useMemo(() => ({
     projects: `gps_projects_${user?.uid || 'guest'}`,
     selectedProject: `gps_selected_project_${user?.uid || 'guest'}`
   }), [user?.uid]);
@@ -907,6 +1169,20 @@ export default function GPSTracker() {
 
     return parts.join(' • ');
   }, [externalGpsPosition]);
+
+  const externalSourceMenuMeta = useMemo(() => {
+    if (!connectedDevice) {
+      return t('gps.notConnected') || 'Not connected';
+    }
+
+    const deviceLabel = externalGpsPosition
+      ? connectedDevice.name
+      : `${connectedDevice.name} (${t('gps.waitingForData') || 'waiting for data...'})`;
+
+    return [deviceLabel, externalGpsPosition ? externalTelemetrySummary : '']
+      .filter(Boolean)
+      .join(' • ');
+  }, [connectedDevice, externalGpsPosition, externalTelemetrySummary, t]);
 
   const gpsSourceState = useMemo(() => {
     const wifiBased = connectedDevice?.connection_type === 'wifi' || connectedDevice?.connection_type === 'tcp' || tcpGPS.isConnected;
@@ -1012,6 +1288,7 @@ export default function GPSTracker() {
   ]);
 
   // Load data once per user session and avoid duplicate project loads
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     // Always reset local state when the user identity changes to prevent bleed-over
     setProjects([]);
@@ -1034,6 +1311,7 @@ export default function GPSTracker() {
 
     return () => clearTimeout(timer);
   }, [user?.uid]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   // Load tracks when project changes
   useEffect(() => {
@@ -1042,6 +1320,7 @@ export default function GPSTracker() {
   }, [selectedProject, loadTracks, loadFieldSamples]);
 
   // Listen for sync-complete to refresh data after coming back online
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     const handleSyncComplete = (event: CustomEvent) => {
       if (event.detail?.syncedItems > 0) {
@@ -1062,6 +1341,7 @@ export default function GPSTracker() {
       window.removeEventListener('hybriddb-sync-complete', handleSyncComplete as EventListener);
     };
   }, [selectedProject, loadFieldBoundaries, loadTracks, loadFieldSamples]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   // Initialize scroll indicator when field boundaries change
   useEffect(() => {
@@ -1277,9 +1557,9 @@ export default function GPSTracker() {
       setLoadingMessage(isOffline ? t('common.loadingOfflineData') || 'Loading offline data...' : t('common.connectingToFirebase') || 'Connecting to Firebase...');
       
       // Test Firebase connection first (non-blocking diagnostic) - only if online
-      let connectionTest = Promise.resolve();
+      let _connectionTest = Promise.resolve();
       if (!isOffline) {
-        connectionTest = hybridDB.testFirebaseConnection()
+        _connectionTest = hybridDB.testFirebaseConnection()
           .then(result => {
             if (result.success) {
               logger.performance('Firebase connection test', result.duration, { status: 'ok' });
@@ -1506,10 +1786,12 @@ export default function GPSTracker() {
   }, [isAdmin, user?.uid, selectedOwnerId]);
 
   // Reload projects/contracts when admin switches selected owner
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     if (!isAdmin || !selectedOwnerId) return;
     void loadProjects(selectedOwnerId);
   }, [isAdmin, selectedOwnerId]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   // Periodic refresh for non-native environments only.
   // Native tablet uses HybridDB background sync and sync-complete events.
@@ -1654,21 +1936,31 @@ export default function GPSTracker() {
   const handleSaveManualSamples = useCallback(async () => {
     if (!selectedFieldForManualSample || !selectedProject?.id) return;
 
+    const projectId = String(selectedProject.id);
+
     try {
-      const existingManualTrack = tracks.find(t =>
+      const latestTracks = await hybridDB.getTracks(projectId);
+      const existingManualTrackIds = Array.from(new Set((Array.isArray(latestTracks) ? latestTracks : [])
+        .filter(t =>
         t &&
         String(t.field_boundary_id) === String(selectedFieldForManualSample.id) &&
         isManualSamplesTrackName(t.name)
-      );
+        )
+        .map(t => String(t.id))
+        .filter(Boolean)));
 
       if (manualSampleCount <= 0) {
-        if (existingManualTrack?.id) {
-          await hybridDB.deleteTrack(String(existingManualTrack.id));
+        if (existingManualTrackIds.length > 0) {
+          for (const trackId of existingManualTrackIds) {
+            await hybridDB.deleteTrack(trackId);
+          }
           toast.success(t('gps.manualSamplesRemoved') || 'Manual samples removed');
         }
       } else {
-        if (existingManualTrack?.id) {
-          await hybridDB.deleteTrack(String(existingManualTrack.id));
+        if (existingManualTrackIds.length > 0) {
+          for (const trackId of existingManualTrackIds) {
+            await hybridDB.deleteTrack(trackId);
+          }
         }
 
         const trackName = `${manualSamplesTrackPrefix} (${manualSampleCount})`;
@@ -1698,16 +1990,15 @@ export default function GPSTracker() {
         toast.success(t('gps.manualSamplesCreated', { count: manualSampleCount }) || `Manual track created with ${manualSampleCount} samples`);
       }
 
-      await loadTracks();
-      await loadFieldBoundaries();
-
       setShowManualSampleModal(false);
       setSelectedFieldForManualSample(null);
+
+      await loadTracks(projectId);
     } catch (error) {
       logger.error('Error saving manual samples', error, { component: 'GPSTracker' });
       toast.error(t('gps.manualSamplesFailed') || 'Failed to save manual samples');
     }
-  }, [selectedFieldForManualSample, selectedProject, manualSampleCount, tracks, calculateManualSamplePositions, loadTracks, loadFieldBoundaries, t, isManualSamplesTrackName, manualSamplesTrackPrefix]);
+  }, [selectedFieldForManualSample, selectedProject, manualSampleCount, calculateManualSamplePositions, loadTracks, t, isManualSamplesTrackName, manualSamplesTrackPrefix]);
 
   const toggleBoundaryExpansion = (boundaryId: number) => {
     const newExpanded = new Set(expandedBoundaries);
@@ -1721,7 +2012,8 @@ export default function GPSTracker() {
 
 
 
-  const handleStartTracking = useCallback(async () => {
+  /* eslint-disable react-hooks/exhaustive-deps */
+  const _handleStartTracking = useCallback(async () => {
     // Check if a field boundary is selected when field boundaries exist
     if (fieldBoundaries.length > 0 && !focusedBoundary) {
       setShowOutsideFieldConfirm(true);
@@ -1730,6 +2022,7 @@ export default function GPSTracker() {
 
     startTrackingProcess();
   }, [fieldBoundaries.length, focusedBoundary]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const startTrackingProcess = async (): Promise<GpsTrack | null> => {
     const startTime = Date.now();
@@ -1744,7 +2037,7 @@ export default function GPSTracker() {
       return null;
     }
     
-    let project = selectedProject;
+    const project = selectedProject;
 
     try {
       let boundaryId = focusedBoundary;
@@ -1789,7 +2082,7 @@ export default function GPSTracker() {
     }
   };
 
-  const handleStopTracking = async () => {
+  const _handleStopTracking = async () => {
     if (!currentTrack) return;
 
     try {
@@ -1842,19 +2135,43 @@ export default function GPSTracker() {
       return;
     }
 
+    const projectId = String(selectedProject.id);
     const normalizedFieldId = String(fieldBoundaryId);
-    const dedicatedSamples = fieldSamples.filter(
+    const latestFieldSamples = await hybridDB.getFieldSamples(projectId);
+    const latestTracks = await hybridDB.getTracks(projectId);
+
+    const dedicatedSamples = latestFieldSamples.filter(
       sample => String(sample.field_boundary_id) === normalizedFieldId
     );
 
-    const manualSamplesTrack = tracks.find(track =>
+    const manualSamplesTracks = latestTracks.filter(track =>
       track
       && String(track.field_boundary_id) === normalizedFieldId
       && isManualSamplesTrackName(track.name)
     );
 
-    const manualSamplesCount = manualSamplesTrack?.samples?.length || 0;
-    const totalSamplesToDelete = dedicatedSamples.length + manualSamplesCount;
+    const gpsTrackSamples = latestTracks.flatMap(track => {
+      if (
+        !track
+        || String(track.field_boundary_id) !== normalizedFieldId
+        || isManualSamplesTrackName(track.name)
+      ) {
+        return [] as Array<{ trackId: string; sampleId: string }>;
+      }
+
+      return (track.samples || [])
+        .filter((sample): sample is { id: string | number } => sample?.id != null)
+        .map(sample => ({
+          trackId: String(track.id),
+          sampleId: String(sample.id)
+        }));
+    });
+
+    const manualSamplesCount = manualSamplesTracks.reduce(
+      (total, track) => total + (track.samples?.length || 0),
+      0
+    );
+    const totalSamplesToDelete = dedicatedSamples.length + gpsTrackSamples.length + manualSamplesCount;
 
     if (totalSamplesToDelete === 0) {
       return;
@@ -1876,18 +2193,28 @@ export default function GPSTracker() {
 
     try {
       if (dedicatedSamples.length > 0) {
-        await Promise.all(
-          dedicatedSamples.map(sample => hybridDB.deleteFieldSample(String(sample.id), String(selectedProject.id)))
-        );
+        for (const sample of dedicatedSamples) {
+          await hybridDB.deleteFieldSample(String(sample.id), projectId);
+        }
       }
 
-      if (manualSamplesTrack?.id != null) {
-        await hybridDB.deleteTrack(String(manualSamplesTrack.id));
+      if (gpsTrackSamples.length > 0) {
+        for (const sample of gpsTrackSamples) {
+          await hybridDB.deleteSample(sample.sampleId);
+        }
+      }
+
+      if (manualSamplesTracks.length > 0) {
+        for (const track of manualSamplesTracks) {
+          if (track?.id != null) {
+            await hybridDB.deleteTrack(String(track.id));
+          }
+        }
       }
 
       await Promise.all([
-        loadFieldSamples(String(selectedProject.id)),
-        loadTracks(String(selectedProject.id)),
+        loadFieldSamples(projectId),
+        loadTracks(projectId),
         loadFieldBoundaries()
       ]);
 
@@ -1898,7 +2225,7 @@ export default function GPSTracker() {
       logger.error('Error deleting field samples', error, {
         component: 'GPSTracker',
         fieldBoundaryId,
-        projectId: selectedProject.id,
+        projectId,
         totalSamplesToDelete
       });
       toast.error(t('gps.samplesDeleteFailed') || 'Failed to delete field samples');
@@ -1906,8 +2233,6 @@ export default function GPSTracker() {
   }, [
     isNativeApp,
     selectedProject?.id,
-    fieldSamples,
-    tracks,
     isManualSamplesTrackName,
     showConfirmation,
     t,
@@ -1916,6 +2241,89 @@ export default function GPSTracker() {
     loadFieldBoundaries
   ]);
 
+  const handleMarkFieldDone = useCallback(async (boundary: GpsFieldBoundary) => {
+    if (!selectedProject?.id) {
+      return;
+    }
+
+    const fieldId = String(boundary.id);
+    const sampleCount = effectiveFieldSampleCountByField.get(fieldId) || 0;
+    if (sampleCount <= 0) {
+      return;
+    }
+
+    const currentState = getBoundarySamplingState(boundary);
+    if (currentState.status === 'completed' && currentState.locked) {
+      return;
+    }
+
+    const completedAt = new Date().toISOString();
+    const completedBy = user?.displayName || user?.email || user?.uid || 'unknown';
+    const nextProperties = buildBoundarySamplingProperties(boundary.properties, {
+      status: 'completed',
+      locked: true,
+      completedAt,
+      completedBy,
+    });
+
+    try {
+      await hybridDB.updateFieldBoundary(
+        String(boundary.id),
+        boundary.name,
+        undefined,
+        boundary.color,
+        nextProperties,
+      );
+      await loadFieldBoundaries();
+      toast.success(t('gps.fieldDone') || 'Field marked as done');
+    } catch (error) {
+      logger.error('Error marking field done', error, {
+        component: 'GPSTracker',
+        fieldBoundaryId: boundary.id,
+        projectId: selectedProject.id,
+      });
+      toast.error(t('gps.fieldDoneFailed') || 'Failed to mark field as done');
+    }
+  }, [effectiveFieldSampleCountByField, loadFieldBoundaries, selectedProject?.id, t, user]);
+
+  const handleReopenField = useCallback(async (boundary: GpsFieldBoundary) => {
+    if (!selectedProject?.id) {
+      return;
+    }
+
+    const fieldId = String(boundary.id);
+    const sampleCount = effectiveFieldSampleCountByField.get(fieldId) || 0;
+    const currentState = getBoundarySamplingState(boundary);
+    if (currentState.status !== 'completed' && !currentState.locked) {
+      return;
+    }
+
+    const nextProperties = buildBoundarySamplingProperties(boundary.properties, {
+      status: sampleCount > 0 ? 'in_progress' : 'pending',
+      locked: false,
+    });
+
+    try {
+      await hybridDB.updateFieldBoundary(
+        String(boundary.id),
+        boundary.name,
+        undefined,
+        boundary.color,
+        nextProperties,
+      );
+      await loadFieldBoundaries();
+      toast.success(t('gps.fieldReopened') || 'Field reopened');
+    } catch (error) {
+      logger.error('Error reopening field', error, {
+        component: 'GPSTracker',
+        fieldBoundaryId: boundary.id,
+        projectId: selectedProject.id,
+      });
+      toast.error(t('gps.fieldReopenFailed') || 'Failed to reopen field');
+    }
+  }, [effectiveFieldSampleCountByField, loadFieldBoundaries, selectedProject?.id, t]);
+
+  /* eslint-disable react-hooks/exhaustive-deps */
   const handleAddSample = async () => {
     if (!position) {
       console.log('handleAddSample: Missing current position');
@@ -1927,17 +2335,25 @@ export default function GPSTracker() {
       return;
     }
 
-    let activeFieldId = focusedBoundary;
-    if (!activeFieldId) {
-      const autoBoundaryId = resolveBoundaryForPosition(position);
-      if (autoBoundaryId) {
-        activeFieldId = autoBoundaryId;
-        setFocusedBoundary(autoBoundaryId);
-      }
-    }
+    const activeFieldId = resolveBoundaryForPosition(position);
 
     if (!activeFieldId) {
-      toast.error(t('gps.selectFieldFirst') || 'Please select a field before sampling');
+      toast.error(t('gps.sampleOutsideField') || 'You are outside of a field. Move inside a field to take a sample.');
+      return;
+    }
+
+    if (focusedBoundary !== activeFieldId) {
+      setFocusedBoundary(activeFieldId);
+      setExpandedBoundaries((previous) => {
+        const next = new Set(previous);
+        next.add(activeFieldId as number);
+        return next;
+      });
+    }
+
+    const activeBoundary = fieldBoundaries.find((boundary) => String(boundary.id) === String(activeFieldId));
+    if (isBoundarySamplingLocked(activeBoundary)) {
+      toast.error(t('gps.fieldLocked') || 'This field is marked as done and is locked for sampling.');
       return;
     }
 
@@ -1988,6 +2404,7 @@ export default function GPSTracker() {
       setIsAddingSample(false);
     }
   };
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   useEffect(() => {
     const isEditableTarget = (target: EventTarget | null) => {
@@ -2019,6 +2436,7 @@ export default function GPSTracker() {
       }
 
       if (isEditableTarget(event.target)) return;
+      if (showBagCodesModal) return;
 
       // Mirror Take Sample button availability in the UI.
       if (isAddingSample || isStartingTracking || !selectedProject) return;
@@ -2038,7 +2456,7 @@ export default function GPSTracker() {
     return () => {
       window.removeEventListener('keydown', handleHardwareSampleTrigger, true);
     };
-  }, [handleAddSample, isAddingSample, isStartingTracking, selectedProject]);
+  }, [handleAddSample, isAddingSample, isStartingTracking, selectedProject, showBagCodesModal]);
 
   const handleDeleteTrack = async (trackId: number) => {
     const confirmed = await showConfirmation(
@@ -2123,8 +2541,275 @@ export default function GPSTracker() {
     return <AnimatedLoader message={loadingMessage} />;
   }
 
+  const sidebarWrapperClass = isCompactLandscapeLayout
+    ? 'gps-tracker-sidebar fixed left-2 top-2 z-[2000] w-[14rem] max-w-[calc(100vw-1rem)]'
+    : 'gps-tracker-sidebar fixed left-4 top-4 z-[2000] w-72 sm:w-80 lg:w-80';
+  const shouldHideSidebarForNavigation = isCompactLandscapeLayout && showNavigationPanel;
+  const sidebarDockClass = isCompactLandscapeLayout ? 'bottom-2' : 'bottom-4';
+  const sidebarRadiusClass = isCompactLandscapeLayout ? 'rounded-xl' : 'rounded-2xl';
+  const collapsedSidebarContentClass = isCompactLandscapeLayout
+    ? 'p-2 flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-2 duration-500'
+    : 'p-3 flex flex-col gap-2 animate-in fade-in slide-in-from-top-2 duration-500';
+  const collapsedProjectTitleClass = isCompactLandscapeLayout
+    ? `text-xs font-semibold truncate block ${isDark ? 'text-white' : 'text-gray-900'}`
+    : `text-sm font-semibold truncate block ${isDark ? 'text-white' : 'text-gray-900'}`;
+  const avatarDropdownWidthClass = isCompactLandscapeLayout ? 'w-48 max-w-[calc(100vw-1rem)]' : 'w-56';
+  const expandedSidebarHeaderClass = isCompactLandscapeLayout
+    ? 'flex items-center justify-between px-1.5 py-1 gap-1 cursor-pointer'
+    : 'flex items-center justify-between px-2 py-1.5 gap-1.5 cursor-pointer';
+  const expandedSidebarContentClass = isCompactLandscapeLayout
+    ? 'flex-shrink-0 px-2.5 pt-1.5 pb-2 animate-in fade-in slide-in-from-top-4 duration-700'
+    : 'flex-shrink-0 px-4 pt-2.5 pb-3 animate-in fade-in slide-in-from-top-4 duration-700';
+  const expandedProjectHeaderClass = isCompactLandscapeLayout ? 'flex-1 min-w-0 text-left p-0.5' : 'flex-1 min-w-0 text-left p-1';
+  const expandedProjectTitleClass = isCompactLandscapeLayout
+    ? `text-xs font-semibold truncate ${isDark ? 'text-white' : 'text-gray-900'}`
+    : `text-sm font-bold truncate ${isDark ? 'text-white' : 'text-gray-900'}`;
+  const expandedProjectDescriptionClass = isCompactLandscapeLayout
+    ? 'text-[10px] text-gray-600 dark:text-gray-300 truncate'
+    : 'text-xs text-gray-600 dark:text-gray-300 truncate mt-0.5';
+  const expandedAvatarButtonClass = `rounded-full flex items-center justify-center ${
+    isDark ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'
+  } transition-all duration-300 ease-in-out hover:-translate-y-0.5 hover:shadow-lg active:scale-95 ${
+    isCompactLandscapeLayout
+      ? (showAvatarDropdown ? 'h-8 w-16 px-2' : 'h-8 w-8')
+      : (showAvatarDropdown ? 'h-9 w-20 px-3' : 'h-9 w-9')
+  }`;
+  const expandedAvatarImageClass = isCompactLandscapeLayout
+    ? `flex-shrink-0 rounded-full object-cover transition-all duration-300 ${showAvatarDropdown ? 'w-6 h-6' : 'w-4.5 h-4.5'}`
+    : `flex-shrink-0 rounded-full object-cover transition-all duration-300 ${showAvatarDropdown ? 'w-7 h-7' : 'w-5 h-5'}`;
+  const expandedAvatarTextClass = isCompactLandscapeLayout
+    ? `flex-shrink-0 transition-all duration-300 ${showAvatarDropdown ? 'text-lg' : 'text-sm'}`
+    : `flex-shrink-0 transition-all duration-300 ${showAvatarDropdown ? 'text-xl' : 'text-base'}`;
+  const expandedAvatarIconClass = isCompactLandscapeLayout
+    ? `flex-shrink-0 transition-all duration-300 ${showAvatarDropdown ? 'w-6 h-6' : 'w-4.5 h-4.5'} ${isDark ? 'text-white' : 'text-gray-700'}`
+    : `flex-shrink-0 transition-all duration-300 ${showAvatarDropdown ? 'w-7 h-7' : 'w-5 h-5'} ${isDark ? 'text-white' : 'text-gray-700'}`;
+  const sidebarSectionClass = isCompactLandscapeLayout
+    ? 'flex-1 flex flex-col px-2.5 pb-2 min-h-0'
+    : 'flex-1 flex flex-col px-4 pb-3 min-h-0';
+  const fieldCardBaseClass = isCompactLandscapeLayout ? 'p-2.5 rounded-lg' : 'p-3 md:p-4 rounded-xl';
+  const fieldTitleClass = isCompactLandscapeLayout
+    ? `block text-sm truncate font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`
+    : `block text-base md:text-lg truncate font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`;
+  const fieldMetaClass = isCompactLandscapeLayout
+    ? `mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] ${isDark ? 'text-gray-300' : 'text-gray-600'}`
+    : `mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs md:text-sm ${isDark ? 'text-gray-300' : 'text-gray-600'}`;
+  const fieldChevronClass = isCompactLandscapeLayout
+    ? 'w-4 h-4 flex-shrink-0 text-gray-600 dark:text-gray-300'
+    : 'w-5 h-5 md:w-6 md:h-6 flex-shrink-0 text-gray-600 dark:text-gray-300';
+  const fieldExpandedRowClass = isCompactLandscapeLayout
+    ? 'flex items-start gap-1.5 pl-0.5'
+    : 'flex items-start gap-2 md:gap-3 pl-1';
+  const fieldStatsClass = isCompactLandscapeLayout
+    ? 'flex items-center gap-2 text-[11px]'
+    : 'flex items-center gap-3 md:gap-4 text-xs md:text-sm';
+  const fieldStatsIconClass = isCompactLandscapeLayout ? 'w-3.5 h-3.5' : 'w-4 h-4 md:w-5 md:h-5';
+  const infoBadgeClass = isCompactLandscapeLayout
+    ? `${isDark ? 'bg-blue-900/40 text-blue-200 border border-blue-800/50' : 'bg-blue-100 text-blue-700 border border-blue-200'} px-1.5 py-0.5 rounded-full text-[9px] font-medium`
+    : `${isDark ? 'bg-blue-900/40 text-blue-200 border border-blue-800/50' : 'bg-blue-100 text-blue-700 border border-blue-200'} px-2 py-0.5 rounded-full text-[10px] md:text-xs font-medium`;
+  const fieldActionButtonClass = isCompactLandscapeLayout ? 'p-1 rounded-lg transition-colors' : 'p-1.5 rounded-lg transition-colors';
+  const fieldActionIconClass = isCompactLandscapeLayout ? 'w-3.5 h-3.5' : 'w-4 h-4 md:w-5 md:h-5';
+  const projectButtonPaddingClass = isCompactLandscapeLayout ? 'p-1.5' : 'p-2';
+  const projectTitleClass = isCompactLandscapeLayout ? 'text-xs font-semibold truncate' : 'text-sm font-semibold truncate';
+  const projectDescriptionClass = isCompactLandscapeLayout
+    ? `${isDark ? 'text-gray-400' : 'text-gray-600'} text-[11px] truncate`
+    : `${isDark ? 'text-gray-400' : 'text-gray-600'} text-xs truncate`;
+  const compactSidebarInfoBlockClass = isCompactLandscapeLayout ? 'mb-1 space-y-0.5' : 'mb-2 space-y-1';
+  const compactSidebarStatusRowClass = isCompactLandscapeLayout ? 'mb-1 flex gap-1.5 min-w-0' : 'mb-2 flex gap-2 min-w-0';
+  const compactSidebarActionButtonClass = isCompactLandscapeLayout ? 'w-full py-1.5 text-[11px]' : 'w-full py-2 text-sm';
+  const compactSidebarTabsContainerClass = isCompactLandscapeLayout ? 'px-2.5 pb-0.5' : 'px-4 pb-1';
+  const compactSidebarTabButtonClass = isCompactLandscapeLayout ? 'flex-1 py-1 rounded-md text-[11px] font-semibold transition-colors' : 'flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors';
+  const compactSidebarFieldHeaderClass = isCompactLandscapeLayout ? 'px-2.5 pb-0' : 'px-4 pb-0';
+  const projectUserDropdownMenuClass = `${isDark ? 'bg-gray-900/95 border border-gray-700' : 'bg-white/95 border border-gray-200'} mt-1 rounded-lg shadow-xl overflow-y-auto overscroll-contain ${isCompactLandscapeLayout ? 'max-h-[calc(100vh-18rem)]' : 'max-h-48'}`;
+  const projectListScrollClass = isCompactLandscapeLayout ? 'h-full space-y-0.5 overflow-y-auto overscroll-contain scrollbar-modern pr-1' : 'h-full space-y-1 overflow-y-auto overscroll-contain scrollbar-modern pr-1';
+  const gpsSummaryToneClass = shouldShowGpsErrorBanner
+    ? (isDark ? 'bg-red-900/30 text-red-300 border-red-700/50' : 'bg-red-50/90 text-red-700 border-red-200/70')
+    : gpsSourceState.style;
+  const gpsSummaryTitle = position
+    ? (gpsSourceState.label || (t('gps.gpsStatus') || 'GPS Status'))
+    : (t('gps.requestingGps') || 'Getting location...');
+  const gpsSummaryMeta = position
+    ? `±${Math.max(1, Math.round(position.accuracy))}m`
+    : (gpsSourceState.subtitle || (t('gps.selectGpsSource') || 'Select GPS Source'));
+  const gpsSummaryToggleClass = `w-full rounded-xl border px-2.5 py-2 text-left transition-colors ${gpsSummaryToneClass}`;
+  const gpsSummaryTitleClass = isCompactLandscapeLayout ? 'text-[11px] font-semibold truncate' : 'text-xs font-semibold truncate';
+  const gpsSummaryMetaClass = isCompactLandscapeLayout ? 'mt-0.5 text-[10px] opacity-80 truncate' : 'mt-0.5 text-[11px] opacity-80 truncate';
+  const gpsAdvancedToggleClass = `w-full flex items-center gap-2 px-3 py-2 rounded-md text-left transition-colors ${
+    isDark ? 'hover:bg-gray-800 text-gray-200' : 'hover:bg-gray-100 text-gray-700'
+  }`;
+  const gpsSourceMenuPanelClass = `absolute top-full left-0 right-auto mt-1 min-w-full w-max max-w-[min(22rem,calc(100vw-1rem))] max-h-[min(24rem,calc(100vh-8rem))] overflow-y-auto overscroll-contain rounded-lg shadow-2xl z-[10001] border ${
+    isDark
+      ? 'bg-gray-900/80 border-gray-700'
+      : 'bg-white/80 border-gray-200'
+  }`;
+  const renderGpsSourceMenu = () => (
+    <div className={gpsSourceMenuPanelClass}>
+      <div className="p-1">
+        <button
+          onClick={() => {
+            updateGpsSourcePreference('internal');
+            setShowGpsSourceMenu(false);
+          }}
+          className={`w-full min-w-0 flex items-start gap-2 px-3 py-2 rounded-md text-left transition-colors ${
+            gpsSourcePreference === 'internal'
+              ? (isDark ? 'bg-blue-900/50 text-blue-300' : 'bg-blue-100 text-blue-700')
+              : (isDark ? 'hover:bg-gray-800 text-gray-200' : 'hover:bg-gray-100 text-gray-700')
+          }`}
+        >
+          <span className="text-lg">📱</span>
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <div className="text-sm font-medium truncate">{t('gps.internalGps') || 'Internal GPS'}</div>
+            <div className="text-xs opacity-75 break-words leading-tight">{t('gps.internalGpsDescription') || 'Use device\'s built-in GPS'}</div>
+          </div>
+          {gpsSourcePreference === 'internal' && (
+            <span className="text-green-500">✓</span>
+          )}
+        </button>
+
+        <button
+          onClick={() => {
+            if (connectedDevice) {
+              updateGpsSourcePreference('external');
+              setShowGpsSourceMenu(false);
+            } else {
+              toast.error(t('common.noExternalGpsConnected'), { duration: 2000 });
+            }
+          }}
+          disabled={!connectedDevice}
+          className={`w-full min-w-0 flex items-start gap-2 px-3 py-2 rounded-md text-left transition-colors ${
+            gpsSourcePreference === 'external'
+              ? (isDark ? 'bg-green-900/50 text-green-300' : 'bg-green-100 text-green-700')
+              : (!connectedDevice)
+              ? (isDark ? 'opacity-50 cursor-not-allowed text-gray-500' : 'opacity-50 cursor-not-allowed text-gray-400')
+              : (isDark ? 'hover:bg-gray-800 text-gray-200' : 'hover:bg-gray-100 text-gray-700')
+          }`}
+        >
+          <span className="text-lg">🛰️</span>
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <div className={`text-sm font-medium truncate ${isDark ? 'text-gray-200' : 'text-gray-900'}`}>{t('gps.externalGps') || 'External GPS'}</div>
+            <div className={`text-xs opacity-75 truncate leading-tight ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+              {externalSourceMenuMeta}
+            </div>
+          </div>
+          {gpsSourcePreference === 'external' && externalGpsPosition && (
+            <span className="text-green-500">✓</span>
+          )}
+          {connectedDevice && !externalGpsPosition && (
+            <Loader2 className="w-3 h-3 animate-spin text-blue-500" />
+          )}
+        </button>
+
+        {mockLocationActive && (
+          <button
+            onClick={() => {
+              updateGpsSourcePreference('external');
+              setShowGpsSourceMenu(false);
+            }}
+            className={`w-full min-w-0 flex items-start gap-2 px-3 py-2 rounded-md text-left transition-colors ${
+              mockLocationActive && gpsSourcePreference === 'external'
+                ? (isDark ? 'bg-yellow-900/50 text-yellow-300' : 'bg-yellow-100 text-yellow-700')
+                : (isDark ? 'hover:bg-gray-800 text-gray-200' : 'hover:bg-gray-100 text-gray-700')
+            }`}
+          >
+            <span className="text-lg">🎯</span>
+            <div className="flex-1 min-w-0 overflow-hidden">
+              <div className="text-sm font-medium truncate">{t('gps.mockGps') || 'Mock GPS'}</div>
+              <div className="text-xs opacity-75 break-words leading-tight">{mockLocationProvider || (t('gps.mockLocationActive') || 'Mock location active')}</div>
+            </div>
+            {mockLocationActive && gpsSourcePreference === 'external' && (
+              <span className="text-green-500">✓</span>
+            )}
+          </button>
+        )}
+
+        <button
+          onClick={() => setShowGpsAdvancedControls((previous) => !previous)}
+          className={gpsAdvancedToggleClass}
+        >
+          <ChevronRight className={`w-4 h-4 flex-shrink-0 transition-transform ${showGpsAdvancedControls ? 'rotate-90' : ''}`} />
+          <div className="text-sm font-medium">{t('gps.advancedSettings') || 'Advanced GPS settings'}</div>
+        </button>
+
+        {showGpsAdvancedControls && (
+          <>
+            <div className={`mt-1 mb-1 rounded-md border px-2 py-2 ${
+              isDark ? 'border-gray-700 bg-gray-800/40' : 'border-gray-200 bg-gray-50'
+            }`}>
+              <div className={`text-[11px] font-semibold ${isDark ? 'text-gray-200' : 'text-gray-700'}`}>
+                {t('gps.sourcePolicyTitle') || 'External source policy'}
+              </div>
+              <div className="mt-1 grid grid-cols-2 gap-1">
+                <button
+                  onClick={() => updateGpsSourcePolicy('preferred')}
+                  className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+                    gpsSourcePolicy === 'preferred'
+                      ? (isDark ? 'bg-blue-900/50 text-blue-300' : 'bg-blue-100 text-blue-700')
+                      : (isDark ? 'bg-gray-700/40 text-gray-300 hover:bg-gray-700/70' : 'bg-white text-gray-700 hover:bg-gray-100')
+                  }`}
+                >
+                  {t('gps.sourcePolicyPreferred') || 'Preferred'}
+                </button>
+                <button
+                  onClick={() => updateGpsSourcePolicy('strict')}
+                  className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+                    gpsSourcePolicy === 'strict'
+                      ? (isDark ? 'bg-red-900/50 text-red-300' : 'bg-red-100 text-red-700')
+                      : (isDark ? 'bg-gray-700/40 text-gray-300 hover:bg-gray-700/70' : 'bg-white text-gray-700 hover:bg-gray-100')
+                  }`}
+                >
+                  {t('gps.sourcePolicyStrict') || 'Strict'}
+                </button>
+              </div>
+              <div className={`mt-1 text-[10px] ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                {gpsSourcePolicy === 'strict'
+                  ? (t('gps.sourcePolicyStrictDescription') || 'No fallback to internal GPS when external data is missing.')
+                  : (t('gps.sourcePolicyPreferredDescription') || 'Fallback to internal GPS if external data is stale.')}
+              </div>
+            </div>
+
+            <div className={`h-px my-1 ${
+              isDark ? 'bg-gray-700' : 'bg-gray-200'
+            }`} />
+
+            <button
+              onClick={() => {
+                setShowDeviceManager(true);
+                setShowGpsSourceMenu(false);
+              }}
+              className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-left transition-colors ${
+                isDark ? 'hover:bg-blue-900/30 text-blue-400' : 'hover:bg-blue-50 text-blue-600'
+              }`}
+            >
+              <Satellite className="w-4 h-4" />
+              <div className="text-sm font-medium">{t('gps.manageDevices') || 'Manage Devices'}</div>
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+  const projectsSearchInputClass = `${
+    isDark ? 'bg-gray-800/70 border-gray-700 text-gray-100 placeholder-gray-500' : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+  } w-full rounded-lg border ${isCompactLandscapeLayout ? 'pl-8 pr-8 py-1.5 text-xs' : 'pl-9 pr-9 py-2 text-sm'} focus:outline-none focus:ring-2 focus:ring-blue-500`;
+  const currentProjectCardClass = `${
+    isDark ? 'bg-blue-900/20 border-blue-800/50' : 'bg-blue-50/90 border-blue-200/70'
+  } mb-2.5 rounded-xl border ${isCompactLandscapeLayout ? 'p-2' : 'p-2.5'}`;
+  const currentProjectEyebrowClass = isCompactLandscapeLayout
+    ? 'text-[9px] font-semibold uppercase tracking-[0.14em] text-blue-400/90 dark:text-blue-300/90'
+    : 'text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-500 dark:text-blue-300/90';
+  const currentProjectTitleClass = isCompactLandscapeLayout
+    ? `mt-1 text-xs font-semibold truncate ${isDark ? 'text-white' : 'text-gray-900'}`
+    : `mt-1 text-sm font-semibold truncate ${isDark ? 'text-white' : 'text-gray-900'}`;
+  const projectSelectedBadgeClass = `${
+    isDark ? 'bg-blue-900/40 text-blue-200 border-blue-800/50' : 'bg-blue-100 text-blue-700 border-blue-200'
+  } inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold`;
+  const deviceInfoButtonSizeClass = isCompactLandscapeLayout ? 'w-9 h-9' : 'w-10 h-10 md:w-12 md:h-12';
+  const deviceInfoButtonPositionClass = showNavigationPanel
+    ? (isCompactLandscapeLayout ? 'hidden' : 'hidden md:flex md:right-[30.5rem] lg:right-[33.5rem]')
+    : (isCompactLandscapeLayout ? 'right-14' : 'right-20');
+  const deviceInfoIconClass = isCompactLandscapeLayout ? 'text-base' : 'text-lg md:text-xl';
+
   return (
-    <div className="fixed inset-0 overflow-hidden">
+    <div className={`fixed inset-0 overflow-hidden ${isCompactLandscapeLayout ? 'gps-compact-landscape' : ''}`}>
       {/* HTTPS Warning Banner - Only show in web browser, NOT in Capacitor APK */}
       {window.location.protocol === 'https:' && Capacitor.getPlatform() === 'web' && (
         <div className="fixed top-0 left-0 right-0 z-[10000] bg-red-600 text-white px-4 py-3 shadow-lg">
@@ -2158,17 +2843,18 @@ export default function GPSTracker() {
       />
       
       {/* Toast-style Sidebar */}
+      {!shouldHideSidebarForNavigation && (
       <div 
         className={`
-          fixed left-4 top-4 z-[2000] w-72 sm:w-80 lg:w-80
-          ${isSidebarCollapsed ? 'h-auto' : 'bottom-4'}
+          ${sidebarWrapperClass}
+          ${isSidebarCollapsed ? 'h-auto' : sidebarDockClass}
           transition-all duration-500 ease-in-out
         `}
       >
         <div 
           className={`
             ${isSidebarCollapsed ? 'h-auto' : 'h-full'}
-            rounded-2xl shadow-lg
+            ${sidebarRadiusClass} shadow-lg
             ${isDark ? 'bg-gray-900/80 border border-gray-700/30' : 'bg-white/80 border border-gray-200/50'}
             flex flex-col
             transition-all duration-500 ease-in-out
@@ -2177,15 +2863,15 @@ export default function GPSTracker() {
         >
           {/* Collapsed Header */}
           {isSidebarCollapsed && (
-            <div className="p-3 flex flex-col gap-2 animate-in fade-in slide-in-from-top-2 duration-500">
+            <div className={collapsedSidebarContentClass}>
               <div className="flex items-center justify-between gap-2">
                 {/* Project Name */}
                 <button
                   onClick={() => setIsSidebarCollapsed(false)}
                   className="flex-1 min-w-0 text-left"
                 >
-                  <span className={`text-sm font-semibold truncate block ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                    {selectedProject?.name || t('gps.gpsTracker') || 'GPS Tracker'}
+                  <span className={collapsedProjectTitleClass}>
+                    {selectedProject?.name || t('gps.gpsTracker') || 'TECHBYP - GPS Pro'}
                   </span>
                 </button>
 
@@ -2214,7 +2900,7 @@ export default function GPSTracker() {
                   {showAvatarDropdown && (
                     <div 
                       className={`
-                        absolute left-1/2 -translate-x-1/2 w-56 rounded-2xl shadow-2xl z-50 mt-2
+                        absolute left-1/2 -translate-x-1/2 ${avatarDropdownWidthClass} rounded-2xl shadow-2xl z-50 mt-2
                         ${isDark ? 'bg-gray-900/80 border border-gray-700/30' : 'bg-white/80 border border-gray-200/50'}
                         avatar-dropdown
                       `}
@@ -2475,16 +3161,9 @@ export default function GPSTracker() {
                             <span className="text-lg">🛰️</span>
                             <div className="flex-1 min-w-0 overflow-hidden">
                               <div className={`text-sm font-medium truncate ${isDark ? 'text-gray-200' : 'text-gray-900'}`}>{t('gps.externalGps') || 'External GPS'}</div>
-                              <div className={`text-xs opacity-75 break-words leading-tight ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-                                {connectedDevice ? (
-                                  externalGpsPosition ? connectedDevice.name : `${connectedDevice.name} (${t('gps.waitingForData') || 'waiting for data...'})`
-                                ) : (t('gps.notConnected') || 'Not connected')}
+                              <div className={`text-xs opacity-75 truncate leading-tight ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                                {externalSourceMenuMeta}
                               </div>
-                              {externalGpsPosition && externalTelemetrySummary && (
-                                <div className={`text-[10px] opacity-70 break-words leading-tight ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-                                  {externalTelemetrySummary}
-                                </div>
-                              )}
                             </div>
                             {gpsSourcePreference === 'external' && externalGpsPosition && (
                               <span className="text-green-500">✓</span>
@@ -2610,17 +3289,17 @@ export default function GPSTracker() {
               {/* Header with Project Selector, Avatar and Chevron */}
               <div className="border-b border-gray-200/50 dark:border-gray-700/50 animate-in fade-in duration-500">
                 <div
-                  className="flex items-center justify-between p-2 gap-2 cursor-pointer"
+                  className={expandedSidebarHeaderClass}
                   onClick={handleSidebarHeaderClick}
                   title={t('gps.collapseToTop') || 'Collapse to top'}
                 >
                   {/* Project Selector */}
-                  <div className="flex-1 min-w-0 text-left p-1">
-                    <h2 className={`text-sm font-bold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                  <div className={expandedProjectHeaderClass}>
+                    <h2 className={expandedProjectTitleClass}>
                       {selectedProject ? selectedProject.name : (t('gps.selectProject') || 'Select Project')}
                     </h2>
                     {selectedProject?.description && (
-                      <p className="text-xs text-gray-600 dark:text-gray-300 truncate mt-0.5">
+                      <p className={expandedProjectDescriptionClass}>
                         {selectedProject.description}
                       </p>
                     )}
@@ -2630,19 +3309,14 @@ export default function GPSTracker() {
                   <div className="relative avatar-dropdown-container flex-shrink-0">
                     <button
                       onClick={() => setShowAvatarDropdown(!showAvatarDropdown)}
-                      className={`
-                        h-9 rounded-full flex items-center justify-center
-                        ${isDark ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'}
-                        transition-all duration-300 ease-in-out hover:-translate-y-0.5 hover:shadow-lg active:scale-95
-                        ${showAvatarDropdown ? 'w-20 px-3' : 'w-9'}
-                      `}
+                      className={expandedAvatarButtonClass}
                     >
                       {isImageAvatar ? (
-                        <img src={userAvatar} alt="Avatar" className={`flex-shrink-0 rounded-full object-cover transition-all duration-300 ${showAvatarDropdown ? 'w-7 h-7' : 'w-5 h-5'}`} />
+                        <img src={userAvatar} alt="Avatar" className={expandedAvatarImageClass} />
                       ) : userAvatar ? (
-                        <span className={`flex-shrink-0 transition-all duration-300 ${showAvatarDropdown ? 'text-xl' : 'text-base'}`}>{userAvatar}</span>
+                        <span className={expandedAvatarTextClass}>{userAvatar}</span>
                       ) : (
-                        <User className={`flex-shrink-0 transition-all duration-300 ${showAvatarDropdown ? 'w-7 h-7' : 'w-5 h-5'} ${isDark ? 'text-white' : 'text-gray-700'}`} />
+                        <User className={expandedAvatarIconClass} />
                       )}
                     </button>
                     
@@ -2650,7 +3324,7 @@ export default function GPSTracker() {
                     {showAvatarDropdown && (
                       <div 
                         className={`
-                          absolute left-1/2 -translate-x-1/2 w-56 rounded-2xl shadow-2xl z-[10001] mt-2
+                          absolute left-1/2 -translate-x-1/2 ${avatarDropdownWidthClass} rounded-2xl shadow-2xl z-[10001] mt-2
                           ${isDark ? 'bg-gray-900/80 border border-gray-700/30' : 'bg-white/80 border border-gray-200/50'}
                           avatar-dropdown
                         `}
@@ -2824,29 +3498,51 @@ export default function GPSTracker() {
               </div>
 
               {/* Fixed Top Content */}
-              <div className="flex-shrink-0 p-4 animate-in fade-in slide-in-from-top-4 duration-700">
+              <div className={expandedSidebarContentClass}>
 
           {/* Mock Location Banner */}
           {mockLocationActive && (
-            <div className="mb-3 px-3 py-2 rounded-lg bg-blue-500/20 border-2 border-blue-500 animate-pulse">
+            <div className={`${isCompactLandscapeLayout ? 'mb-2 px-2 py-1.5 rounded-md' : 'mb-3 px-3 py-2 rounded-lg'} bg-blue-500/20 border-2 border-blue-500 animate-pulse`}>
               <div className="flex items-center gap-2">
-                <span className="text-2xl">🛰️</span>
+                <span className={isCompactLandscapeLayout ? 'text-lg' : 'text-2xl'}>🛰️</span>
                 <div className="flex-1">
-                  <div className="font-bold text-blue-600 dark:text-blue-400 text-sm">{t('gps.externalGnss') || 'External GNSS'}</div>
-                  <div className="text-xs opacity-70">{mockLocationProvider || (t('gps.mockLocation') || 'Mock Location')}</div>
+                  <div className={`${isCompactLandscapeLayout ? 'text-[11px]' : 'text-sm'} font-bold text-blue-600 dark:text-blue-400`}>{t('gps.externalGnss') || 'External GNSS'}</div>
+                  <div className={`${isCompactLandscapeLayout ? 'text-[10px]' : 'text-xs'} opacity-70`}>{mockLocationProvider || (t('gps.mockLocation') || 'Mock Location')}</div>
                 </div>
-                <div className="text-xs bg-green-500/30 px-2 py-1 rounded font-bold">{t('gps.rtk') || 'RTK'}</div>
+                <div className={`${isCompactLandscapeLayout ? 'text-[10px] px-1.5 py-0.5' : 'text-xs px-2 py-1'} bg-green-500/30 rounded font-bold`}>{t('gps.rtk') || 'RTK'}</div>
               </div>
             </div>
           )}
 
+          {isCompactLandscapeLayout && !shouldShowGpsErrorBanner && (
+            <div className="relative gps-source-menu-container">
+              <button
+                type="button"
+                onClick={() => setShowGpsSourceMenu((previous) => !previous)}
+                className={gpsSummaryToggleClass}
+                title={t('gps.selectGpsSource') || 'Select GPS Source'}
+                data-sidebar-no-collapse="true"
+              >
+                <div className="flex items-start gap-2">
+                  <span className="text-sm flex-shrink-0">{position ? gpsSourceState.emoji : '📍'}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className={gpsSummaryTitleClass}>{gpsSummaryTitle}</div>
+                    <div className={gpsSummaryMetaClass}>{gpsSummaryMeta}</div>
+                  </div>
+                </div>
+              </button>
+
+              {showGpsSourceMenu && renderGpsSourceMenu()}
+            </div>
+          )}
+
           {/* GPS Status & Position - Combined Layout (hidden on web/PC) */}
-          {position && (
-            <div className="mb-3 flex gap-2 min-w-0">
-              {/* Coordinates Display (Green) */}
+          {position && gpsDetailsExpanded && !isCompactLandscapeLayout && (
+            <div className={compactSidebarStatusRowClass}>
+              {/* Location Status Display */}
               <div 
                 onClick={() => setRecenterTrigger(prev => prev + 1)}
-                className="flex-1 p-1 rounded-lg bg-green-50/90 dark:bg-green-900/30 text-green-700 dark:text-green-300 border border-green-200/50 dark:border-green-700/50 cursor-pointer hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors"
+                className={`flex-1 ${isCompactLandscapeLayout ? 'p-0.5 rounded-md' : 'p-1 rounded-lg'} bg-green-50/90 dark:bg-green-900/30 text-green-700 dark:text-green-300 border border-green-200/50 dark:border-green-700/50 cursor-pointer hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors`}
                 title={t('gps.recenter') || 'Recenter Map'}
               >
                 <div className="flex items-center justify-between gap-1">
@@ -2855,9 +3551,9 @@ export default function GPSTracker() {
                     {(position as any).mocked && (
                       <span className="text-blue-600 dark:text-blue-400 font-bold" title="External GNSS (Mock Location)">🛰️</span>
                     )}
-                    <span>{position.latitude.toFixed(4)}, {position.longitude.toFixed(4)}</span>
+                    <span>±{position.accuracy.toFixed(1)}m</span>
                     <span className={position.accuracy <= 10 ? 'text-green-600 dark:text-green-400' : position.accuracy <= 20 ? 'text-yellow-600 dark:text-yellow-400' : 'text-orange-600 dark:text-orange-400'}>
-                      ±{position.accuracy.toFixed(1)}m
+                      {position.accuracy <= 10 ? 'High' : position.accuracy <= 20 ? 'Mid' : 'Low'}
                     </span>
                   </div>
                   {(externalGpsPosition as any)?.satellites && (
@@ -2900,157 +3596,7 @@ export default function GPSTracker() {
                 </div>
 
                 {/* GPS Source Dropdown Menu */}
-                {showGpsSourceMenu && (
-                  <div
-                    className={`absolute top-full left-0 right-auto mt-1 min-w-full w-max max-w-[min(22rem,calc(100vw-1rem))] rounded-lg shadow-2xl z-[10001] border overflow-hidden ${
-                      isDark 
-                        ? 'bg-gray-900/80 border-gray-700' 
-                        : 'bg-white/80 border-gray-200'
-                    }`}
-                  >
-                    <div className="p-1">
-                      {/* Internal GPS Option */}
-                      <button
-                        onClick={() => {
-                          updateGpsSourcePreference('internal');
-                          setShowGpsSourceMenu(false);
-                        }}
-                        className={`w-full min-w-0 flex items-start gap-2 px-3 py-2 rounded-md text-left transition-colors ${
-                          gpsSourcePreference === 'internal'
-                            ? (isDark ? 'bg-blue-900/50 text-blue-300' : 'bg-blue-100 text-blue-700')
-                            : (isDark ? 'hover:bg-gray-800 text-gray-200' : 'hover:bg-gray-100 text-gray-700')
-                        }`}
-                      >
-                        <span className="text-lg">📱</span>
-                        <div className="flex-1 min-w-0 overflow-hidden">
-                          <div className="text-sm font-medium truncate">{t('gps.internalGps') || 'Internal GPS'}</div>
-                          <div className="text-xs opacity-75 break-words leading-tight">{t('gps.internalGpsDescription') || 'Use device\'s built-in GPS'}</div>
-                        </div>
-                        {gpsSourcePreference === 'internal' && (
-                          <span className="text-green-500">✓</span>
-                        )}
-                      </button>
-
-                      {/* External GPS Option */}
-                      <button
-                        onClick={() => {
-                          if (connectedDevice) {
-                            updateGpsSourcePreference('external');
-                            setShowGpsSourceMenu(false);
-                          } else {
-                            toast.error(t('common.noExternalGpsConnected'), { duration: 2000 });
-                          }
-                        }}
-                        disabled={!connectedDevice}
-                        className={`w-full min-w-0 flex items-start gap-2 px-3 py-2 rounded-md text-left transition-colors ${
-                          gpsSourcePreference === 'external'
-                            ? (isDark ? 'bg-green-900/50 text-green-300' : 'bg-green-100 text-green-700')
-                            : (!connectedDevice)
-                            ? (isDark ? 'opacity-50 cursor-not-allowed text-gray-500' : 'opacity-50 cursor-not-allowed text-gray-400')
-                            : (isDark ? 'hover:bg-gray-800 text-gray-200' : 'hover:bg-gray-100 text-gray-700')
-                        }`}
-                      >
-                        <span className="text-lg">🛰️</span>
-                        <div className="flex-1 min-w-0 overflow-hidden">
-                          <div className={`text-sm font-medium truncate ${isDark ? 'text-gray-200' : 'text-gray-900'}`}>{t('gps.externalGps') || 'External GPS'}</div>
-                          <div className={`text-xs opacity-75 break-words leading-tight ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-                            {connectedDevice ? (
-                              externalGpsPosition ? connectedDevice.name : `${connectedDevice.name} (${t('gps.waitingForData') || 'waiting for data...'})`
-                            ) : (t('gps.notConnected') || 'Not connected')}
-                          </div>
-                            {externalGpsPosition && externalTelemetrySummary && (
-                              <div className={`text-[10px] opacity-70 break-words leading-tight ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-                                {externalTelemetrySummary}
-                              </div>
-                            )}
-                        </div>
-                        {gpsSourcePreference === 'external' && externalGpsPosition && (
-                          <span className="text-green-500">✓</span>
-                        )}
-                        {connectedDevice && !externalGpsPosition && (
-                          <Loader2 className="w-3 h-3 animate-spin text-blue-500" />
-                        )}
-                      </button>
-
-                      <div className={`mt-1 mb-1 rounded-md border px-2 py-2 ${
-                        isDark ? 'border-gray-700 bg-gray-800/40' : 'border-gray-200 bg-gray-50'
-                      }`}>
-                        <div className={`text-[11px] font-semibold ${isDark ? 'text-gray-200' : 'text-gray-700'}`}>
-                          {t('gps.sourcePolicyTitle') || 'External source policy'}
-                        </div>
-                        <div className="mt-1 grid grid-cols-2 gap-1">
-                          <button
-                            onClick={() => updateGpsSourcePolicy('preferred')}
-                            className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
-                              gpsSourcePolicy === 'preferred'
-                                ? (isDark ? 'bg-blue-900/50 text-blue-300' : 'bg-blue-100 text-blue-700')
-                                : (isDark ? 'bg-gray-700/40 text-gray-300 hover:bg-gray-700/70' : 'bg-white text-gray-700 hover:bg-gray-100')
-                            }`}
-                          >
-                            {t('gps.sourcePolicyPreferred') || 'Preferred'}
-                          </button>
-                          <button
-                            onClick={() => updateGpsSourcePolicy('strict')}
-                            className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
-                              gpsSourcePolicy === 'strict'
-                                ? (isDark ? 'bg-red-900/50 text-red-300' : 'bg-red-100 text-red-700')
-                                : (isDark ? 'bg-gray-700/40 text-gray-300 hover:bg-gray-700/70' : 'bg-white text-gray-700 hover:bg-gray-100')
-                            }`}
-                          >
-                            {t('gps.sourcePolicyStrict') || 'Strict'}
-                          </button>
-                        </div>
-                        <div className={`mt-1 text-[10px] ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-                          {gpsSourcePolicy === 'strict'
-                            ? (t('gps.sourcePolicyStrictDescription') || 'No fallback to internal GPS when external data is missing.')
-                            : (t('gps.sourcePolicyPreferredDescription') || 'Fallback to internal GPS if external data is stale.')}
-                        </div>
-                      </div>
-
-                      {/* Mock GPS Option (if available) */}
-                      {mockLocationActive && (
-                        <button
-                          onClick={() => {
-                            updateGpsSourcePreference('external');
-                            setShowGpsSourceMenu(false);
-                          }}
-                          className={`w-full min-w-0 flex items-start gap-2 px-3 py-2 rounded-md text-left transition-colors ${
-                            mockLocationActive && gpsSourcePreference === 'external'
-                              ? (isDark ? 'bg-yellow-900/50 text-yellow-300' : 'bg-yellow-100 text-yellow-700')
-                              : (isDark ? 'hover:bg-gray-800 text-gray-200' : 'hover:bg-gray-100 text-gray-700')
-                          }`}
-                        >
-                          <span className="text-lg">🎯</span>
-                          <div className="flex-1 min-w-0 overflow-hidden">
-                            <div className="text-sm font-medium truncate">{t('gps.mockGps') || 'Mock GPS'}</div>
-                            <div className="text-xs opacity-75 break-words leading-tight">{mockLocationProvider || (t('gps.mockLocationActive') || 'Mock location active')}</div>
-                          </div>
-                          {mockLocationActive && gpsSourcePreference === 'external' && (
-                            <span className="text-green-500">✓</span>
-                          )}
-                        </button>
-                      )}
-
-                      <div className={`h-px my-1 ${
-                        isDark ? 'bg-gray-700' : 'bg-gray-200'
-                      }`} />
-
-                      {/* Manage Devices */}
-                      <button
-                        onClick={() => {
-                          setShowDeviceManager(true);
-                          setShowGpsSourceMenu(false);
-                        }}
-                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-left transition-colors ${
-                          isDark ? 'hover:bg-blue-900/30 text-blue-400' : 'hover:bg-blue-50 text-blue-600'
-                        }`}
-                      >
-                        <Satellite className="w-4 h-4" />
-                        <div className="text-sm font-medium">{t('gps.manageDevices') || 'Manage Devices'}</div>
-                      </button>
-                    </div>
-                  </div>
-                )}
+                {showGpsSourceMenu && renderGpsSourceMenu()}
               </div>
               
               {/* GPS Source Selector */}
@@ -3078,15 +3624,15 @@ export default function GPSTracker() {
             </div>
           )}
 
-          {!position && !shouldShowGpsErrorBanner && (
-            <div className="mb-3 space-y-2">
-              <div className="p-1.5 md:p-2 rounded-lg bg-blue-50/90 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-xs border border-blue-200/50 dark:border-blue-700/50">
+          {!position && !shouldShowGpsErrorBanner && gpsDetailsExpanded && (
+            <div className={compactSidebarInfoBlockClass}>
+              <div className={`${isCompactLandscapeLayout ? 'p-1.5 rounded-md text-[11px]' : 'p-1.5 md:p-2 rounded-lg text-xs'} bg-blue-50/90 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border border-blue-200/50 dark:border-blue-700/50`}>
                 📍 {t('gps.requestingGps') || 'Getting location...'}
               </div>
               <Button
                 onClick={() => setShowDeviceManager(true)}
                 variant="secondary"
-                className="w-full py-2 text-sm"
+                className={compactSidebarActionButtonClass}
               >
                 <Satellite className="w-4 h-4 mr-2" />
                 {t('gps.manageDevices') || 'Manage GPS Devices'}
@@ -3095,44 +3641,41 @@ export default function GPSTracker() {
           )}
 
           {shouldShowGpsErrorBanner && (
-            <div className="mb-3 space-y-2">
-              <div className="p-1.5 md:p-2 rounded-lg bg-red-50/90 dark:bg-red-900/30 text-red-700 dark:text-red-400 text-xs border border-red-200/50 dark:border-red-700/50">
-                ❌ GPS Error
-              </div>
-              <Button
-                onClick={() => setShowDeviceManager(true)}
-                variant="secondary"
-                className="w-full py-2 text-sm"
+            <div className={compactSidebarInfoBlockClass}>
+              <button
+                onClick={() => void handleGpsRescan()}
+                className={`inline-flex items-center gap-1.5 ${isCompactLandscapeLayout ? 'px-2 py-1 rounded-md text-[11px]' : 'px-2.5 py-1.5 rounded-lg text-xs'} bg-red-50/90 dark:bg-red-900/30 text-red-700 dark:text-red-400 border border-red-200/50 dark:border-red-700/50 hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors`}
+                title={t('gps.gpsError') || 'GPS Error'}
               >
-                <Satellite className="w-4 h-4 mr-2" />
-                {t('gps.manageDevices') || 'Manage GPS Devices'}
-              </Button>
+                <span className="font-semibold">❌ {t('gps.gpsError') || 'GPS Error'}</span>
+                {isRefreshingGps ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+              </button>
             </div>
           )}
 
           {/* Fixed Tracking Controls (hidden on web/PC) */}
-          {canTrack && (
-            <div className="mb-0.5 space-y-1">
+          {canTrack && sidebarTab !== 'projects' && (
+            <div className="mb-0 space-y-0.5">
               <Button 
                 onClick={handleAddSample} 
                 variant={selectedProject ? 'success' : 'secondary'}
-                className={`w-full py-2 text-sm font-medium ${!selectedProject ? 'opacity-60' : ''}`}
+                className={`${compactSidebarActionButtonClass} font-medium ${!selectedProject ? 'opacity-60' : ''}`}
                 disabled={isAddingSample || isStartingTracking || !selectedProject}
                 title={!selectedProject ? (t('gps.selectProjectFirst') || 'Please select a project first') : ''}
               >
                 {isStartingTracking ? (
                   <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    <Loader2 className={`${isCompactLandscapeLayout ? 'w-3.5 h-3.5 mr-1.5' : 'w-4 h-4 mr-2'} animate-spin`} />
                     {t('gps.starting') || 'Starting...'}
                   </>
                 ) : isAddingSample ? (
                   <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    <Loader2 className={`${isCompactLandscapeLayout ? 'w-3.5 h-3.5 mr-1.5' : 'w-4 h-4 mr-2'} animate-spin`} />
                     {t('gps.adding') || 'Adding...'}
                   </>
                 ) : (
                   <>
-                    <MapPin className="w-4 h-4 mr-2" />
+                    <MapPin className={`${isCompactLandscapeLayout ? 'w-3.5 h-3.5 mr-1.5' : 'w-4 h-4 mr-2'}`} />
                     {t('gps.takeSample') || 'Take Sample'} ({activeFieldSampleCount})
                   </>
                 )}
@@ -3142,18 +3685,17 @@ export default function GPSTracker() {
               </div>
 
               {sidebarTab === 'fields' && (
-                <div className="px-4 pb-2">
-                  <div className="h-px bg-gray-300 dark:bg-gray-600 mb-2 lg:mb-4" />
+                <div className={compactSidebarFieldHeaderClass}>
                   <div className="hidden lg:flex gap-2 justify-end" />
                 </div>
               )}
 
               {/* Tabs */}
-              <div className="px-4 pb-2">
+              <div className={compactSidebarTabsContainerClass}>
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => setSidebarTab('fields')}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    className={`${compactSidebarTabButtonClass} ${
                       sidebarTab === 'fields'
                         ? isDark ? 'bg-blue-600/30 text-blue-200' : 'bg-blue-100 text-blue-700'
                         : isDark ? 'bg-gray-700/30 text-gray-300 hover:bg-gray-600/40' : 'bg-white/70 text-gray-600 hover:bg-gray-100'
@@ -3163,7 +3705,7 @@ export default function GPSTracker() {
                   </button>
                   <button
                     onClick={() => setSidebarTab('projects')}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    className={`${compactSidebarTabButtonClass} ${
                       sidebarTab === 'projects'
                         ? isDark ? 'bg-blue-600/30 text-blue-200' : 'bg-blue-100 text-blue-700'
                         : isDark ? 'bg-gray-700/30 text-gray-300 hover:bg-gray-600/40' : 'bg-white/70 text-gray-600 hover:bg-gray-100'
@@ -3176,10 +3718,10 @@ export default function GPSTracker() {
               {sidebarTab === 'fields' && (
                 <>
                   {/* Field Boundaries Section - Mobile Optimized */}
-                  <div className="flex-1 flex flex-col px-4 pb-4 min-h-0">
+                  <div className={sidebarSectionClass}>
 
                     {/* Fixed Field Header - Smaller on tablets */}
-                    <div className="flex items-center justify-between mb-1 lg:mb-3 flex-shrink-0 h-5">
+                    <div className={`${isCompactLandscapeLayout ? 'flex items-center justify-between mb-0 flex-shrink-0 h-0' : 'flex items-center justify-between mb-1 lg:mb-3 flex-shrink-0 h-5'}`}>
                       {/* Compact header: hide field count and edit actions on mobile */}
                       <div className="text-[10px] font-semibold text-gray-800 dark:text-gray-200 hidden lg:block">
                         {t('gps.fieldBoundaries') || 'Fields'} ({fieldBoundaries.length})
@@ -3204,48 +3746,114 @@ export default function GPSTracker() {
                             {fieldBoundaries.map((boundary) => {
                             const isExpanded = expandedBoundaries.has(boundary.id);
                             const existingManualSampleCount = manualTrackSampleCountByField.get(String(boundary.id));
-                            const directSamplesInField = directFieldSampleCountByField.get(String(boundary.id)) || 0;
                             const totalSamplesInField = effectiveFieldSampleCountByField.get(String(boundary.id)) || 0;
-                            const canDeleteFieldSamples = directSamplesInField > 0 || (existingManualSampleCount || 0) > 0;
+                            const hasSamplesInField = totalSamplesInField > 0;
+                            const samplingState = boundarySamplingStateByField.get(String(boundary.id));
+                            const isCompletedField = samplingState?.status === 'completed';
+                            const isLockedField = Boolean(samplingState?.locked);
+                            const canDeleteFieldSamples = totalSamplesInField > 0 && !isLockedField;
                             const areaHa = boundaryAreaHaByField.get(String(boundary.id));
                             const infoBadges = boundaryInfoBadgesByField.get(String(boundary.id)) || [];
+                            const bagCodeCount = getBagCodesForBoundary(boundary).length;
                             const areaDisplay = areaHa != null
                               ? (areaHa >= 10 ? areaHa.toFixed(1) : areaHa.toFixed(2))
                               : null;
                             
                             return (
-                              <div key={boundary.id} className="mb-2 relative" data-field-id={boundary.id}>
+                              <div key={boundary.id} className={`${isCompactLandscapeLayout ? 'mb-1' : 'mb-2'} relative`} data-field-id={boundary.id}>
                                 <div
                                   onClick={() => {
                                     setFocusedBoundary(boundary.id);
+                                    setFocusedBoundaryRequestId((prev) => prev + 1);
                                     toggleBoundaryExpansion(boundary.id);
                                   }}
                                   className={`
-                                    p-3 md:p-4 rounded-xl cursor-pointer transition-all
+                                    ${fieldCardBaseClass} cursor-pointer transition-all
                                     ${focusedBoundary === boundary.id 
-                                      ? isDark ? 'bg-blue-500/30 border-blue-400/50 shadow-lg' : 'bg-blue-100/90 border-blue-500/50 shadow-lg'
-                                      : isDark ? 'bg-gray-700/30 hover:bg-gray-600/40 border-gray-600/30' : 'bg-white/90 hover:bg-gray-100/90 border-gray-300/50'
+                                      ? isCompletedField
+                                        ? isDark ? 'bg-green-500/25 border-green-400/60 shadow-lg' : 'bg-green-100/90 border-green-500/60 shadow-lg'
+                                        : hasSamplesInField
+                                        ? isDark ? 'bg-pink-500/25 border-pink-400/60 shadow-lg' : 'bg-pink-100/90 border-pink-500/60 shadow-lg'
+                                        : isDark ? 'bg-blue-500/30 border-blue-400/50 shadow-lg' : 'bg-blue-100/90 border-blue-500/50 shadow-lg'
+                                      : isCompletedField
+                                        ? isDark ? 'bg-green-900/20 hover:bg-green-900/30 border-green-400/60' : 'bg-green-50/90 hover:bg-green-100/90 border-green-400/70'
+                                      : hasSamplesInField
+                                        ? isDark ? 'bg-gray-700/30 hover:bg-gray-600/40 border-pink-400/60' : 'bg-white/90 hover:bg-gray-100/90 border-pink-400/70'
+                                        : isDark ? 'bg-gray-700/30 hover:bg-gray-600/40 border-gray-600/30' : 'bg-white/90 hover:bg-gray-100/90 border-gray-300/50'
                                     }
+                                    ${isCompletedField ? (isDark ? 'ring-1 ring-green-400/40' : 'ring-1 ring-green-300/70') : hasSamplesInField ? (isDark ? 'ring-1 ring-pink-400/40' : 'ring-1 ring-pink-300/70') : ''}
                                     border-2
                                   `}
                                 >
                                   {/* Top row: field name with area details and expand button */}
                                   <div className="flex items-start gap-2">
                                     <div className="flex-1 min-w-0">
-                                      <span className={`block text-base md:text-lg truncate font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                        {getFieldNumber(boundary.name)}
-                                      </span>
-                                      <div className={`mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs md:text-sm ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className={fieldTitleClass}>
+                                          {getFieldNumber(boundary.name)}
+                                        </span>
+                                        {bagCodeCount > 0 && (
+                                          <button
+                                            type="button"
+                                            onClick={(event) => {
+                                              event.stopPropagation();
+                                              openBagCodesModal(boundary);
+                                            }}
+                                            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold transition-colors ${
+                                              isDark
+                                                ? 'border-amber-400/40 bg-amber-500/20 text-amber-100 hover:bg-amber-500/30'
+                                                : 'border-amber-300 bg-amber-100 text-amber-800 hover:bg-amber-200'
+                                            }`}
+                                            title={t('gps.bagCodes.open') || 'Bag codes'}
+                                            aria-label={t('gps.bagCodes.open') || 'Bag codes'}
+                                          >
+                                            <Tag className="h-3 w-3" />
+                                            <span>{t('gps.bagCodes.countBadge', { count: bagCodeCount }) || `${bagCodeCount} bag codes`}</span>
+                                          </button>
+                                        )}
+                                      </div>
+                                      <div className={fieldMetaClass}>
                                         {areaDisplay && (
                                           <span>{`${areaDisplay} ha`}</span>
                                         )}
+                                        <span>{`${totalSamplesInField} ${totalSamplesInField === 1 ? (t('gps.sampleCount') || 'sample') : (t('gps.samplesCount') || 'samples')}`}</span>
+                                        {isCompletedField && (
+                                          <span className={isDark ? 'text-green-300' : 'text-green-700'}>{t('gps.done') || 'Done'}</span>
+                                        )}
                                       </div>
                                     </div>
-                                    {isExpanded ? (
-                                      <ChevronDown className="w-5 h-5 md:w-6 md:h-6 flex-shrink-0 text-gray-600 dark:text-gray-300" />
-                                    ) : (
-                                      <ChevronRight className="w-5 h-5 md:w-6 md:h-6 flex-shrink-0 text-gray-600 dark:text-gray-300" />
-                                    )}
+                                    <div className="flex shrink-0 flex-col items-center gap-1">
+                                      {isExpanded ? (
+                                        <ChevronDown className={fieldChevronClass} />
+                                      ) : (
+                                        <ChevronRight className={fieldChevronClass} />
+                                      )}
+                                      {hasSamplesInField && (
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (isCompletedField) {
+                                              void handleReopenField(boundary);
+                                              return;
+                                            }
+                                            void handleMarkFieldDone(boundary);
+                                          }}
+                                          className={`flex h-6 w-6 items-center justify-center rounded-full border transition-colors ${
+                                            isCompletedField
+                                              ? isDark
+                                                ? 'border-amber-400/40 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30'
+                                                : 'border-amber-300 bg-amber-100 text-amber-700 hover:bg-amber-200'
+                                              : isDark
+                                                ? 'border-green-400/40 bg-green-500/20 text-green-300 hover:bg-green-500/30'
+                                                : 'border-green-300 bg-green-100 text-green-700 hover:bg-green-200'
+                                          }`}
+                                          title={isCompletedField ? (t('gps.reopen') || 'Reopen') : (t('gps.done') || 'Done')}
+                                          aria-label={isCompletedField ? (t('gps.reopen') || 'Reopen') : (t('gps.done') || 'Done')}
+                                        >
+                                          {isCompletedField ? <RefreshCw className="h-3 w-3" /> : <Check className="h-3 w-3" />}
+                                        </button>
+                                      )}
+                                    </div>
                                   </div>
                                   
                                     {/* Sampling requirements badge (compact mode for field card) */}
@@ -3260,11 +3868,11 @@ export default function GPSTracker() {
                                 {/* Tracks under this field */}
                                 {isExpanded && (
                                   <div className="ml-4 mt-0.5 space-y-1">
-                                    <div className="flex items-start gap-2 md:gap-3 pl-1">
+                                    <div className={fieldExpandedRowClass}>
                                       <div className="min-w-0 flex-1">
-                                        <div className="flex items-center gap-3 md:gap-4 text-xs md:text-sm">
+                                        <div className={fieldStatsClass}>
                                           <div className={`flex items-center gap-1 md:gap-1.5 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                                            <MapPin className="w-4 h-4 md:w-5 md:h-5" />
+                                            <MapPin className={fieldStatsIconClass} />
                                             <span className="font-medium">{totalSamplesInField}</span>
                                             <span className="opacity-70">{totalSamplesInField === 1 ? (t('gps.sampleCount') || 'sample') : (t('gps.samplesCount') || 'samples')}</span>
                                           </div>
@@ -3274,7 +3882,7 @@ export default function GPSTracker() {
                                             {infoBadges.map((badge) => (
                                               <span
                                                 key={`${boundary.id}-${badge}`}
-                                                className={`px-2 py-0.5 rounded-full text-[10px] md:text-xs font-medium ${isDark ? 'bg-blue-900/40 text-blue-200 border border-blue-800/50' : 'bg-blue-100 text-blue-700 border border-blue-200'}`}
+                                                className={infoBadgeClass}
                                               >
                                                 {badge}
                                               </span>
@@ -3283,37 +3891,58 @@ export default function GPSTracker() {
                                         )}
                                       </div>
                                       <div className="ml-auto flex items-center gap-1.5">
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            openBagCodesModal(boundary);
+                                          }}
+                                          className={`${fieldActionButtonClass} ${
+                                            bagCodeCount > 0
+                                              ? isDark ? 'bg-amber-500/20 text-amber-200 hover:bg-amber-500/30' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                                              : isDark ? 'bg-gray-600/40 text-gray-300 hover:bg-gray-600/60' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                                          }`}
+                                          title={t('gps.bagCodes.open') || 'Bag codes'}
+                                          aria-label={t('gps.bagCodes.open') || 'Bag codes'}
+                                        >
+                                          <Tag className={fieldActionIconClass} />
+                                        </button>
                                         {isNativeApp && canDeleteFieldSamples && (
                                           <button
                                             onClick={(e) => {
                                               e.stopPropagation();
                                               void handleDeleteFieldSamples(boundary.id);
                                             }}
-                                            className={`p-1.5 rounded-lg transition-colors ${
+                                            className={`${fieldActionButtonClass} ${
                                               isDark
                                                 ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30'
                                                 : 'bg-red-100 text-red-600 hover:bg-red-200'
                                             }`}
                                             title={t('gps.deleteSamples') || 'Delete samples'}
                                           >
-                                            <Trash2 className="w-4 h-4 md:w-5 md:h-5" />
+                                            <Trash2 className={fieldActionIconClass} />
                                           </button>
                                         )}
                                         <button
                                           onClick={(e) => {
                                             e.stopPropagation();
+                                            if (isLockedField) {
+                                              return;
+                                            }
                                             setSelectedFieldForManualSample(boundary);
                                             setManualSampleCount(existingManualSampleCount || 5);
                                             setShowManualSampleModal(true);
                                           }}
-                                          className={`p-1.5 rounded-lg transition-colors ${
-                                            existingManualSampleCount != null
+                                          disabled={isLockedField}
+                                          className={`${fieldActionButtonClass} ${
+                                            isLockedField
+                                              ? isDark ? 'bg-gray-700/40 text-gray-500 cursor-not-allowed' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                              : existingManualSampleCount != null
                                               ? isDark ? 'bg-purple-500/20 text-purple-300 hover:bg-purple-500/30' : 'bg-purple-100 text-purple-600 hover:bg-purple-200'
                                               : isDark ? 'bg-gray-600/40 text-gray-300 hover:bg-gray-600/60' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
                                           }`}
                                           title={t('gps.manualSamples') || 'Manual samples'}
                                         >
-                                          <Hand className="w-4 h-4 md:w-5 md:h-5" />
+                                          <Hand className={fieldActionIconClass} />
                                         </button>
                                       </div>
                                     </div>
@@ -3347,7 +3976,7 @@ export default function GPSTracker() {
                   </div>
 
                   {/* Fixed Unassigned Tracks at bottom */}
-                  {false && (() => {
+                  {import.meta.env.VITE_ENABLE_UNASSIGNED_TRACKS_PANEL === 'true' && (() => {
                     // Tracks are unassigned if they have no field_boundary_id OR if the field_boundary_id doesn't match any existing boundary
                     const unassignedTracks = tracks.filter(t => {
                       if (!t) return false;
@@ -3454,7 +4083,7 @@ export default function GPSTracker() {
               )}
 
               {sidebarTab === 'projects' && (
-                <div className="flex-1 flex flex-col px-4 pb-4 min-h-0">
+                <div className={sidebarSectionClass}>
                   <div className="h-px bg-gray-300 dark:bg-gray-600 mb-2 lg:mb-4" />
                   {isAdmin && (
                     <div className="mb-2 user-selector-dropdown">
@@ -3480,9 +4109,7 @@ export default function GPSTracker() {
                       </button>
 
                       {showUserDropdown && (
-                        <div className={`mt-1 rounded-lg shadow-xl max-h-48 overflow-y-auto ${
-                          isDark ? 'bg-gray-900/95 border border-gray-700' : 'bg-white/95 border border-gray-200'
-                        }`}>
+                        <div className={projectUserDropdownMenuClass}>
                           {userOptions.map(entry => (
                             <button
                               key={entry.id}
@@ -3507,40 +4134,82 @@ export default function GPSTracker() {
                       )}
                     </div>
                   )}
+                  {selectedProject && (
+                    <div className={currentProjectCardClass}>
+                      <div className={currentProjectEyebrowClass}>{t('gps.currentProject') || 'Current project'}</div>
+                      <div className={currentProjectTitleClass}>{selectedProject.name}</div>
+                      {selectedProject.description && (
+                        <div className={`${projectDescriptionClass} mt-0.5`}>
+                          {selectedProject.description}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {shouldShowProjectSearch && (
+                    <div className="relative mb-2.5">
+                      <Search className={`absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />
+                      <input
+                        value={projectSearchQuery}
+                        onChange={(event) => setProjectSearchQuery(event.target.value)}
+                        placeholder={t('gps.searchProjects') || 'Search projects'}
+                        className={projectsSearchInputClass}
+                      />
+                      {projectSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setProjectSearchQuery('')}
+                          className={`absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded ${isDark ? 'text-gray-400 hover:bg-gray-700 hover:text-gray-200' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'}`}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <div className="flex items-center justify-between mb-2">
                     <div className={`text-xs font-semibold ${isDark ? 'text-gray-200' : 'text-gray-800'}`}>
-                      {t('gps.projects') || 'Projects'} ({projects.length})
+                      {t('gps.projects') || 'Projects'} ({filteredProjects.length}{projectSearchQuery ? `/${projects.length}` : ''})
                     </div>
                   </div>
 
                   <div className="flex-1 min-h-0">
-                    <div className="h-full space-y-1 overflow-y-auto scrollbar-modern pr-1">
-                      {projects.length > 0 ? (
-                        projects.map(project => (
+                    <div className={projectListScrollClass}>
+                      {filteredProjects.length > 0 ? (
+                        filteredProjects.map(project => (
                           <button
                             key={project.id}
                             onClick={() => {
                               setSelectedProject(project);
                               setSidebarTab('fields');
                             }}
-                            className={`w-full text-left p-2 rounded-lg border transition-colors ${
+                            className={`w-full text-left ${projectButtonPaddingClass} rounded-lg border transition-colors ${
                               selectedProject?.id === project.id
                                 ? isDark ? 'bg-blue-600/30 border-blue-400/50 text-blue-200' : 'bg-blue-100 border-blue-400/50 text-blue-800'
                                 : isDark ? 'bg-gray-700/25 hover:bg-gray-600/35 border-gray-600/25 text-gray-200' : 'bg-white/80 hover:bg-gray-100/80 border-gray-300/50 text-gray-900'
                             }`}
                           >
-                            <div className="text-sm font-semibold truncate">{project.name}</div>
-                            {project.description && (
-                              <div className={`text-xs truncate ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-                                {project.description}
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className={projectTitleClass}>{project.name}</div>
+                                {project.description && (
+                                  <div className={projectDescriptionClass}>
+                                    {project.description}
+                                  </div>
+                                )}
                               </div>
-                            )}
+                              {selectedProject?.id === project.id && (
+                                <span className={projectSelectedBadgeClass}>
+                                  {t('gps.current') || 'Current'}
+                                </span>
+                              )}
+                            </div>
                           </button>
                         ))
                       ) : (
                         <div className="flex items-center justify-center text-center py-6">
                           <div className="text-sm text-gray-600 dark:text-gray-300">
-                            {t('gps.noProjectsCreate') || 'No projects - Create one below'}
+                            {projectSearchQuery
+                              ? (t('gps.noMatchingProjects') || 'No matching projects')
+                              : (t('gps.noProjectsCreate') || 'No projects - Create one below')}
                           </div>
                         </div>
                       )}
@@ -3552,26 +4221,31 @@ export default function GPSTracker() {
           )}
         </div>
       </div>
+      )}
 
       {/* Map Container - Full screen */}
-      <div className="absolute inset-0 w-full h-full z-0">
-        <MapView
-            currentPosition={position}
-          tracks={mapTracks}
-            fieldSamples={selectedProject ? effectiveFieldSamples : []}
-            fieldBoundaries={fieldBoundaries}
-            focusedBoundaryId={focusedBoundary}
-          focusedTrackId={null}
-            isTracking={isTracking}
-            showNavigationButton={!!selectedProject}
-            onNavigationClick={toggleNavigationPanel}
-            isNavigationOpen={showNavigationPanel}
-            isSidebarCollapsed={isSidebarCollapsed}
-            recenterTrigger={recenterTrigger}
-            onFieldClick={handleFieldClickFromMap}
-            onMapEmptyTap={handleMapEmptyTap}
-          />
-      </div>
+      {(!showNavigationPanel || !isCompactLandscapeLayout) && (
+        <div className="absolute inset-0 w-full h-full z-0">
+          <MapView
+              currentPosition={position}
+            tracks={mapTracks}
+              fieldSamples={selectedProject ? effectiveFieldSamples : []}
+              fieldBoundaries={fieldBoundaries}
+              focusedBoundaryId={focusedBoundary}
+              focusedBoundaryRequestId={focusedBoundaryRequestId}
+            focusedTrackId={null}
+              isTracking={isTracking}
+              showNavigationButton={!!selectedProject}
+              onNavigationClick={toggleNavigationPanel}
+              isNavigationOpen={showNavigationPanel}
+              isSidebarCollapsed={isSidebarCollapsed}
+              isCompactLandscapeLayout={isCompactLandscapeLayout}
+              recenterTrigger={recenterTrigger}
+              onFieldClick={handleFieldClickFromMap}
+              onMapEmptyTap={handleMapEmptyTap}
+            />
+        </div>
+      )}
 
       {/* Navigation Panel */}
       {showNavigationPanel && (
@@ -3582,11 +4256,138 @@ export default function GPSTracker() {
             currentPosition={position}
             fieldBoundaries={fieldBoundaries}
             projectName={selectedProject?.name}
+            isCompactLandscapeLayout={isCompactLandscapeLayout}
           />
         </Suspense>
       )}
 
       {/* Manual Sample Modal */}
+      {showBagCodesModal && selectedBagCodeBoundary && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4" style={{ zIndex: 9999 }}>
+          <div className={`w-full max-w-md p-6 rounded-2xl shadow-2xl ${
+            isDark ? 'bg-gray-900/95 border border-gray-700/30' : 'bg-white/95 border border-gray-200/50'
+          }`}>
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                  {t('gps.bagCodes.title') || 'Bag Codes'}
+                </h2>
+                <p className={`text-sm mt-1 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                  {t('gps.bagCodes.description', { field: getFieldNumber(selectedBagCodeBoundary.name) }) || `Manage bag codes for ${getFieldNumber(selectedBagCodeBoundary.name)}`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeBagCodesModal}
+                className={`rounded-lg p-2 transition-colors ${isDark ? 'text-gray-400 hover:text-white hover:bg-gray-800' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'}`}
+                aria-label={t('common.close') || 'Close'}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className={`rounded-lg px-3 py-2 text-xs ${isDark ? 'bg-amber-900/20 text-amber-200 border border-amber-800/40' : 'bg-amber-50 text-amber-800 border border-amber-200'}`}>
+                {t('gps.bagCodes.scanHint') || 'Tap this field first, then scan into the input below. Manual entry also works.'}
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  ref={bagCodeInputRef}
+                  type="text"
+                  value={bagCodeInput}
+                  onChange={(event) => setBagCodeInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      void handleSubmitBagCode();
+                    }
+                  }}
+                  placeholder={t('gps.bagCodes.inputPlaceholder') || 'Scan or enter a bag code'}
+                  className={`flex-1 rounded-lg border px-3 py-2.5 text-sm ${
+                    isDark
+                      ? 'bg-gray-800/90 border-gray-700 text-white'
+                      : 'bg-white border-gray-300 text-gray-900'
+                  } focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors`}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+                <Button onClick={() => void handleSubmitBagCode()} variant="primary">
+                  {editingBagCodeIndex == null
+                    ? (t('gps.bagCodes.addAction') || 'Add code')
+                    : (t('gps.bagCodes.replaceAction') || 'Replace code')}
+                </Button>
+              </div>
+
+              {editingBagCodeIndex != null && (
+                <div className={`flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-xs ${
+                  isDark ? 'bg-blue-900/20 text-blue-200 border border-blue-800/40' : 'bg-blue-50 text-blue-800 border border-blue-200'
+                }`}>
+                  <span>{t('gps.bagCodes.editingHint') || 'Editing selected code. Save to replace it or cancel to keep the current value.'}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingBagCodeIndex(null);
+                      setBagCodeInput('');
+                    }}
+                    className="font-semibold"
+                  >
+                    {t('common.cancel') || 'Cancel'}
+                  </button>
+                </div>
+              )}
+
+              <div className="space-y-2 max-h-64 overflow-y-auto scrollbar-modern pr-1">
+                {selectedBagCodes.length === 0 ? (
+                  <div className={`rounded-lg border border-dashed px-4 py-5 text-sm text-center ${
+                    isDark ? 'border-gray-700 text-gray-400' : 'border-gray-300 text-gray-500'
+                  }`}>
+                    {t('gps.bagCodes.emptyState') || 'No bag codes assigned to this field yet.'}
+                  </div>
+                ) : (
+                  selectedBagCodes.map((code, index) => (
+                    <div
+                      key={`${selectedBagCodeBoundary.id}-bag-code-${code}-${index}`}
+                      className={`rounded-lg border px-3 py-2.5 flex items-center gap-3 ${
+                        isDark ? 'border-gray-700 bg-gray-800/60' : 'border-gray-200 bg-white'
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-sm font-semibold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{code}</div>
+                        {index === 0 && (
+                          <div className={`text-[11px] uppercase tracking-wide ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
+                            {t('gps.bagCodes.primaryLabel') || 'Primary export code'}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleEditBagCode(index)}
+                        className={`text-xs font-semibold px-2.5 py-1.5 rounded-lg ${
+                          isDark ? 'bg-blue-900/30 text-blue-200 hover:bg-blue-900/50' : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                        }`}
+                      >
+                        {t('common.edit') || 'Edit'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteBagCode(index)}
+                        className={`text-xs font-semibold px-2.5 py-1.5 rounded-lg ${
+                          isDark ? 'bg-red-900/30 text-red-200 hover:bg-red-900/50' : 'bg-red-100 text-red-700 hover:bg-red-200'
+                        }`}
+                      >
+                        {t('common.delete') || 'Delete'}
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showManualSampleModal && selectedFieldForManualSample && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4" style={{ zIndex: 9999 }}>
           <div className={`w-full max-w-md p-6 rounded-2xl shadow-2xl ${
@@ -3701,7 +4502,7 @@ export default function GPSTracker() {
             tcpGPS={tcpGPS}
             bluetoothGPS={bluetoothGPS}
             onClose={() => setShowDeviceManager(false)}
-            onDeviceConnected={async (device, positionCallback) => {
+            onDeviceConnected={async (device, _positionCallback) => {
               setConnectedDevice(device);
               
               // The hooks will handle the actual connection and call positionCallback
@@ -3863,17 +4664,13 @@ export default function GPSTracker() {
       {connectedDevice && isExternalGpsConnected && externalGpsPosition && (Date.now() - externalGpsPosition.timestamp < 15000) && !showDevicePopup && (
         <button
           onClick={() => setShowDevicePopup(true)}
-          className={`fixed bottom-4 z-[1500] w-10 h-10 md:w-12 md:h-12 flex items-center justify-center rounded-full shadow-lg transition-all duration-300 ${
-            showNavigationPanel 
-              ? 'hidden md:flex md:right-[30.5rem] lg:right-[33.5rem]' 
-              : 'right-20'
-          }`}
+          className={`fixed bottom-4 z-[1500] ${deviceInfoButtonSizeClass} flex items-center justify-center rounded-full shadow-lg transition-all duration-300 ${deviceInfoButtonPositionClass}`}
           style={{
             backgroundColor: isDark ? 'rgba(59, 130, 246, 0.8)' : 'rgba(37, 99, 235, 0.8)',
           }}
           title={t('common.gpsDeviceInfo') || 'GPS Device Info'}
         >
-          <span className="text-lg md:text-xl">📡</span>
+          <span className={deviceInfoIconClass}>📡</span>
         </button>
       )}
 

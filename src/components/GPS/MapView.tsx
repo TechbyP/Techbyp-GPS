@@ -8,7 +8,8 @@ import { useDarkMode } from '../../hooks/useDarkMode';
 import { useLanguage } from '../../hooks/useLanguage';
 import { GpsPosition, GpsTrackDetail, GpsPoint, GpsFieldBoundary, GpsFieldSample } from '../../types';
 import { getBoundaryLodLevel } from '../../utils/boundaryRenderMeta';
-import { getBlankTileUrl, getBundledGermanyPmtilesUrl } from '../../utils/tileUtils';
+import { getBoundarySamplingState } from '../../utils/fieldSamplingState';
+import { getBlankTileUrl, getBundledGermanyPmtilesUrl, getTileLayerCrossOrigin } from '../../utils/tileUtils';
 import { getDefaultPack, getPackForLocation, OFFLINE_MAP_PACKS } from '../../config/offlineMapPacks';
 import PMTilesVectorLayer from './PMTilesVectorLayer';
 import { tileDownloader, DownloadProgress } from '../../services/offlineTileDownloader';
@@ -157,7 +158,7 @@ const pruneCacheMap = <T,>(cache: Map<string, T>, maxSize: number) => {
   }
 };
 
-const getTrackSimplifyStep = (zoom: number, isMoving: boolean): number => {
+const _getTrackSimplifyStep = (zoom: number, isMoving: boolean): number => {
   if (isMoving) return 12;
   if (zoom >= 16) return 2;
   if (zoom >= 14) return 6;
@@ -165,7 +166,7 @@ const getTrackSimplifyStep = (zoom: number, isMoving: boolean): number => {
   return 16;
 };
 
-const getTrackLodKey = (zoom: number, isMoving: boolean): string => {
+const _getTrackLodKey = (zoom: number, isMoving: boolean): string => {
   if (isMoving) return 'moving';
   if (zoom >= 16) return 'z16';
   if (zoom >= 14) return 'z14';
@@ -357,6 +358,46 @@ const getBoundaryCentroid = (boundary: GpsFieldBoundary): [number, number] | nul
   return null;
 };
 
+const buildFieldViewportBounds = (
+  fieldBoundaries: GpsFieldBoundary[],
+  currentPosition?: GpsPosition | null
+): L.LatLngBounds | null => {
+  const bounds = L.latLngBounds([]);
+
+  fieldBoundaries.forEach((boundary) => {
+    if (boundary.geometry_type === 'Polygon') {
+      const coords = boundary.coordinates as number[][][];
+      coords[0]?.forEach((coord) => {
+        if (Array.isArray(coord) && coord.length >= 2) {
+          bounds.extend([coord[1], coord[0]]);
+        }
+      });
+      return;
+    }
+
+    if (boundary.geometry_type === 'MultiPolygon') {
+      const coords = boundary.coordinates as number[][][][];
+      coords.forEach((polygon) => {
+        polygon[0]?.forEach((coord) => {
+          if (Array.isArray(coord) && coord.length >= 2) {
+            bounds.extend([coord[1], coord[0]]);
+          }
+        });
+      });
+    }
+  });
+
+  if (
+    currentPosition
+    && Number.isFinite(currentPosition.latitude)
+    && Number.isFinite(currentPosition.longitude)
+  ) {
+    bounds.extend([currentPosition.latitude, currentPosition.longitude]);
+  }
+
+  return bounds.isValid() ? bounds : null;
+};
+
 const getBoundaryAreaScore = (boundary: GpsFieldBoundary, fallbackBounds: L.LatLngBounds): number => {
   const bbox = boundary.render_meta?.bbox;
   if (Array.isArray(bbox) && bbox.length === 4) {
@@ -544,7 +585,7 @@ const reduceSamplesToPathPoints = (samples: GpsFieldSample[], maxPoints: number)
   return reduced;
 };
 
-const getPathWaypoints = (pathPoints: [number, number][], maxWaypoints: number): [number, number][] => {
+const _getPathWaypoints = (pathPoints: [number, number][], maxWaypoints: number): [number, number][] => {
   if (maxWaypoints <= 0 || pathPoints.length <= 2) {
     return [];
   }
@@ -669,9 +710,9 @@ const simplifyPolygonsForPerformance = (polygons: [number, number][][][], maxPoi
   return polygons.map((polygon) => simplifyRingsForPerformance(polygon, maxPoints));
 };
 
-const MAX_TRACK_POINTS_FOR_SMOOTHING = 600;
+const _MAX_TRACK_POINTS_FOR_SMOOTHING = 600;
 
-const getTrackBoundsFromPoints = (points: { latitude: number; longitude: number }[]): L.LatLngBounds | null => {
+const _getTrackBoundsFromPoints = (points: { latitude: number; longitude: number }[]): L.LatLngBounds | null => {
   if (!Array.isArray(points) || points.length === 0) return null;
 
   let minLat = Infinity;
@@ -708,7 +749,7 @@ const getBoundaryGeometryVersionKey = (boundary: GpsFieldBoundary): string => {
 
 // Advanced GPS Point Smoothing Algorithm
 // Creates smooth curved paths, ignores circling and small movements
-function smoothGpsPoints(points: GpsPoint[]): GpsPoint[] {
+function _smoothGpsPoints(points: GpsPoint[]): GpsPoint[] {
   if (!points || points.length < 2) return points || [];
 
   const smoothed: GpsPoint[] = [];
@@ -837,7 +878,7 @@ const createCurrentLocationArrow = (heading: number = 0) => new L.DivIcon({
 // Backward-compatible fallback (in case any stale references remain)
 
 // Red square for start point - smaller fixed size
-const startPointIcon = new L.Icon({
+const _startPointIcon = new L.Icon({
   iconUrl: 'data:image/svg+xml;base64,' + btoa(`
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
       <rect x="6" y="6" width="12" height="12" fill="#EF4444" stroke="white" stroke-width="2"/>
@@ -849,7 +890,7 @@ const startPointIcon = new L.Icon({
 });
 
 // Red square for end point - smaller fixed size
-const endPointIcon = new L.Icon({
+const _endPointIcon = new L.Icon({
   iconUrl: 'data:image/svg+xml;base64,' + btoa(`
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
       <rect x="6" y="6" width="12" height="12" fill="#EF4444" stroke="white" stroke-width="2"/>
@@ -862,6 +903,7 @@ const endPointIcon = new L.Icon({
 
 // Reusable 1x1 transparent tile for safe fallback when offline tiles are missing
 const BLANK_TILE_URL = getBlankTileUrl();
+const LEAFLET_WORLD_BOUNDS: L.LatLngBoundsExpression = [[-85.05112878, -180], [85.05112878, 180]];
 
 interface MapViewProps {
   currentPosition: GpsPosition | null;
@@ -869,12 +911,14 @@ interface MapViewProps {
   fieldSamples: GpsFieldSample[];
   fieldBoundaries?: GpsFieldBoundary[];
   focusedBoundaryId?: number | null;
+  focusedBoundaryRequestId?: number;
   focusedTrackId?: number | string | null;
   isTracking: boolean;
   showNavigationButton?: boolean;
   onNavigationClick?: () => void;
   isNavigationOpen?: boolean;
   isSidebarCollapsed?: boolean;
+  isCompactLandscapeLayout?: boolean;
   recenterTrigger?: number;
   onFieldClick?: (fieldId: number | string) => void;
   onMapEmptyTap?: () => void;
@@ -884,12 +928,14 @@ const MapController = memo(function MapController({
   currentPosition,
   fieldBoundaries,
   focusedBoundaryId,
+  focusedBoundaryRequestId,
   isTracking,
   snapState
 }: {
   currentPosition: GpsPosition | null;
   fieldBoundaries: GpsFieldBoundary[];
   focusedBoundaryId?: number | null;
+  focusedBoundaryRequestId?: number;
   isTracking?: boolean;
   snapState?: {
     hasZoomedRef: MutableRefObject<boolean>;
@@ -897,6 +943,7 @@ const MapController = memo(function MapController({
     trackingCenterDoneRef: MutableRefObject<boolean>;
     boundaryFocusDoneRef: MutableRefObject<boolean>;
     lastFocusedBoundaryIdRef: MutableRefObject<number | null>;
+    lastFocusedBoundaryRequestKeyRef: MutableRefObject<string | null>;
   };
 }) {
   const map = useMap();
@@ -906,12 +953,14 @@ const MapController = memo(function MapController({
   const animationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const localTrackingCenterDoneRef = useRef(false);
   const localLastFocusedBoundaryIdRef = useRef<number | null>(null);
+  const localLastFocusedBoundaryRequestKeyRef = useRef<string | null>(null);
   const localBoundaryFocusDoneRef = useRef(false);
 
   const hasZoomedRef = snapState?.hasZoomedRef ?? localHasZoomedRef;
   const hasZoomedToBoundariesRef = snapState?.hasZoomedToBoundariesRef ?? localHasZoomedToBoundariesRef;
   const trackingCenterDoneRef = snapState?.trackingCenterDoneRef ?? localTrackingCenterDoneRef;
   const lastFocusedBoundaryIdRef = snapState?.lastFocusedBoundaryIdRef ?? localLastFocusedBoundaryIdRef;
+  const lastFocusedBoundaryRequestKeyRef = snapState?.lastFocusedBoundaryRequestKeyRef ?? localLastFocusedBoundaryRequestKeyRef;
   const boundaryFocusDoneRef = snapState?.boundaryFocusDoneRef ?? localBoundaryFocusDoneRef;
 
   const flyToBoundsAnimated = useCallback((bounds: L.LatLngBoundsExpression, padding: [number, number] = [80, 80], maxZoom: number = 18, force: boolean = false) => {
@@ -952,6 +1001,10 @@ const MapController = memo(function MapController({
       return;
     }
 
+    if (fieldBoundaries.length > 0) {
+      return;
+    }
+
     if (trackingCenterDoneRef.current) return;
     if (currentPosition) {
       map.setView([currentPosition.latitude, currentPosition.longitude], map.getZoom(), {
@@ -960,17 +1013,24 @@ const MapController = memo(function MapController({
       });
       trackingCenterDoneRef.current = true;
     }
-  }, [currentPosition, isTracking, map]);
+  }, [currentPosition, fieldBoundaries.length, isTracking, map, trackingCenterDoneRef]);
 
   // Focus on specific boundary when clicked
   useEffect(() => {
     if (!focusedBoundaryId) {
       boundaryFocusDoneRef.current = false;
       lastFocusedBoundaryIdRef.current = null;
+      lastFocusedBoundaryRequestKeyRef.current = null;
       return;
     }
 
-    if (boundaryFocusDoneRef.current && lastFocusedBoundaryIdRef.current === focusedBoundaryId) {
+    const focusRequestKey = `${focusedBoundaryId}:${focusedBoundaryRequestId ?? 0}`;
+
+    if (
+      boundaryFocusDoneRef.current
+      && lastFocusedBoundaryIdRef.current === focusedBoundaryId
+      && lastFocusedBoundaryRequestKeyRef.current === focusRequestKey
+    ) {
       return;
     }
 
@@ -978,59 +1038,34 @@ const MapController = memo(function MapController({
       const boundary = fieldBoundaries.find(b => String(b.id) === String(focusedBoundaryId));
       if (boundary) {
         try {
-          const bounds = L.latLngBounds([]);
+          const bounds = buildFieldViewportBounds([boundary], currentPosition);
 
-          if (boundary.geometry_type === 'Polygon') {
-            const coords = boundary.coordinates as number[][][];
-            coords[0].forEach(coord => {
-              bounds.extend([coord[1], coord[0]]);
-            });
-          } else if (boundary.geometry_type === 'MultiPolygon') {
-            const coords = boundary.coordinates as number[][][][];
-            coords.forEach(polygon => {
-              polygon[0].forEach(coord => {
-                bounds.extend([coord[1], coord[0]]);
-              });
-            });
-          }
-
-          if (bounds.isValid()) {
+          if (bounds) {
             flyToBoundsAnimated(bounds, [90, 90], 18, true);
             boundaryFocusDoneRef.current = true;
             lastFocusedBoundaryIdRef.current = focusedBoundaryId;
+            lastFocusedBoundaryRequestKeyRef.current = focusRequestKey;
           }
         } catch (error) {
           console.error('Error focusing on boundary:', error);
         }
       }
     }
-  }, [focusedBoundaryId, fieldBoundaries, map, flyToBoundsAnimated]);
+  }, [currentPosition, focusedBoundaryId, focusedBoundaryRequestId, fieldBoundaries, map, flyToBoundsAnimated, boundaryFocusDoneRef, lastFocusedBoundaryIdRef, lastFocusedBoundaryRequestKeyRef]);
 
   // Auto-zoom to field boundaries when they're loaded (with delay to ensure rendering)
   useEffect(() => {
     if (fieldBoundaries.length > 0 && !hasZoomedToBoundariesRef.current) {
+      if (isTracking && !currentPosition) {
+        return;
+      }
+
       // Add a small delay to ensure boundaries are rendered before animation
       const timer = setTimeout(() => {
         try {
-          const bounds = L.latLngBounds([]);
+          const bounds = buildFieldViewportBounds(fieldBoundaries, currentPosition);
 
-          fieldBoundaries.forEach(boundary => {
-            if (boundary.geometry_type === 'Polygon') {
-              const coords = boundary.coordinates as number[][][];
-              coords[0].forEach(coord => {
-                bounds.extend([coord[1], coord[0]]);
-              });
-            } else if (boundary.geometry_type === 'MultiPolygon') {
-              const coords = boundary.coordinates as number[][][][];
-              coords.forEach(polygon => {
-                polygon[0].forEach(coord => {
-                  bounds.extend([coord[1], coord[0]]);
-                });
-              });
-            }
-          });
-
-          if (bounds.isValid()) {
+          if (bounds) {
             flyToBoundsAnimated(bounds, [70, 70], 17);
             hasZoomedToBoundariesRef.current = true;
           }
@@ -1041,7 +1076,7 @@ const MapController = memo(function MapController({
 
       return () => clearTimeout(timer);
     }
-  }, [fieldBoundaries, map, flyToBoundsAnimated]);
+  }, [currentPosition, fieldBoundaries, flyToBoundsAnimated, isTracking, map, hasZoomedToBoundariesRef]);
 
   // Zoom to current position if no boundaries
   useEffect(() => {
@@ -1049,7 +1084,7 @@ const MapController = memo(function MapController({
       map.setView([currentPosition.latitude, currentPosition.longitude], 18);
       hasZoomedRef.current = true;
     }
-  }, [currentPosition, fieldBoundaries, map]);
+  }, [currentPosition, fieldBoundaries, map, hasZoomedRef]);
 
   // Cleanup animation timeout on unmount
   useEffect(() => {
@@ -1754,16 +1789,18 @@ const SampleCanvasLayer = memo(function SampleCanvasLayer({
 
 function MapView({
   currentPosition,
-  tracks,
+  tracks: _tracks,
   fieldSamples,
   fieldBoundaries = [],
   focusedBoundaryId = null,
-  focusedTrackId = null,
+  focusedBoundaryRequestId = 0,
+  focusedTrackId: _focusedTrackId = null,
   isTracking,
   showNavigationButton = false,
   onNavigationClick,
   isNavigationOpen = false,
   isSidebarCollapsed = false,
+  isCompactLandscapeLayout = false,
   recenterTrigger,
   onFieldClick,
   onMapEmptyTap,
@@ -1774,12 +1811,14 @@ function MapView({
   const trackingCenterDoneRef = useRef(false);
   const boundaryFocusDoneRef = useRef(false);
   const lastFocusedBoundaryIdRef = useRef<number | null>(null);
+  const lastFocusedBoundaryRequestKeyRef = useRef<string | null>(null);
   const snapState = useMemo(() => ({
     hasZoomedRef,
     hasZoomedToBoundariesRef,
     trackingCenterDoneRef,
     boundaryFocusDoneRef,
     lastFocusedBoundaryIdRef,
+    lastFocusedBoundaryRequestKeyRef,
   }), []);
   const [isDark] = useDarkMode();
   const isDarkMode = isDark;
@@ -2277,7 +2316,12 @@ function MapView({
     return activeBoundaryRenderData.map((item) => {
       const boundary = item.boundary;
       const hasSamplesInField = fieldsWithSamples.has(String(boundary.id));
-      const fieldColor = hasSamplesInField ? '#FF4D6D' : (boundary.color || '#00FF00');
+      const boundarySamplingState = getBoundarySamplingState(boundary);
+      const fieldColor = boundarySamplingState.status === 'completed'
+        ? '#16A34A'
+        : hasSamplesInField
+          ? '#FF4D6D'
+          : (boundary.color || '#00FF00');
       const labelColor = useSatellite ? '#ffffff' : '#000000';
       const shouldRenderLabel = boundaryVisualZoom >= 13 && visibleLabelIds.has(String(boundary.id));
       const labelIcons = shouldRenderLabel
@@ -2779,7 +2823,7 @@ function MapView({
     if (ok) {
       setShowOfflinePrompt(false);
     }
-  }, [isDownloadingOffline, t, activePack]);
+  }, [isDownloadingOffline, isOnline, t, activePack]);
   
   useEffect(() => {
     const handleOnline = () => {
@@ -2806,22 +2850,58 @@ function MapView({
       setTimeout(() => mapRef.current?.invalidateSize?.(), 150);
     }
   }, [hasInternetAccess]);
-  const forceOffline = isOffline;
+  const _forceOffline = isOffline;
   const [showLabels, setShowLabels] = useState(true); // Show labels on satellite
   const [mapKey, setMapKey] = useState(0); // Force map refresh on network change
-  const pmtilesVersion = import.meta.env.VITE_PMTILES_VERSION || '20260122';
+  const _pmtilesVersion = import.meta.env.VITE_PMTILES_VERSION || '20260122';
   // Fixed control position just right of sidebar header; keep it closer to the menu edge
-  const desiredLeftPx = 344;
+  const desiredLeftPx = isCompactLandscapeLayout ? 236 : 344;
   const controlsLeftPx = typeof window !== 'undefined'
-    ? Math.min(Math.max(16, desiredLeftPx), window.innerWidth - 120)
+    ? Math.min(Math.max(isCompactLandscapeLayout ? 8 : 16, desiredLeftPx), window.innerWidth - (isCompactLandscapeLayout ? 88 : 120))
     : desiredLeftPx;
   const controlPositionStyle = { left: `${controlsLeftPx}px`, right: 'auto' };
+  const floatingControlsClass = isCompactLandscapeLayout
+    ? 'absolute top-2 z-[4000] flex flex-col gap-0.5 transition-all duration-300 ease-in-out'
+    : 'absolute top-4 z-[4000] flex flex-col gap-1 md:gap-1 transition-all duration-300 ease-in-out';
+  const navigationButtonSizeClass = isCompactLandscapeLayout ? 'w-9 h-9' : 'w-10 h-10 md:w-12 md:h-12';
+  const navigationButtonPositionClass = isNavigationOpen
+    ? (isCompactLandscapeLayout ? 'hidden' : 'hidden md:flex md:right-[29rem] lg:right-[32rem]')
+    : (isCompactLandscapeLayout ? 'right-3' : 'right-4');
+  const navigationIconClass = isCompactLandscapeLayout ? 'w-4 h-4' : 'w-5 h-5 md:w-6 md:h-6';
+  const mapModeButtonClass = isCompactLandscapeLayout
+    ? `group h-10 flex items-center transition-all glass-panel ${isDarkMode ? 'glass-panel-dark' : 'glass-panel-light'
+      } ${isOffline
+        ? 'opacity-50 cursor-not-allowed'
+        : isDarkMode ? 'text-white hover:text-gray-200' : 'text-black hover:text-gray-700'
+      } hover:-translate-y-0.5 active:scale-95 duration-300 ease-in-out w-10 justify-center hover:w-28 hover:gap-1.5 hover:px-2.5 hover:justify-start ${isOffline ? 'hover:w-10' : ''}`
+    : `group h-12 md:h-14 flex items-center transition-all glass-panel ${isDarkMode ? 'glass-panel-dark' : 'glass-panel-light'
+      } ${isOffline
+        ? 'opacity-50 cursor-not-allowed' 
+        : isDarkMode ? 'text-white hover:text-gray-200' : 'text-black hover:text-gray-700'
+      } hover:-translate-y-0.5 active:scale-95 duration-300 ease-in-out w-12 md:w-14 justify-center hover:w-36 hover:md:w-40 hover:gap-2 hover:px-3 hover:justify-start ${isOffline ? 'hover:w-12 md:hover:w-14' : ''}`;
+  const mapModeIconClass = isCompactLandscapeLayout ? 'w-6 h-6 flex-shrink-0' : 'w-8 h-8 md:w-10 md:h-10 flex-shrink-0';
+  const mapModeLabelClass = isCompactLandscapeLayout
+    ? `text-[11px] font-medium whitespace-nowrap overflow-hidden transition-all duration-300 max-w-0 opacity-0 ${isOffline ? '' : 'group-hover:max-w-[112px] group-hover:opacity-100'}`
+    : `text-xs md:text-sm font-medium whitespace-nowrap overflow-hidden transition-all duration-300 max-w-0 opacity-0 ${isOffline ? '' : 'group-hover:max-w-[140px] group-hover:opacity-100'}`;
 
-  const centerOnCurrentLocation = () => {
+  const centerOnCurrentLocation = useCallback(() => {
     if (currentPosition && mapRef.current) {
+      const projectBounds = fieldBoundaries.length > 0
+        ? buildFieldViewportBounds(fieldBoundaries, currentPosition)
+        : null;
+
+      if (projectBounds) {
+        mapRef.current.fitBounds(projectBounds, {
+          padding: [70, 70],
+          maxZoom: 17,
+          animate: !isTabletPerformanceMode,
+        });
+        return;
+      }
+
       mapRef.current.setView([currentPosition.latitude, currentPosition.longitude], 19); // Zoom 19 = ~2.5m per pixel
     }
-  };
+  }, [currentPosition, fieldBoundaries, isTabletPerformanceMode]);
 
   const DEFAULT_CENTER: [number, number] = [49.6116, 6.1319]; // Luxembourg
 
@@ -2830,7 +2910,7 @@ function MapView({
     if (recenterTrigger && recenterTrigger > 0) {
       centerOnCurrentLocation();
     }
-  }, [recenterTrigger]);
+  }, [recenterTrigger, centerOnCurrentLocation]);
 
   const cycleMapMode = () => {
     setMapMode((prev) => {
@@ -2855,7 +2935,7 @@ function MapView({
   // Tile source logging removed to reduce console spam
 
   return (
-    <div className="w-full h-full">
+    <div className={`w-full h-full ${isCompactLandscapeLayout ? 'gps-compact-landscape' : ''}`}>
       <MapContainer
         key={mapKey}
         center={currentPosition ? [currentPosition.latitude, currentPosition.longitude] : DEFAULT_CENTER}
@@ -2863,6 +2943,9 @@ function MapView({
         maxZoom={19}
         zoomSnap={0}
         zoomDelta={1}
+        worldCopyJump={true}
+        maxBounds={LEAFLET_WORLD_BOUNDS}
+        maxBoundsViscosity={1}
         inertia={mapPanInertia}
         bounceAtZoomLimits={mapBounceAtZoomLimits}
         zoomControl={false}
@@ -2902,8 +2985,9 @@ function MapView({
                 key="osm-map"
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 maxZoom={19}
+                noWrap={true}
                 attribution='© OpenStreetMap contributors'
-                crossOrigin="anonymous"
+                crossOrigin={getTileLayerCrossOrigin('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')}
                 tileSize={256}
                 keepBuffer={tileKeepBuffer}
                 updateWhenIdle={tileUpdateWhenIdle}
@@ -2921,9 +3005,10 @@ function MapView({
                 minZoom={1}
                 maxZoom={18}
                 maxNativeZoom={12}
+                noWrap={true}
                 attribution='Offline Maps - Germany Base Map (OpenStreetMap Data)'
                 errorTileUrl='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
-                crossOrigin="anonymous"
+                crossOrigin={getTileLayerCrossOrigin('/tiles/germany/{z}/{x}/{y}.png')}
                 keepBuffer={tileKeepBuffer}
                 updateWhenIdle={tileUpdateWhenIdle}
                 updateWhenZooming={tileUpdateWhenZooming}
@@ -2939,6 +3024,7 @@ function MapView({
                 pmtilesUrl={offlinePmtilesUri}
                 maxZoom={19}
                 maxDataZoom={15}
+                noWrap={true}
                 attribution='© OpenStreetMap contributors | Offline PMTiles'
                 theme={Capacitor.isNativePlatform() && isDarkMode ? 'dark' : 'light'}
                 schema="openmaptiles"
@@ -2959,9 +3045,10 @@ function MapView({
                 minZoom={1}
                 maxZoom={18}
                 maxNativeZoom={12}
+                noWrap={true}
                 attribution='Offline Maps - Germany Base Map (OpenStreetMap Data)'
                 errorTileUrl='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
-                crossOrigin="anonymous"
+                crossOrigin={getTileLayerCrossOrigin('/tiles/germany/{z}/{x}/{y}.png')}
                 keepBuffer={tileKeepBuffer}
                 updateWhenIdle={tileUpdateWhenIdle}
                 updateWhenZooming={tileUpdateWhenZooming}
@@ -2979,6 +3066,7 @@ function MapView({
                 minZoom={1}
                 maxZoom={18}
                 maxNativeZoom={18}
+                noWrap={true}
                 attribution='Offline fallback (no tiles available)'
                 tileSize={256}
               />
@@ -2993,6 +3081,7 @@ function MapView({
                   key="esri-satellite"
                   url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
                   maxZoom={20}
+                  noWrap={true}
                   keepBuffer={satelliteTileKeepBuffer}
                   updateWhenIdle={tileUpdateWhenIdle}
                   updateWhenZooming={satelliteUpdateWhenZooming}
@@ -3004,6 +3093,7 @@ function MapView({
                     key="esri-labels"
                     url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
                     maxZoom={20}
+                    noWrap={true}
                     opacity={0.7}
                     keepBuffer={satelliteTileKeepBuffer}
                     updateWhenIdle={tileUpdateWhenIdle}
@@ -3029,6 +3119,7 @@ function MapView({
                 minZoom={1}
                 maxZoom={18}
                 maxNativeZoom={18}
+                noWrap={true}
                 attribution='Online tiles unavailable'
                 tileSize={256}
               />
@@ -3041,8 +3132,9 @@ function MapView({
               url={baseOnlineUrl}
               maxZoom={19}
               maxNativeZoom={19}
+              noWrap={true}
               attribution={onlineTileUrl || rasterFallback ? 'Self-hosted tiles' : '© OpenStreetMap contributors'}
-              crossOrigin="anonymous"
+              crossOrigin={getTileLayerCrossOrigin(baseOnlineUrl)}
               tileSize={256}
               keepBuffer={tileKeepBuffer}
               updateWhenIdle={tileUpdateWhenIdle}
@@ -3062,6 +3154,7 @@ function MapView({
           currentPosition={currentPosition}
           fieldBoundaries={uniqueFieldBoundaries}
           focusedBoundaryId={focusedBoundaryId}
+          focusedBoundaryRequestId={focusedBoundaryRequestId}
           isTracking={isTracking}
           snapState={snapState}
         />
@@ -3124,7 +3217,7 @@ function MapView({
         </div>
       )}
 
-      {false && showOfflinePrompt && (
+      {import.meta.env.VITE_ENABLE_OFFLINE_PROMPT_BANNER === 'true' && showOfflinePrompt && (
         <div
           className={`fixed top-2 left-1/2 z-[6000] w-[92%] max-w-xl -translate-x-1/2 px-4 py-3 text-xs md:text-sm glass-panel ${isDarkMode ? 'glass-panel-dark text-white' : 'glass-panel-light text-gray-900'}`}
         >
@@ -3212,20 +3305,17 @@ function MapView({
       {showNavigationButton && onNavigationClick && (
         <button
           onClick={onNavigationClick}
-          className={`absolute bottom-4 z-[1500] w-10 h-10 md:w-12 md:h-12 flex items-center justify-center text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-full transition-all duration-300 ${isNavigationOpen
-              ? 'hidden md:flex md:right-[29rem] lg:right-[32rem]'
-              : 'right-4'
-            }`}
+          className={`absolute bottom-4 z-[1500] ${navigationButtonSizeClass} flex items-center justify-center text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-full transition-all duration-300 ${navigationButtonPositionClass}`}
           title={t('common.navigation') || 'Navigation'}
         >
-          <Navigation2 className="w-5 h-5 md:w-6 md:h-6" />
+          <Navigation2 className={navigationIconClass} />
         </button>
       )}
 
       {/* Floating controls - hide when sidebar is collapsed */}
       {!isSidebarCollapsed && (
       <div
-        className={`absolute top-4 z-[4000] flex flex-col gap-1 md:gap-1 transition-all duration-300 ease-in-out`}
+        className={floatingControlsClass}
         style={controlPositionStyle}
       >
         {/* Map Type Switch Button - Default/OSM/Satellite with Labels */}
@@ -3239,11 +3329,7 @@ function MapView({
               cycleMapMode();
             }}
             disabled={isOffline}
-            className={`group h-12 md:h-14 flex items-center transition-all glass-panel ${isDarkMode ? 'glass-panel-dark' : 'glass-panel-light'
-              } ${isOffline
-                ? 'opacity-50 cursor-not-allowed' 
-                : isDarkMode ? 'text-white hover:text-gray-200' : 'text-black hover:text-gray-700'
-              } hover:-translate-y-0.5 active:scale-95 duration-300 ease-in-out w-12 md:w-14 justify-center hover:w-36 hover:md:w-40 hover:gap-2 hover:px-3 hover:justify-start ${isOffline ? 'hover:w-12 md:hover:w-14' : ''}`}
+            className={mapModeButtonClass}
             title={
               isOffline
                 ? 'Map mode switch requires internet connection'
@@ -3252,8 +3338,8 @@ function MapView({
                 : 'Switch to OpenMap'
             }
           >
-            <Satellite className="w-8 h-8 md:w-10 md:h-10 flex-shrink-0" />
-            <span className={`text-xs md:text-sm font-medium whitespace-nowrap overflow-hidden transition-all duration-300 max-w-0 opacity-0 ${isOffline ? '' : 'group-hover:max-w-[140px] group-hover:opacity-100'}`}>
+            <Satellite className={mapModeIconClass} />
+            <span className={mapModeLabelClass}>
               {mapMode === 'osm' ? 'OpenMap' : 'Satellite'}
               {isOffline && <span className="ml-1 text-red-500">✕</span>}
             </span>

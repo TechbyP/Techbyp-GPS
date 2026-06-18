@@ -3,8 +3,6 @@
  * Downloads map tiles dynamically when user navigates to areas without offline coverage
  */
 
-import { Capacitor } from '@capacitor/core';
-
 interface TileCoordinate {
   x: number;
   y: number;
@@ -54,20 +52,6 @@ function latLonToTile(lat: number, lon: number, zoom: number): TileCoordinate {
   const x = Math.floor(((lon + 180) / 360) * n);
   const y = Math.floor(((1 - Math.asinh(Math.tan(latRad)) / Math.PI) / 2) * n);
   return { x, y, zoom };
-}
-
-/**
- * Convert tile coordinates to lat/lon bounds
- */
-function tileToBounds(x: number, y: number, zoom: number): TileBounds {
-  const n = Math.pow(2, zoom);
-  const west = (x / n) * 360 - 180;
-  const east = ((x + 1) / n) * 360 - 180;
-  const northRad = Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n)));
-  const southRad = Math.atan(Math.sinh(Math.PI * (1 - (2 * (y + 1)) / n)));
-  const north = (northRad * 180) / Math.PI;
-  const south = (southRad * 180) / Math.PI;
-  return { north, south, east, west };
 }
 
 /**

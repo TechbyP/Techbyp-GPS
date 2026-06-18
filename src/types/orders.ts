@@ -53,12 +53,92 @@ export interface BillingRecipientSnapshot {
   vatNumber?: string;
 }
 
-export type OrderLabProvider = 'agrolab' | 'lufa_nrw';
+export type OrderLabProvider = 'agrolab' | 'lufa_nrw' | 'pbs' | 'documentation_only';
 export type LufaStandarduntersuchungsumfang = 'DED' | 'Nmin';
+export type PbsProfile = 'boden' | 'nmin' | 'n306090';
 
 export interface LufaImportNminLayer {
   depthFromCm: number;
   depthToCm: number;
+}
+
+export interface LufaPartyAddress {
+  adrnr?: string;
+  name?: string;
+  firstName?: string;
+  street?: string;
+  postalCode?: string;
+  city?: string;
+  country?: string;
+  phone?: string;
+  fax?: string;
+  email?: string;
+}
+
+export interface LufaCopyRecipient extends LufaPartyAddress {
+  id?: string;
+  label?: string;
+}
+
+export interface LufaResultLabel {
+  code: string;
+  name?: string;
+  value: string;
+}
+
+export interface LufaResultParameter {
+  code: string;
+  name?: string;
+  method?: string;
+  result?: string;
+  unit?: string;
+  external?: boolean;
+}
+
+export interface LufaResultProbe {
+  pnr?: string;
+  sampleNumber?: string;
+  description?: string;
+  foreignId?: string;
+  piafKennung?: string;
+  bagNumber?: string;
+  receivedAt?: string;
+  startedAt?: string;
+  completedAt?: string;
+  materialCode?: string;
+  materialName?: string;
+  matchedFieldKey?: string;
+  matchedFieldName?: string;
+  matchedBarcode?: string;
+  labels: LufaResultLabel[];
+  parameters: LufaResultParameter[];
+}
+
+export interface LufaResultOrder {
+  orderNumber?: string;
+  action?: string;
+  client?: LufaPartyAddress;
+  scope?: string;
+  subject?: string;
+  receivedAt?: string;
+  reportedAt?: string;
+  sampling?: {
+    sampler?: string;
+    location?: string;
+    sampledAt?: string;
+  };
+  probes: LufaResultProbe[];
+}
+
+export interface LufaResultImport {
+  importedAt: string;
+  fileName?: string;
+  exportDate?: string;
+  exportFileName?: string;
+  orderCount: number;
+  probeCount: number;
+  unmatchedProbeCount?: number;
+  orders: LufaResultOrder[];
 }
 
 export interface LufaImportConfig {
@@ -67,10 +147,28 @@ export interface LufaImportConfig {
   auftraggeberAdrnr?: string;
   kostentraegerAdrnr?: string;
   durchschriftenempfaengerAdrnr?: string;
+  auftraggeber?: LufaPartyAddress;
+  kostentraeger?: LufaPartyAddress;
+  durchschriftenempfaenger?: LufaCopyRecipient[];
   defaultKennzeichnung?: Record<string, string>;
+  defaultKennzeichnungKurz?: Record<string, string>;
   zusatzpruefparameter?: string[];
   nminLayers?: LufaImportNminLayer[];
   dateFormatHint?: 'YYYYMMDD_HH24MISS' | 'DDMMYYYY_HHMMSS';
+  actionCode?: string;
+}
+
+export interface PbsConfig {
+  profile: PbsProfile;
+  customerNumberAgrolab?: string;
+  billingCustomerNumber?: string;
+  distributor?: string;
+  nminType?: string;
+  pn030?: string;
+  pn060?: string;
+  pn090?: string;
+  pn0x?: string;
+  anzahlPnStellen?: string;
 }
 
 export interface SamplingCellMetadata {
@@ -88,6 +186,15 @@ export interface OrderFieldExportMapping {
   sampleDisplayName?: string;
   sourceBaseId: string;
   sourceBaseName: string;
+}
+
+export interface OrderSourceFieldImportMeta {
+  fileName?: string;
+  sourceType?: 'shapefile' | 'drawn' | 'xml';
+  rawProperties?: Record<string, string>;
+  joinKeys?: string[];
+  landUseCode?: string;
+  landUseLabel?: string;
 }
 
 export interface OrderDraft {
@@ -151,8 +258,11 @@ export interface OrderDraft {
     sampleCount?: string;
   };
   agrolabMetadataEnabled?: boolean;
+  pbsConfigEnabled?: boolean;
   lufaImportEnabled?: boolean;
   lufaImport?: LufaImportConfig;
+  pbsConfig?: PbsConfig;
+  lufaResults?: LufaResultImport;
   gridSizeHa?: 3 | 5;
   samplingRequirements?: SamplingRequirements;
   sourceFields?: Array<{
@@ -163,6 +273,7 @@ export interface OrderDraft {
     labAttributes?: Record<string, string>;
     samplingCell?: SamplingCellMetadata;
     exportMapping?: OrderFieldExportMapping;
+    importMeta?: OrderSourceFieldImportMeta;
   }>;
   fields?: Array<{
     fieldId: string;
@@ -184,11 +295,16 @@ export interface OrderDraft {
     };
     labAttributes?: Record<string, string>;
     barcode?: string;
+    barcodes?: string[];
     sampleCount?: number;
     notSampleable?: boolean;
     note?: string;
     samplingCell?: SamplingCellMetadata;
     exportMapping?: OrderFieldExportMapping;
+  }>;
+  fieldBarcodeAssignments?: Record<string, {
+    barcode?: string;
+    barcodes?: string[];
   }>;
   parameters?: {
     landUseType?: string;

@@ -31,19 +31,61 @@ const germanyTilesPath = path.resolve(__dirname, "public/tiles/germany");
 const germanyTilesSourceAvailable = fs.existsSync(germanyTilesPath) && fs.existsSync(path.join(germanyTilesPath, "metadata.json"));
 const germanyPmtilesPath = path.resolve(__dirname, "public/tiles/germany.pmtiles");
 const germanyPmtilesSourceAvailable = fs.existsSync(germanyPmtilesPath);
+const apacheHtaccessPath = path.resolve(__dirname, "public/.htaccess");
 
 console.log(germanyPmtilesSourceAvailable ? "🇩🇪 Germany PMTiles available" : "🌐 Germany PMTiles not found");
 console.log(germanyTilesSourceAvailable ? "🇩🇪 Germany raster tiles available" : "🌐 Germany raster tiles not found (will use online tiles)");
 
+const isRecoverableDistCleanupError = (error: unknown): error is NodeJS.ErrnoException => {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const code = "code" in error ? String((error as NodeJS.ErrnoException).code || "") : "";
+  return code === "EBUSY" || code === "EPERM" || code === "ENOTEMPTY";
+};
+
+const clearDirectoryContents = (directoryPath: string) => {
+  if (!fs.existsSync(directoryPath)) {
+    return;
+  }
+
+  for (const entry of fs.readdirSync(directoryPath)) {
+    const entryPath = path.join(directoryPath, entry);
+    try {
+      fs.rmSync(entryPath, {
+        recursive: true,
+        force: true,
+        maxRetries: 8,
+        retryDelay: 150,
+      });
+    } catch (error) {
+      if (isRecoverableDistCleanupError(error)) {
+        console.warn(`⚠️ Skipping locked build artifact: ${entryPath}`);
+        continue;
+      }
+
+      throw error;
+    }
+  }
+};
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const appTarget = env.VITE_APP_TARGET || "web";
+  const modeAppTarget = mode === "tablet" ? "tablet" : mode === "web" ? "web" : null;
+  const envAppTarget = env.VITE_APP_TARGET === "tablet" ? "tablet" : env.VITE_APP_TARGET === "web" ? "web" : null;
+  const appTarget = modeAppTarget || envAppTarget || "web";
   const htmlInput = appTarget === "tablet" ? "index.tablet.html" : "index.html";
   const isDev = mode === "development";
   const bundleOfflineTiles = command !== "build" || env.VITE_BUNDLE_OFFLINE_TILES === "true";
   const germanyTilesAvailable = bundleOfflineTiles && germanyTilesSourceAvailable;
   const germanyPmtilesAvailable = bundleOfflineTiles && germanyPmtilesSourceAvailable;
+  const outDir = path.resolve(__dirname, "dist");
+
+  if (modeAppTarget && envAppTarget && envAppTarget !== modeAppTarget) {
+    console.log(`ℹ️ Ignoring inherited VITE_APP_TARGET=${envAppTarget} for mode ${mode}`);
+  }
 
   console.log(`🧭 App target: ${appTarget}`);
   if (command === "build" && !bundleOfflineTiles) {
@@ -184,13 +226,36 @@ export default defineConfig(({ mode, command }) => {
       },
     },
     {
+      name: "prepare-build-output",
+      buildStart() {
+        if (command !== "build") {
+          return;
+        }
+
+        fs.mkdirSync(outDir, { recursive: true });
+        clearDirectoryContents(outDir);
+      },
+    },
+    {
+      name: "copy-apache-htaccess",
+      closeBundle() {
+        if (command !== "build" || !fs.existsSync(apacheHtaccessPath)) {
+          return;
+        }
+
+        const distHtaccessPath = path.join(outDir, ".htaccess");
+        fs.copyFileSync(apacheHtaccessPath, distHtaccessPath);
+        console.log("🔒 Copied .htaccess to dist");
+      },
+    },
+    {
       name: "exclude-bundled-offline-tiles",
       closeBundle() {
         if (command !== "build" || bundleOfflineTiles) {
           return;
         }
 
-        const distTilesPath = path.resolve(__dirname, "dist/tiles");
+        const distTilesPath = path.join(outDir, "tiles");
         if (fs.existsSync(distTilesPath)) {
           fs.rmSync(distTilesPath, { recursive: true, force: true });
           console.log("🧹 Removed offline tiles from dist");
@@ -212,6 +277,7 @@ export default defineConfig(({ mode, command }) => {
     __APP_TARGET__: JSON.stringify(appTarget),
   },
   build: {
+    emptyOutDir: false,
     // Enable code splitting and chunking
     rollupOptions: {
       input: path.resolve(__dirname, htmlInput),
@@ -225,8 +291,7 @@ export default defineConfig(({ mode, command }) => {
           firebase: ["firebase/app", "firebase/auth", "firebase/firestore"],
         },
         // Better chunk naming for caching
-        chunkFileNames: (chunkInfo) => {
-          const facadeModuleId = chunkInfo.facadeModuleId ? chunkInfo.facadeModuleId.split("/").pop() : "chunk";
+        chunkFileNames: (_chunkInfo) => {
           return `assets/js/[name]-[hash].js`;
         },
         entryFileNames: "assets/js/[name]-[hash].js",

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useDarkMode } from '../../hooks/useDarkMode';
 import { useLanguage } from '../../hooks/useLanguage';
@@ -68,23 +68,9 @@ export default function GPSDeviceManager({ onDeviceConnected, onDeviceDisconnect
   const hasSerialScan = !isIOS && backendDeviceApiEnabled;
   const hasAnyScanOption = hasBluetoothScan || hasWifiScan || hasSerialScan;
 
-  useEffect(() => {
-    // Only load devices after auth is ready and user is logged in
-    if (!authLoading && user) {
-      loadSavedDevices();
-    } else if (!authLoading && !user) {
-      // User not logged in - use local storage only
-      setLoading(false);
-      loadDevicesFromLocalStorage();
-    }
-    
-    // Load paired Bluetooth devices on Android
-    loadPairedBluetoothDevices();
-  }, [authLoading, user]);
-
   const STORAGE_KEY = 'gps_devices_local';
 
-  const loadDevicesFromLocalStorage = () => {
+  const loadDevicesFromLocalStorage = useCallback(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
@@ -100,17 +86,17 @@ export default function GPSDeviceManager({ onDeviceConnected, onDeviceDisconnect
     } catch (error) {
       console.error('Failed to load devices from local storage:', error);
     }
-  };
+  }, [backendDeviceApiEnabled]);
 
-  const saveDevicesToLocalStorage = (devices: GpsDevice[]) => {
+  const saveDevicesToLocalStorage = useCallback((devices: GpsDevice[]) => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(devices));
     } catch (error) {
       console.error('Failed to save devices to local storage:', error);
     }
-  };
+  }, []);
 
-  const loadSavedDevices = async () => {
+  const loadSavedDevices = useCallback(async () => {
     try {
       setLoading(true);
       let devices = await gpsAPI.getDevices();
@@ -144,9 +130,9 @@ export default function GPSDeviceManager({ onDeviceConnected, onDeviceDisconnect
     } finally {
       setLoading(false);
     }
-  };
+  }, [backendDeviceApiEnabled, loadDevicesFromLocalStorage, saveDevicesToLocalStorage, t]);
 
-  const loadPairedBluetoothDevices = async () => {
+  const loadPairedBluetoothDevices = useCallback(async () => {
     // Only available on Android Capacitor app
     if (!isCapacitorApp()) {
       console.log('⚠️ Not running on Android - auto-detect not available (web mode)');
@@ -192,7 +178,21 @@ export default function GPSDeviceManager({ onDeviceConnected, onDeviceDisconnect
     } finally {
       setLoadingPaired(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    // Only load devices after auth is ready and user is logged in
+    if (!authLoading && user) {
+      void loadSavedDevices();
+    } else if (!authLoading && !user) {
+      // User not logged in - use local storage only
+      setLoading(false);
+      loadDevicesFromLocalStorage();
+    }
+    
+    // Load paired Bluetooth devices on Android
+    void loadPairedBluetoothDevices();
+  }, [authLoading, user, loadSavedDevices, loadDevicesFromLocalStorage, loadPairedBluetoothDevices]);
 
   const handleScan = async (type: 'bluetooth' | 'wifi' | 'serial') => {
     setScanning(true);
@@ -346,20 +346,6 @@ export default function GPSDeviceManager({ onDeviceConnected, onDeviceDisconnect
     }
     
     try {
-      const payload = isScanned ? {
-        address: device.address,
-        connection_type: device.connection_type,
-        device_type: 'connection_type' in device && device.connection_type === 'wifi' && (device as any).manufacturer === 'Emlid' 
-          ? 'reach_rs3' 
-          : 'generic',
-      } : {
-        device_id: 'id' in device ? (device as any).id : undefined,
-        address: device.address,
-        connection_type: device.connection_type,
-        device_type: 'device_type' in device ? (device as any).device_type : 'generic',
-        config: 'config' in device ? (device as any).config : undefined,
-      };
-
       // const response = await api.post('/api/gps-devices/devices/connect', payload);
       
       // Mock connection for standalone mode

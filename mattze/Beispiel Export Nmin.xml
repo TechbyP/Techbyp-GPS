@@ -1,0 +1,1476 @@
+<?xml version="1.0" encoding="ISO-8859-15"?>
+<Export Exportdatum="11072025_112701" Exportdatei="FM-XML_11072025_112701_25-A-011457.xml">
+  <Auftrag anr="25-A-011457">
+    <Auftragsnummer>25-A-011457</Auftragsnummer>
+    <Aktion/>
+    <Auftraggeber adrnr="100000" ansprechNr="35">
+      <AdrNr>100000/35</AdrNr>
+      <Name>LUFA Nordrhein-Westfalen</Name>
+      <Strasse>Nevinghoff 40</Strasse>
+      <PLZ>48147</PLZ>
+      <Ort>Münster</Ort>
+      <Land>DE</Land>
+    </Auftraggeber>
+    <Pruefbereich>Boden</Pruefbereich>
+    <Pruefgegenstand>Nmin</Pruefgegenstand>
+    <Auftragseingang>11072025_110654</Auftragseingang>
+    <Berichtsdatum>11072025_112654</Berichtsdatum>
+    <Probenahme>
+      <Probenehmer/>
+      <Probenahmeort/>
+      <Probenahmedatum/>
+    </Probenahme>
+    <Probe pnr="25-P-405305">
+      <Probenummer>25-P-405305</Probenummer>
+      <Bezeichnung/>
+      <Fremdkennung>318178001000024016</Fremdkennung>
+      <Probeneingang>11072025_110654</Probeneingang>
+      <Pruefbeginn>11072025_110654</Pruefbeginn>
+      <Pruefende>11072025_112009</Pruefende>
+      <Eingangstemperatur/>
+      <Aufbewahrungstemperatur/>
+      <Material>
+        <Kennung>000038</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+      </Material>
+      <Kennzeichnung knr="Gruppennummer">
+        <Kennung>Gruppennummer</Kennung>
+        <Bezeichnung>Gruppennummer</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Feldbezeichnung">
+        <Kennung>Feldbezeichnung</Kennung>
+        <Bezeichnung>Feldbezeichnung</Bezeichnung>
+        <Wert>Testserie 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Ort">
+        <Kennung>Ort</Kennung>
+        <Bezeichnung>Ort</Bezeichnung>
+        <Wert>Testhausen</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Serie">
+        <Kennung>Serie</Kennung>
+        <Bezeichnung>Serie</Bezeichnung>
+        <Wert>Kontrolle</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Termin">
+        <Kennung>Termin</Kennung>
+        <Bezeichnung>Termin</Bezeichnung>
+        <Wert>Testtermin 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nr">
+        <Kennung>Nr</Kennung>
+        <Bezeichnung>Nr</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Wdh">
+        <Kennung>Wdh</Kennung>
+        <Bezeichnung>Wdh</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Kürzel">
+        <Kennung>Kürzel</Kennung>
+        <Bezeichnung>Kürzel</Bezeichnung>
+        <Wert>1/*</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Gruppenart">
+        <Kennung>Gruppenart</Kennung>
+        <Bezeichnung>Gruppenart</Bezeichnung>
+        <Wert>A</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichttiefe [cm]">
+        <Kennung>Schichttiefe [cm]</Kennung>
+        <Bezeichnung>Schichttiefe [cm]</Bezeichnung>
+        <Wert>0-30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichtdicke [cm]">
+        <Kennung>Schichtdicke [cm]</Kennung>
+        <Bezeichnung>Schichtdicke [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht von [cm]">
+        <Kennung>Schicht von [cm]</Kennung>
+        <Bezeichnung>Schicht von [cm]</Bezeichnung>
+        <Wert>0</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht bis [cm]">
+        <Kennung>Schicht bis [cm]</Kennung>
+        <Bezeichnung>Schicht bis [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="PIAFKennung">
+        <Kennung>PIAFKennung</Kennung>
+        <Bezeichnung>PIAFKennung</Bezeichnung>
+        <Wert>3181780010000249</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Objekt">
+        <Kennung>Objekt</Kennung>
+        <Bezeichnung>Objekt</Bezeichnung>
+        <Wert>BO</Wert>
+      </Kennzeichnung>
+      <Pruefparameter untersuchung="000096">
+        <Kennung>000096</Kennung>
+        <Bezeichnung>Rohdichte</Bezeichnung>
+        <Methode>Nmin Berechnungsdaten</Methode>
+        <Ergebnis1>1.4</Ergebnis1>
+        <Einheit1>kg/l</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000093">
+        <Kennung>000093</Kennung>
+        <Bezeichnung>Ammonium Stickstoff (NH4-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>1</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000227">
+        <Kennung>000227</Kennung>
+        <Bezeichnung>Nitrat Stickstoff (NO3-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>8</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001818">
+        <Kennung>001818</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>9</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+    </Probe>
+    <Probe pnr="25-P-405306">
+      <Probenummer>25-P-405306</Probenummer>
+      <Bezeichnung/>
+      <Fremdkennung>318178001000024023</Fremdkennung>
+      <Probeneingang>11072025_110654</Probeneingang>
+      <Pruefbeginn>11072025_110654</Pruefbeginn>
+      <Pruefende>11072025_112107</Pruefende>
+      <Eingangstemperatur/>
+      <Aufbewahrungstemperatur/>
+      <Material>
+        <Kennung>000038</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+      </Material>
+      <Kennzeichnung knr="Gruppennummer">
+        <Kennung>Gruppennummer</Kennung>
+        <Bezeichnung>Gruppennummer</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Feldbezeichnung">
+        <Kennung>Feldbezeichnung</Kennung>
+        <Bezeichnung>Feldbezeichnung</Bezeichnung>
+        <Wert>Testserie 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Ort">
+        <Kennung>Ort</Kennung>
+        <Bezeichnung>Ort</Bezeichnung>
+        <Wert>Testhausen</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Serie">
+        <Kennung>Serie</Kennung>
+        <Bezeichnung>Serie</Bezeichnung>
+        <Wert>Kontrolle</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Termin">
+        <Kennung>Termin</Kennung>
+        <Bezeichnung>Termin</Bezeichnung>
+        <Wert>Testtermin 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nr">
+        <Kennung>Nr</Kennung>
+        <Bezeichnung>Nr</Bezeichnung>
+        <Wert>2</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Wdh">
+        <Kennung>Wdh</Kennung>
+        <Bezeichnung>Wdh</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Kürzel">
+        <Kennung>Kürzel</Kennung>
+        <Bezeichnung>Kürzel</Bezeichnung>
+        <Wert>1/*</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Gruppenart">
+        <Kennung>Gruppenart</Kennung>
+        <Bezeichnung>Gruppenart</Bezeichnung>
+        <Wert>A</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichttiefe [cm]">
+        <Kennung>Schichttiefe [cm]</Kennung>
+        <Bezeichnung>Schichttiefe [cm]</Bezeichnung>
+        <Wert>30-60</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichtdicke [cm]">
+        <Kennung>Schichtdicke [cm]</Kennung>
+        <Bezeichnung>Schichtdicke [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht von [cm]">
+        <Kennung>Schicht von [cm]</Kennung>
+        <Bezeichnung>Schicht von [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht bis [cm]">
+        <Kennung>Schicht bis [cm]</Kennung>
+        <Bezeichnung>Schicht bis [cm]</Bezeichnung>
+        <Wert>60</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="PIAFKennung">
+        <Kennung>PIAFKennung</Kennung>
+        <Bezeichnung>PIAFKennung</Bezeichnung>
+        <Wert>3181780010000249</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Objekt">
+        <Kennung>Objekt</Kennung>
+        <Bezeichnung>Objekt</Bezeichnung>
+        <Wert>BO</Wert>
+      </Kennzeichnung>
+      <Pruefparameter untersuchung="000096">
+        <Kennung>000096</Kennung>
+        <Bezeichnung>Rohdichte</Bezeichnung>
+        <Methode>Nmin Berechnungsdaten</Methode>
+        <Ergebnis1>1.5</Ergebnis1>
+        <Einheit1>kg/l</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000093">
+        <Kennung>000093</Kennung>
+        <Bezeichnung>Ammonium Stickstoff (NH4-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>3</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000227">
+        <Kennung>000227</Kennung>
+        <Bezeichnung>Nitrat Stickstoff (NO3-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>10</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001818">
+        <Kennung>001818</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>13</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+    </Probe>
+    <Probe pnr="25-P-405307">
+      <Probenummer>25-P-405307</Probenummer>
+      <Bezeichnung/>
+      <Fremdkennung>318178001000024030</Fremdkennung>
+      <Probeneingang>11072025_110654</Probeneingang>
+      <Pruefbeginn>11072025_110654</Pruefbeginn>
+      <Pruefende>11072025_112109</Pruefende>
+      <Eingangstemperatur/>
+      <Aufbewahrungstemperatur/>
+      <Material>
+        <Kennung>000038</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+      </Material>
+      <Kennzeichnung knr="Gruppennummer">
+        <Kennung>Gruppennummer</Kennung>
+        <Bezeichnung>Gruppennummer</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Feldbezeichnung">
+        <Kennung>Feldbezeichnung</Kennung>
+        <Bezeichnung>Feldbezeichnung</Bezeichnung>
+        <Wert>Testserie 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Ort">
+        <Kennung>Ort</Kennung>
+        <Bezeichnung>Ort</Bezeichnung>
+        <Wert>Testhausen</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Serie">
+        <Kennung>Serie</Kennung>
+        <Bezeichnung>Serie</Bezeichnung>
+        <Wert>Kontrolle</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Termin">
+        <Kennung>Termin</Kennung>
+        <Bezeichnung>Termin</Bezeichnung>
+        <Wert>Testtermin 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nr">
+        <Kennung>Nr</Kennung>
+        <Bezeichnung>Nr</Bezeichnung>
+        <Wert>3</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Wdh">
+        <Kennung>Wdh</Kennung>
+        <Bezeichnung>Wdh</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Kürzel">
+        <Kennung>Kürzel</Kennung>
+        <Bezeichnung>Kürzel</Bezeichnung>
+        <Wert>1/*</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Gruppenart">
+        <Kennung>Gruppenart</Kennung>
+        <Bezeichnung>Gruppenart</Bezeichnung>
+        <Wert>A</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichttiefe [cm]">
+        <Kennung>Schichttiefe [cm]</Kennung>
+        <Bezeichnung>Schichttiefe [cm]</Bezeichnung>
+        <Wert>60-90</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichtdicke [cm]">
+        <Kennung>Schichtdicke [cm]</Kennung>
+        <Bezeichnung>Schichtdicke [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht von [cm]">
+        <Kennung>Schicht von [cm]</Kennung>
+        <Bezeichnung>Schicht von [cm]</Bezeichnung>
+        <Wert>60</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht bis [cm]">
+        <Kennung>Schicht bis [cm]</Kennung>
+        <Bezeichnung>Schicht bis [cm]</Bezeichnung>
+        <Wert>90</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="PIAFKennung">
+        <Kennung>PIAFKennung</Kennung>
+        <Bezeichnung>PIAFKennung</Bezeichnung>
+        <Wert>3181780010000249</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Objekt">
+        <Kennung>Objekt</Kennung>
+        <Bezeichnung>Objekt</Bezeichnung>
+        <Wert>BO</Wert>
+      </Kennzeichnung>
+      <Pruefparameter untersuchung="000096">
+        <Kennung>000096</Kennung>
+        <Bezeichnung>Rohdichte</Bezeichnung>
+        <Methode>Nmin Berechnungsdaten</Methode>
+        <Ergebnis1>1.6</Ergebnis1>
+        <Einheit1>kg/l</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000093">
+        <Kennung>000093</Kennung>
+        <Bezeichnung>Ammonium Stickstoff (NH4-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>2</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000227">
+        <Kennung>000227</Kennung>
+        <Bezeichnung>Nitrat Stickstoff (NO3-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>16</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001818">
+        <Kennung>001818</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>18</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+    </Probe>
+    <Probe pnr="25-P-405308">
+      <Probenummer>25-P-405308</Probenummer>
+      <Bezeichnung/>
+      <Fremdkennung>318178002000024013</Fremdkennung>
+      <Probeneingang>11072025_110654</Probeneingang>
+      <Pruefbeginn>11072025_110654</Pruefbeginn>
+      <Pruefende>11072025_112207</Pruefende>
+      <Eingangstemperatur/>
+      <Aufbewahrungstemperatur/>
+      <Material>
+        <Kennung>000038</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+      </Material>
+      <Kennzeichnung knr="Gruppennummer">
+        <Kennung>Gruppennummer</Kennung>
+        <Bezeichnung>Gruppennummer</Bezeichnung>
+        <Wert>2</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Feldbezeichnung">
+        <Kennung>Feldbezeichnung</Kennung>
+        <Bezeichnung>Feldbezeichnung</Bezeichnung>
+        <Wert>Testserie 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Ort">
+        <Kennung>Ort</Kennung>
+        <Bezeichnung>Ort</Bezeichnung>
+        <Wert>Testhausen</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Serie">
+        <Kennung>Serie</Kennung>
+        <Bezeichnung>Serie</Bezeichnung>
+        <Wert>Hacken EC 6</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Termin">
+        <Kennung>Termin</Kennung>
+        <Bezeichnung>Termin</Bezeichnung>
+        <Wert>Testtermin 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nr">
+        <Kennung>Nr</Kennung>
+        <Bezeichnung>Nr</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Wdh">
+        <Kennung>Wdh</Kennung>
+        <Bezeichnung>Wdh</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Kürzel">
+        <Kennung>Kürzel</Kennung>
+        <Bezeichnung>Kürzel</Bezeichnung>
+        <Wert>2/*</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Gruppenart">
+        <Kennung>Gruppenart</Kennung>
+        <Bezeichnung>Gruppenart</Bezeichnung>
+        <Wert>A</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichttiefe [cm]">
+        <Kennung>Schichttiefe [cm]</Kennung>
+        <Bezeichnung>Schichttiefe [cm]</Bezeichnung>
+        <Wert>0-30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichtdicke [cm]">
+        <Kennung>Schichtdicke [cm]</Kennung>
+        <Bezeichnung>Schichtdicke [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht von [cm]">
+        <Kennung>Schicht von [cm]</Kennung>
+        <Bezeichnung>Schicht von [cm]</Bezeichnung>
+        <Wert>0</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht bis [cm]">
+        <Kennung>Schicht bis [cm]</Kennung>
+        <Bezeichnung>Schicht bis [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="PIAFKennung">
+        <Kennung>PIAFKennung</Kennung>
+        <Bezeichnung>PIAFKennung</Bezeichnung>
+        <Wert>3181780020000246</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Objekt">
+        <Kennung>Objekt</Kennung>
+        <Bezeichnung>Objekt</Bezeichnung>
+        <Wert>BO</Wert>
+      </Kennzeichnung>
+      <Pruefparameter untersuchung="000096">
+        <Kennung>000096</Kennung>
+        <Bezeichnung>Rohdichte</Bezeichnung>
+        <Methode>Nmin Berechnungsdaten</Methode>
+        <Ergebnis1>1.4</Ergebnis1>
+        <Einheit1>kg/l</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000093">
+        <Kennung>000093</Kennung>
+        <Bezeichnung>Ammonium Stickstoff (NH4-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>36</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000227">
+        <Kennung>000227</Kennung>
+        <Bezeichnung>Nitrat Stickstoff (NO3-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>18</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001818">
+        <Kennung>001818</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>54</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+    </Probe>
+    <Probe pnr="25-P-405309">
+      <Probenummer>25-P-405309</Probenummer>
+      <Bezeichnung/>
+      <Fremdkennung>318178002000024020</Fremdkennung>
+      <Probeneingang>11072025_110654</Probeneingang>
+      <Pruefbeginn>11072025_110654</Pruefbeginn>
+      <Pruefende>11072025_112209</Pruefende>
+      <Eingangstemperatur/>
+      <Aufbewahrungstemperatur/>
+      <Material>
+        <Kennung>000038</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+      </Material>
+      <Kennzeichnung knr="Gruppennummer">
+        <Kennung>Gruppennummer</Kennung>
+        <Bezeichnung>Gruppennummer</Bezeichnung>
+        <Wert>2</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Feldbezeichnung">
+        <Kennung>Feldbezeichnung</Kennung>
+        <Bezeichnung>Feldbezeichnung</Bezeichnung>
+        <Wert>Testserie 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Ort">
+        <Kennung>Ort</Kennung>
+        <Bezeichnung>Ort</Bezeichnung>
+        <Wert>Testhausen</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Serie">
+        <Kennung>Serie</Kennung>
+        <Bezeichnung>Serie</Bezeichnung>
+        <Wert>Hacken EC 6</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Termin">
+        <Kennung>Termin</Kennung>
+        <Bezeichnung>Termin</Bezeichnung>
+        <Wert>Testtermin 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nr">
+        <Kennung>Nr</Kennung>
+        <Bezeichnung>Nr</Bezeichnung>
+        <Wert>2</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Wdh">
+        <Kennung>Wdh</Kennung>
+        <Bezeichnung>Wdh</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Kürzel">
+        <Kennung>Kürzel</Kennung>
+        <Bezeichnung>Kürzel</Bezeichnung>
+        <Wert>2/*</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Gruppenart">
+        <Kennung>Gruppenart</Kennung>
+        <Bezeichnung>Gruppenart</Bezeichnung>
+        <Wert>A</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichttiefe [cm]">
+        <Kennung>Schichttiefe [cm]</Kennung>
+        <Bezeichnung>Schichttiefe [cm]</Bezeichnung>
+        <Wert>30-60</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichtdicke [cm]">
+        <Kennung>Schichtdicke [cm]</Kennung>
+        <Bezeichnung>Schichtdicke [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht von [cm]">
+        <Kennung>Schicht von [cm]</Kennung>
+        <Bezeichnung>Schicht von [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht bis [cm]">
+        <Kennung>Schicht bis [cm]</Kennung>
+        <Bezeichnung>Schicht bis [cm]</Bezeichnung>
+        <Wert>60</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="PIAFKennung">
+        <Kennung>PIAFKennung</Kennung>
+        <Bezeichnung>PIAFKennung</Bezeichnung>
+        <Wert>3181780020000246</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Objekt">
+        <Kennung>Objekt</Kennung>
+        <Bezeichnung>Objekt</Bezeichnung>
+        <Wert>BO</Wert>
+      </Kennzeichnung>
+      <Pruefparameter untersuchung="000096">
+        <Kennung>000096</Kennung>
+        <Bezeichnung>Rohdichte</Bezeichnung>
+        <Methode>Nmin Berechnungsdaten</Methode>
+        <Ergebnis1>1.5</Ergebnis1>
+        <Einheit1>kg/l</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000093">
+        <Kennung>000093</Kennung>
+        <Bezeichnung>Ammonium Stickstoff (NH4-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>7</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000227">
+        <Kennung>000227</Kennung>
+        <Bezeichnung>Nitrat Stickstoff (NO3-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>3</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001818">
+        <Kennung>001818</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>10</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+    </Probe>
+    <Probe pnr="25-P-405310">
+      <Probenummer>25-P-405310</Probenummer>
+      <Bezeichnung/>
+      <Fremdkennung>318178002000024037</Fremdkennung>
+      <Probeneingang>11072025_110654</Probeneingang>
+      <Pruefbeginn>11072025_110654</Pruefbeginn>
+      <Pruefende>11072025_112310</Pruefende>
+      <Eingangstemperatur/>
+      <Aufbewahrungstemperatur/>
+      <Material>
+        <Kennung>000038</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+      </Material>
+      <Kennzeichnung knr="Gruppennummer">
+        <Kennung>Gruppennummer</Kennung>
+        <Bezeichnung>Gruppennummer</Bezeichnung>
+        <Wert>2</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Feldbezeichnung">
+        <Kennung>Feldbezeichnung</Kennung>
+        <Bezeichnung>Feldbezeichnung</Bezeichnung>
+        <Wert>Testserie 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Ort">
+        <Kennung>Ort</Kennung>
+        <Bezeichnung>Ort</Bezeichnung>
+        <Wert>Testhausen</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Serie">
+        <Kennung>Serie</Kennung>
+        <Bezeichnung>Serie</Bezeichnung>
+        <Wert>Hacken EC 6</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Termin">
+        <Kennung>Termin</Kennung>
+        <Bezeichnung>Termin</Bezeichnung>
+        <Wert>Testtermin 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nr">
+        <Kennung>Nr</Kennung>
+        <Bezeichnung>Nr</Bezeichnung>
+        <Wert>3</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Wdh">
+        <Kennung>Wdh</Kennung>
+        <Bezeichnung>Wdh</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Kürzel">
+        <Kennung>Kürzel</Kennung>
+        <Bezeichnung>Kürzel</Bezeichnung>
+        <Wert>2/*</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Gruppenart">
+        <Kennung>Gruppenart</Kennung>
+        <Bezeichnung>Gruppenart</Bezeichnung>
+        <Wert>A</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichttiefe [cm]">
+        <Kennung>Schichttiefe [cm]</Kennung>
+        <Bezeichnung>Schichttiefe [cm]</Bezeichnung>
+        <Wert>60-90</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichtdicke [cm]">
+        <Kennung>Schichtdicke [cm]</Kennung>
+        <Bezeichnung>Schichtdicke [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht von [cm]">
+        <Kennung>Schicht von [cm]</Kennung>
+        <Bezeichnung>Schicht von [cm]</Bezeichnung>
+        <Wert>60</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht bis [cm]">
+        <Kennung>Schicht bis [cm]</Kennung>
+        <Bezeichnung>Schicht bis [cm]</Bezeichnung>
+        <Wert>90</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="PIAFKennung">
+        <Kennung>PIAFKennung</Kennung>
+        <Bezeichnung>PIAFKennung</Bezeichnung>
+        <Wert>3181780020000246</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Objekt">
+        <Kennung>Objekt</Kennung>
+        <Bezeichnung>Objekt</Bezeichnung>
+        <Wert>BO</Wert>
+      </Kennzeichnung>
+      <Pruefparameter untersuchung="000096">
+        <Kennung>000096</Kennung>
+        <Bezeichnung>Rohdichte</Bezeichnung>
+        <Methode>Nmin Berechnungsdaten</Methode>
+        <Ergebnis1>1.6</Ergebnis1>
+        <Einheit1>kg/l</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000093">
+        <Kennung>000093</Kennung>
+        <Bezeichnung>Ammonium Stickstoff (NH4-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>61</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000227">
+        <Kennung>000227</Kennung>
+        <Bezeichnung>Nitrat Stickstoff (NO3-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>82</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001818">
+        <Kennung>001818</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>143</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+    </Probe>
+    <Probe pnr="25-P-405311">
+      <Probenummer>25-P-405311</Probenummer>
+      <Bezeichnung/>
+      <Fremdkennung>318178003000024010</Fremdkennung>
+      <Probeneingang>11072025_110654</Probeneingang>
+      <Pruefbeginn>11072025_110654</Pruefbeginn>
+      <Pruefende>11072025_112413</Pruefende>
+      <Eingangstemperatur/>
+      <Aufbewahrungstemperatur/>
+      <Material>
+        <Kennung>000038</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+      </Material>
+      <Kennzeichnung knr="Gruppennummer">
+        <Kennung>Gruppennummer</Kennung>
+        <Bezeichnung>Gruppennummer</Bezeichnung>
+        <Wert>3</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Feldbezeichnung">
+        <Kennung>Feldbezeichnung</Kennung>
+        <Bezeichnung>Feldbezeichnung</Bezeichnung>
+        <Wert>Testserie 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Ort">
+        <Kennung>Ort</Kennung>
+        <Bezeichnung>Ort</Bezeichnung>
+        <Wert>Testhausen</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Serie">
+        <Kennung>Serie</Kennung>
+        <Bezeichnung>Serie</Bezeichnung>
+        <Wert>Gülle früh</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Termin">
+        <Kennung>Termin</Kennung>
+        <Bezeichnung>Termin</Bezeichnung>
+        <Wert>Testtermin 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nr">
+        <Kennung>Nr</Kennung>
+        <Bezeichnung>Nr</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Wdh">
+        <Kennung>Wdh</Kennung>
+        <Bezeichnung>Wdh</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Kürzel">
+        <Kennung>Kürzel</Kennung>
+        <Bezeichnung>Kürzel</Bezeichnung>
+        <Wert>3/*</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Gruppenart">
+        <Kennung>Gruppenart</Kennung>
+        <Bezeichnung>Gruppenart</Bezeichnung>
+        <Wert>A</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichttiefe [cm]">
+        <Kennung>Schichttiefe [cm]</Kennung>
+        <Bezeichnung>Schichttiefe [cm]</Bezeichnung>
+        <Wert>0-30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichtdicke [cm]">
+        <Kennung>Schichtdicke [cm]</Kennung>
+        <Bezeichnung>Schichtdicke [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht von [cm]">
+        <Kennung>Schicht von [cm]</Kennung>
+        <Bezeichnung>Schicht von [cm]</Bezeichnung>
+        <Wert>0</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht bis [cm]">
+        <Kennung>Schicht bis [cm]</Kennung>
+        <Bezeichnung>Schicht bis [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="PIAFKennung">
+        <Kennung>PIAFKennung</Kennung>
+        <Bezeichnung>PIAFKennung</Bezeichnung>
+        <Wert>3181780030000243</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Objekt">
+        <Kennung>Objekt</Kennung>
+        <Bezeichnung>Objekt</Bezeichnung>
+        <Wert>BO</Wert>
+      </Kennzeichnung>
+      <Pruefparameter untersuchung="000096">
+        <Kennung>000096</Kennung>
+        <Bezeichnung>Rohdichte</Bezeichnung>
+        <Methode>Nmin Berechnungsdaten</Methode>
+        <Ergebnis1>1.4</Ergebnis1>
+        <Einheit1>kg/l</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000093">
+        <Kennung>000093</Kennung>
+        <Bezeichnung>Ammonium Stickstoff (NH4-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>36</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000227">
+        <Kennung>000227</Kennung>
+        <Bezeichnung>Nitrat Stickstoff (NO3-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>9</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001818">
+        <Kennung>001818</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>45</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+    </Probe>
+    <Probe pnr="25-P-405312">
+      <Probenummer>25-P-405312</Probenummer>
+      <Bezeichnung/>
+      <Fremdkennung>318178003000024027</Fremdkennung>
+      <Probeneingang>11072025_110654</Probeneingang>
+      <Pruefbeginn>11072025_110654</Pruefbeginn>
+      <Pruefende>11072025_112411</Pruefende>
+      <Eingangstemperatur/>
+      <Aufbewahrungstemperatur/>
+      <Material>
+        <Kennung>000038</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+      </Material>
+      <Kennzeichnung knr="Gruppennummer">
+        <Kennung>Gruppennummer</Kennung>
+        <Bezeichnung>Gruppennummer</Bezeichnung>
+        <Wert>3</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Feldbezeichnung">
+        <Kennung>Feldbezeichnung</Kennung>
+        <Bezeichnung>Feldbezeichnung</Bezeichnung>
+        <Wert>Testserie 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Ort">
+        <Kennung>Ort</Kennung>
+        <Bezeichnung>Ort</Bezeichnung>
+        <Wert>Testhausen</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Serie">
+        <Kennung>Serie</Kennung>
+        <Bezeichnung>Serie</Bezeichnung>
+        <Wert>Gülle früh</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Termin">
+        <Kennung>Termin</Kennung>
+        <Bezeichnung>Termin</Bezeichnung>
+        <Wert>Testtermin 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nr">
+        <Kennung>Nr</Kennung>
+        <Bezeichnung>Nr</Bezeichnung>
+        <Wert>2</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Wdh">
+        <Kennung>Wdh</Kennung>
+        <Bezeichnung>Wdh</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Kürzel">
+        <Kennung>Kürzel</Kennung>
+        <Bezeichnung>Kürzel</Bezeichnung>
+        <Wert>3/*</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Gruppenart">
+        <Kennung>Gruppenart</Kennung>
+        <Bezeichnung>Gruppenart</Bezeichnung>
+        <Wert>A</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichttiefe [cm]">
+        <Kennung>Schichttiefe [cm]</Kennung>
+        <Bezeichnung>Schichttiefe [cm]</Bezeichnung>
+        <Wert>30-60</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichtdicke [cm]">
+        <Kennung>Schichtdicke [cm]</Kennung>
+        <Bezeichnung>Schichtdicke [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht von [cm]">
+        <Kennung>Schicht von [cm]</Kennung>
+        <Bezeichnung>Schicht von [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht bis [cm]">
+        <Kennung>Schicht bis [cm]</Kennung>
+        <Bezeichnung>Schicht bis [cm]</Bezeichnung>
+        <Wert>60</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="PIAFKennung">
+        <Kennung>PIAFKennung</Kennung>
+        <Bezeichnung>PIAFKennung</Bezeichnung>
+        <Wert>3181780030000243</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Objekt">
+        <Kennung>Objekt</Kennung>
+        <Bezeichnung>Objekt</Bezeichnung>
+        <Wert>BO</Wert>
+      </Kennzeichnung>
+      <Pruefparameter untersuchung="000096">
+        <Kennung>000096</Kennung>
+        <Bezeichnung>Rohdichte</Bezeichnung>
+        <Methode>Nmin Berechnungsdaten</Methode>
+        <Ergebnis1>1.5</Ergebnis1>
+        <Einheit1>kg/l</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000093">
+        <Kennung>000093</Kennung>
+        <Bezeichnung>Ammonium Stickstoff (NH4-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>2</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000227">
+        <Kennung>000227</Kennung>
+        <Bezeichnung>Nitrat Stickstoff (NO3-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>6</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001818">
+        <Kennung>001818</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>8</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+    </Probe>
+    <Probe pnr="25-P-405313">
+      <Probenummer>25-P-405313</Probenummer>
+      <Bezeichnung/>
+      <Fremdkennung>318178003000024034</Fremdkennung>
+      <Probeneingang>11072025_110654</Probeneingang>
+      <Pruefbeginn>11072025_110654</Pruefbeginn>
+      <Pruefende>11072025_112509</Pruefende>
+      <Eingangstemperatur/>
+      <Aufbewahrungstemperatur/>
+      <Material>
+        <Kennung>000038</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+      </Material>
+      <Kennzeichnung knr="Gruppennummer">
+        <Kennung>Gruppennummer</Kennung>
+        <Bezeichnung>Gruppennummer</Bezeichnung>
+        <Wert>3</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Feldbezeichnung">
+        <Kennung>Feldbezeichnung</Kennung>
+        <Bezeichnung>Feldbezeichnung</Bezeichnung>
+        <Wert>Testserie 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Ort">
+        <Kennung>Ort</Kennung>
+        <Bezeichnung>Ort</Bezeichnung>
+        <Wert>Testhausen</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Serie">
+        <Kennung>Serie</Kennung>
+        <Bezeichnung>Serie</Bezeichnung>
+        <Wert>Gülle früh</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Termin">
+        <Kennung>Termin</Kennung>
+        <Bezeichnung>Termin</Bezeichnung>
+        <Wert>Testtermin 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nr">
+        <Kennung>Nr</Kennung>
+        <Bezeichnung>Nr</Bezeichnung>
+        <Wert>3</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Wdh">
+        <Kennung>Wdh</Kennung>
+        <Bezeichnung>Wdh</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Kürzel">
+        <Kennung>Kürzel</Kennung>
+        <Bezeichnung>Kürzel</Bezeichnung>
+        <Wert>3/*</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Gruppenart">
+        <Kennung>Gruppenart</Kennung>
+        <Bezeichnung>Gruppenart</Bezeichnung>
+        <Wert>A</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichttiefe [cm]">
+        <Kennung>Schichttiefe [cm]</Kennung>
+        <Bezeichnung>Schichttiefe [cm]</Bezeichnung>
+        <Wert>60-90</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichtdicke [cm]">
+        <Kennung>Schichtdicke [cm]</Kennung>
+        <Bezeichnung>Schichtdicke [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht von [cm]">
+        <Kennung>Schicht von [cm]</Kennung>
+        <Bezeichnung>Schicht von [cm]</Bezeichnung>
+        <Wert>60</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht bis [cm]">
+        <Kennung>Schicht bis [cm]</Kennung>
+        <Bezeichnung>Schicht bis [cm]</Bezeichnung>
+        <Wert>90</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="PIAFKennung">
+        <Kennung>PIAFKennung</Kennung>
+        <Bezeichnung>PIAFKennung</Bezeichnung>
+        <Wert>3181780030000243</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Objekt">
+        <Kennung>Objekt</Kennung>
+        <Bezeichnung>Objekt</Bezeichnung>
+        <Wert>BO</Wert>
+      </Kennzeichnung>
+      <Pruefparameter untersuchung="000096">
+        <Kennung>000096</Kennung>
+        <Bezeichnung>Rohdichte</Bezeichnung>
+        <Methode>Nmin Berechnungsdaten</Methode>
+        <Ergebnis1>1.6</Ergebnis1>
+        <Einheit1>kg/l</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000093">
+        <Kennung>000093</Kennung>
+        <Bezeichnung>Ammonium Stickstoff (NH4-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>3</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000227">
+        <Kennung>000227</Kennung>
+        <Bezeichnung>Nitrat Stickstoff (NO3-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>7</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001818">
+        <Kennung>001818</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>10</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+    </Probe>
+    <Probe pnr="25-P-405314">
+      <Probenummer>25-P-405314</Probenummer>
+      <Bezeichnung/>
+      <Fremdkennung>318178004000024017</Fremdkennung>
+      <Probeneingang>11072025_110654</Probeneingang>
+      <Pruefbeginn>11072025_110654</Pruefbeginn>
+      <Pruefende>11072025_112507</Pruefende>
+      <Eingangstemperatur/>
+      <Aufbewahrungstemperatur/>
+      <Material>
+        <Kennung>000038</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+      </Material>
+      <Kennzeichnung knr="Gruppennummer">
+        <Kennung>Gruppennummer</Kennung>
+        <Bezeichnung>Gruppennummer</Bezeichnung>
+        <Wert>4</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Feldbezeichnung">
+        <Kennung>Feldbezeichnung</Kennung>
+        <Bezeichnung>Feldbezeichnung</Bezeichnung>
+        <Wert>Testserie 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Ort">
+        <Kennung>Ort</Kennung>
+        <Bezeichnung>Ort</Bezeichnung>
+        <Wert>Testhausen</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Serie">
+        <Kennung>Serie</Kennung>
+        <Bezeichnung>Serie</Bezeichnung>
+        <Wert>Gülle früh+Kieserit</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Termin">
+        <Kennung>Termin</Kennung>
+        <Bezeichnung>Termin</Bezeichnung>
+        <Wert>Testtermin 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nr">
+        <Kennung>Nr</Kennung>
+        <Bezeichnung>Nr</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Wdh">
+        <Kennung>Wdh</Kennung>
+        <Bezeichnung>Wdh</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Kürzel">
+        <Kennung>Kürzel</Kennung>
+        <Bezeichnung>Kürzel</Bezeichnung>
+        <Wert>4/*</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Gruppenart">
+        <Kennung>Gruppenart</Kennung>
+        <Bezeichnung>Gruppenart</Bezeichnung>
+        <Wert>A</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichttiefe [cm]">
+        <Kennung>Schichttiefe [cm]</Kennung>
+        <Bezeichnung>Schichttiefe [cm]</Bezeichnung>
+        <Wert>0-30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichtdicke [cm]">
+        <Kennung>Schichtdicke [cm]</Kennung>
+        <Bezeichnung>Schichtdicke [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht von [cm]">
+        <Kennung>Schicht von [cm]</Kennung>
+        <Bezeichnung>Schicht von [cm]</Bezeichnung>
+        <Wert>0</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht bis [cm]">
+        <Kennung>Schicht bis [cm]</Kennung>
+        <Bezeichnung>Schicht bis [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="PIAFKennung">
+        <Kennung>PIAFKennung</Kennung>
+        <Bezeichnung>PIAFKennung</Bezeichnung>
+        <Wert>3181780040000240</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Objekt">
+        <Kennung>Objekt</Kennung>
+        <Bezeichnung>Objekt</Bezeichnung>
+        <Wert>BO</Wert>
+      </Kennzeichnung>
+      <Pruefparameter untersuchung="000096">
+        <Kennung>000096</Kennung>
+        <Bezeichnung>Rohdichte</Bezeichnung>
+        <Methode>Nmin Berechnungsdaten</Methode>
+        <Ergebnis1>1.4</Ergebnis1>
+        <Einheit1>kg/l</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000093">
+        <Kennung>000093</Kennung>
+        <Bezeichnung>Ammonium Stickstoff (NH4-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>4</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000227">
+        <Kennung>000227</Kennung>
+        <Bezeichnung>Nitrat Stickstoff (NO3-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>10</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001818">
+        <Kennung>001818</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>14</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+    </Probe>
+    <Probe pnr="25-P-405315">
+      <Probenummer>25-P-405315</Probenummer>
+      <Bezeichnung/>
+      <Fremdkennung>318178004000024024</Fremdkennung>
+      <Probeneingang>11072025_110654</Probeneingang>
+      <Pruefbeginn>11072025_110654</Pruefbeginn>
+      <Pruefende>11072025_112608</Pruefende>
+      <Eingangstemperatur/>
+      <Aufbewahrungstemperatur/>
+      <Material>
+        <Kennung>000038</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+      </Material>
+      <Kennzeichnung knr="Gruppennummer">
+        <Kennung>Gruppennummer</Kennung>
+        <Bezeichnung>Gruppennummer</Bezeichnung>
+        <Wert>4</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Feldbezeichnung">
+        <Kennung>Feldbezeichnung</Kennung>
+        <Bezeichnung>Feldbezeichnung</Bezeichnung>
+        <Wert>Testserie 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Ort">
+        <Kennung>Ort</Kennung>
+        <Bezeichnung>Ort</Bezeichnung>
+        <Wert>Testhausen</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Serie">
+        <Kennung>Serie</Kennung>
+        <Bezeichnung>Serie</Bezeichnung>
+        <Wert>Gülle früh+Kieserit</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Termin">
+        <Kennung>Termin</Kennung>
+        <Bezeichnung>Termin</Bezeichnung>
+        <Wert>Testtermin 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nr">
+        <Kennung>Nr</Kennung>
+        <Bezeichnung>Nr</Bezeichnung>
+        <Wert>2</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Wdh">
+        <Kennung>Wdh</Kennung>
+        <Bezeichnung>Wdh</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Kürzel">
+        <Kennung>Kürzel</Kennung>
+        <Bezeichnung>Kürzel</Bezeichnung>
+        <Wert>4/*</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Gruppenart">
+        <Kennung>Gruppenart</Kennung>
+        <Bezeichnung>Gruppenart</Bezeichnung>
+        <Wert>A</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichttiefe [cm]">
+        <Kennung>Schichttiefe [cm]</Kennung>
+        <Bezeichnung>Schichttiefe [cm]</Bezeichnung>
+        <Wert>30-60</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichtdicke [cm]">
+        <Kennung>Schichtdicke [cm]</Kennung>
+        <Bezeichnung>Schichtdicke [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht von [cm]">
+        <Kennung>Schicht von [cm]</Kennung>
+        <Bezeichnung>Schicht von [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht bis [cm]">
+        <Kennung>Schicht bis [cm]</Kennung>
+        <Bezeichnung>Schicht bis [cm]</Bezeichnung>
+        <Wert>60</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="PIAFKennung">
+        <Kennung>PIAFKennung</Kennung>
+        <Bezeichnung>PIAFKennung</Bezeichnung>
+        <Wert>3181780040000240</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Objekt">
+        <Kennung>Objekt</Kennung>
+        <Bezeichnung>Objekt</Bezeichnung>
+        <Wert>BO</Wert>
+      </Kennzeichnung>
+      <Pruefparameter untersuchung="000096">
+        <Kennung>000096</Kennung>
+        <Bezeichnung>Rohdichte</Bezeichnung>
+        <Methode>Nmin Berechnungsdaten</Methode>
+        <Ergebnis1>1.5</Ergebnis1>
+        <Einheit1>kg/l</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000093">
+        <Kennung>000093</Kennung>
+        <Bezeichnung>Ammonium Stickstoff (NH4-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>5</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000227">
+        <Kennung>000227</Kennung>
+        <Bezeichnung>Nitrat Stickstoff (NO3-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>7</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001818">
+        <Kennung>001818</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>12</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+    </Probe>
+    <Probe pnr="25-P-405316">
+      <Probenummer>25-P-405316</Probenummer>
+      <Bezeichnung/>
+      <Fremdkennung>318178004000024031</Fremdkennung>
+      <Probeneingang>11072025_110654</Probeneingang>
+      <Pruefbeginn>11072025_110654</Pruefbeginn>
+      <Pruefende>11072025_112610</Pruefende>
+      <Eingangstemperatur/>
+      <Aufbewahrungstemperatur/>
+      <Material>
+        <Kennung>000038</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+      </Material>
+      <Kennzeichnung knr="Gruppennummer">
+        <Kennung>Gruppennummer</Kennung>
+        <Bezeichnung>Gruppennummer</Bezeichnung>
+        <Wert>4</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Feldbezeichnung">
+        <Kennung>Feldbezeichnung</Kennung>
+        <Bezeichnung>Feldbezeichnung</Bezeichnung>
+        <Wert>Testserie 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Ort">
+        <Kennung>Ort</Kennung>
+        <Bezeichnung>Ort</Bezeichnung>
+        <Wert>Testhausen</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Serie">
+        <Kennung>Serie</Kennung>
+        <Bezeichnung>Serie</Bezeichnung>
+        <Wert>Gülle früh+Kieserit</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Termin">
+        <Kennung>Termin</Kennung>
+        <Bezeichnung>Termin</Bezeichnung>
+        <Wert>Testtermin 1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nr">
+        <Kennung>Nr</Kennung>
+        <Bezeichnung>Nr</Bezeichnung>
+        <Wert>3</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Wdh">
+        <Kennung>Wdh</Kennung>
+        <Bezeichnung>Wdh</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Kürzel">
+        <Kennung>Kürzel</Kennung>
+        <Bezeichnung>Kürzel</Bezeichnung>
+        <Wert>4/*</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Gruppenart">
+        <Kennung>Gruppenart</Kennung>
+        <Bezeichnung>Gruppenart</Bezeichnung>
+        <Wert>A</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichttiefe [cm]">
+        <Kennung>Schichttiefe [cm]</Kennung>
+        <Bezeichnung>Schichttiefe [cm]</Bezeichnung>
+        <Wert>60-90</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schichtdicke [cm]">
+        <Kennung>Schichtdicke [cm]</Kennung>
+        <Bezeichnung>Schichtdicke [cm]</Bezeichnung>
+        <Wert>30</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht von [cm]">
+        <Kennung>Schicht von [cm]</Kennung>
+        <Bezeichnung>Schicht von [cm]</Bezeichnung>
+        <Wert>60</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht bis [cm]">
+        <Kennung>Schicht bis [cm]</Kennung>
+        <Bezeichnung>Schicht bis [cm]</Bezeichnung>
+        <Wert>90</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="PIAFKennung">
+        <Kennung>PIAFKennung</Kennung>
+        <Bezeichnung>PIAFKennung</Bezeichnung>
+        <Wert>3181780040000240</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Objekt">
+        <Kennung>Objekt</Kennung>
+        <Bezeichnung>Objekt</Bezeichnung>
+        <Wert>BO</Wert>
+      </Kennzeichnung>
+      <Pruefparameter untersuchung="000096">
+        <Kennung>000096</Kennung>
+        <Bezeichnung>Rohdichte</Bezeichnung>
+        <Methode>Nmin Berechnungsdaten</Methode>
+        <Ergebnis1>1.6</Ergebnis1>
+        <Einheit1>kg/l</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000093">
+        <Kennung>000093</Kennung>
+        <Bezeichnung>Ammonium Stickstoff (NH4-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>93</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000227">
+        <Kennung>000227</Kennung>
+        <Bezeichnung>Nitrat Stickstoff (NO3-N)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>72</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001818">
+        <Kennung>001818</Kennung>
+        <Bezeichnung>Nmin</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.1.4.1</Methode>
+        <Ergebnis1>165</Ergebnis1>
+        <Einheit1>kg/ha</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+    </Probe>
+  </Auftrag>
+</Export>

@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { GpsPositionUpdate } from '../types';
 import { isCapacitorApp } from '../utils/platform';
-import { BleClient, BleDevice, numbersToDataView, numberToUUID } from '@capacitor-community/bluetooth-le';
+import { BleClient, BleDevice } from '@capacitor-community/bluetooth-le';
 import { useNativeGpsManager } from './useNativeGpsManager';
 import { GpsConnectionValidator, NotificationDebouncer } from '../utils/gpsValidation';
 
@@ -48,7 +48,6 @@ export function useBluetoothGPS(options: BluetoothGPSOptions = {}) {
   const notificationDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const validatorRef = useRef<GpsConnectionValidator>(new GpsConnectionValidator());
   const notificationDebouncerRef = useRef<NotificationDebouncer>(new NotificationDebouncer());
-  const isNative = isCapacitorApp();
   
   // Use native GPS manager when available (Android app)
   const nativeGpsManager = useNativeGpsManager({
@@ -222,33 +221,6 @@ export function useBluetoothGPS(options: BluetoothGPSOptions = {}) {
   }, []);
 
   /**
-   * Handle incoming data from Bluetooth characteristic
-   */
-  const handleCharacteristicValue = useCallback((event: any) => {
-    const value = event.target.value;
-    const decoder = new TextDecoder('utf-8');
-    const chunk = decoder.decode(value);
-    
-    // Add to buffer
-    nmeaBufferRef.current += chunk;
-
-    // Process complete NMEA sentences (end with \r\n)
-    const lines = nmeaBufferRef.current.split('\n');
-    nmeaBufferRef.current = lines.pop() || ''; // Keep incomplete line in buffer
-
-    for (const line of lines) {
-      const sentence = line.trim();
-      if (sentence.startsWith('$')) {
-        const position = parseNMEA(sentence);
-        if (position) {
-          setLastPosition(position);
-          options.onPosition?.(position);
-        }
-      }
-    }
-  }, [parseNMEA, options]);
-
-  /**
    * Check if Bluetooth LE is available on this device
    */
   const checkBluetoothSupport = useCallback(async (): Promise<boolean> => {
@@ -282,6 +254,7 @@ export function useBluetoothGPS(options: BluetoothGPSOptions = {}) {
    * @param deviceAddress - Device ID from previous scan
    * @param deviceName - Device name for display
    */
+  /* eslint-disable react-hooks/exhaustive-deps */
   const connect = useCallback(async (deviceAddress?: string, deviceName?: string): Promise<BleDevice | null> => {
     setIsConnecting(true);
 
@@ -504,6 +477,7 @@ export function useBluetoothGPS(options: BluetoothGPSOptions = {}) {
       return null;
     }
   }, [parseNMEA, options]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   /**
    * Disconnect from GPS device
@@ -575,7 +549,7 @@ export function useBluetoothGPS(options: BluetoothGPSOptions = {}) {
       console.log('🔍 Scanning for Bluetooth GPS devices...');
       
       // Request devices with GPS-related services
-      const devices = await BleClient.requestLEScan({
+      await BleClient.requestLEScan({
         services: NMEA_SERVICE_UUIDS,
         allowDuplicates: false,
       }, (result) => {

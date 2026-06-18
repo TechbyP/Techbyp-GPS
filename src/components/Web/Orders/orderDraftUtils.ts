@@ -1,10 +1,12 @@
 import type {
-  LufaImportConfig,
   LufaStandarduntersuchungsumfang,
   OrderDraft,
   OrderLabProvider,
+  PbsProfile,
   OrderServiceType
 } from '../../../types';
+import { createDefaultLufaImport } from '../../../utils/lufa';
+import { createDefaultPbsConfig } from '../../../utils/pbs';
 
 const defaultConsent = {
   dataProtectionAccepted: false,
@@ -23,28 +25,8 @@ export const getDefaultCrops = () => Array.from({ length: 7 }, () => ({ crop: ''
 type CreateOrderDraftOptions = {
   labProvider?: OrderLabProvider;
   lufaScope?: LufaStandarduntersuchungsumfang;
+  pbsProfile?: PbsProfile;
 };
-
-const createDefaultLufaImport = (
-  scope: LufaStandarduntersuchungsumfang = 'DED'
-): LufaImportConfig => ({
-  standarduntersuchungsumfang: scope,
-  kundeAdrnr: '',
-  auftraggeberAdrnr: '',
-  kostentraegerAdrnr: '',
-  durchschriftenempfaengerAdrnr: '',
-  defaultKennzeichnung: {
-    Objekt: 'BO',
-    Gruppenart: scope === 'Nmin' ? 'A' : 'AB'
-  },
-  zusatzpruefparameter: [],
-  nminLayers: [
-    { depthFromCm: 0, depthToCm: 30 },
-    { depthFromCm: 30, depthToCm: 60 },
-    { depthFromCm: 60, depthToCm: 90 }
-  ],
-  dateFormatHint: 'YYYYMMDD_HH24MISS'
-});
 
 export const createOrderDraft = (
   ownerId: string,
@@ -53,9 +35,12 @@ export const createOrderDraft = (
   options?: CreateOrderDraftOptions
 ): OrderDraft => {
   const now = new Date().toISOString();
-  const todayIso = new Date().toISOString().slice(0, 10);
   const labProvider = options?.labProvider || 'agrolab';
   const lufaScope = options?.lufaScope || 'DED';
+  const pbsProfile = options?.pbsProfile || 'boden';
+  const defaultServices: OrderServiceType[] = labProvider === 'pbs'
+    ? (pbsProfile === 'boden' ? ['basic_nutrients'] : ['nmin'])
+    : ['basic_nutrients'];
 
   return {
     id,
@@ -66,7 +51,10 @@ export const createOrderDraft = (
     ownerId,
     labProvider,
     consent: { ...defaultConsent },
-    serviceSelection: { ...defaultServiceSelection },
+    serviceSelection: {
+      ...defaultServiceSelection,
+      services: defaultServices,
+    },
     cropYield: { crops: getDefaultCrops() },
     labMeta: {
       assignedLab: '',
@@ -74,7 +62,7 @@ export const createOrderDraft = (
       sampleTypeBns: '',
       version: '',
       trackingNumber: '',
-      orderDate: todayIso,
+      orderDate: '',
       storageName: '',
       internalInfo: '',
       projectId: '',
@@ -92,7 +80,7 @@ export const createOrderDraft = (
       advertiserNo: '',
       samplingOrderNo: '',
       priceList: '',
-      samplingDate: todayIso,
+      samplingDate: '',
       pricePerSample: '',
       pricePerHa: '',
       totalAreaHa: '',
@@ -101,7 +89,9 @@ export const createOrderDraft = (
       km: '',
       sampleCount: ''
     },
+    pbsConfigEnabled: false,
     lufaImport: createDefaultLufaImport(lufaScope),
+    pbsConfig: labProvider === 'pbs' ? createDefaultPbsConfig(pbsProfile) : undefined,
     gridSizeHa: 5,
     sourceFields: [],
     fields: []

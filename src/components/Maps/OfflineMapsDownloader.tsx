@@ -7,13 +7,11 @@ import { useState, useEffect } from 'react';
 import { Download, Trash2, CheckCircle, AlertCircle, HardDrive } from 'lucide-react';
 import { tileDownloader, DownloadProgress } from '../../services/offlineTileDownloader';
 import { useDarkMode } from '../../hooks/useDarkMode';
-import { useLanguage } from '../../hooks/useLanguage';
 import Button from '../ui/Button';
 import { Capacitor } from '@capacitor/core';
 
 export default function OfflineMapsDownloader() {
   const [isDarkMode] = useDarkMode();
-  const { t } = useLanguage();
   const [isDownloading, setIsDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState<string>('');

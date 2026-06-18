@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GpsPosition } from '../types';
-import { isCapacitor, watchPosition, clearWatch, requestLocationPermission } from '../utils/geolocation';
+import { isCapacitor, watchPosition, clearWatch, requestLocationPermission, getCurrentPosition } from '../utils/geolocation';
 import { isWindowsTablet } from '../utils/deviceDetection';
 
 export type GpsSourcePreference = 'internal' | 'external';
@@ -13,6 +13,17 @@ const normalizeTimestamp = (rawTimestamp: number | undefined): number => {
 
   return rawTimestamp < 1_000_000_000_000 ? rawTimestamp * 1000 : rawTimestamp;
 };
+
+const toGpsPosition = (position: GeolocationPosition): GpsPosition => ({
+  latitude: position.coords.latitude,
+  longitude: position.coords.longitude,
+  accuracy: position.coords.accuracy,
+  altitude: position.coords.altitude || undefined,
+  heading: position.coords.heading ?? undefined,
+  speed: position.coords.speed ?? undefined,
+  timestamp: position.timestamp,
+  ...(((position as any).mocked === true) ? { mocked: true as any } : {}),
+});
 
 export function useHybridPosition(
   externalGpsSource?: GpsPosition | null,
@@ -39,6 +50,7 @@ export function useHybridPosition(
   const [positionSource, setPositionSource] = useState<'internal' | 'external' | 'none'>('none');
   const [isExternalFallback, setIsExternalFallback] = useState(false);
   const [externalDataAgeMs, setExternalDataAgeMs] = useState<number | null>(null);
+  const [refreshToken, setRefreshToken] = useState(0);
 
   useEffect(() => {
     if (position) {
@@ -224,6 +236,41 @@ export function useHybridPosition(
 
       if (cancelled) return;
 
+      const primeImmediatePosition = async () => {
+        try {
+          const quickNetworkPosition = await getCurrentPosition({
+            enableHighAccuracy: false,
+            timeout: 8000,
+            maximumAge: 5000,
+          });
+
+          if (!cancelled && Number.isFinite(quickNetworkPosition.coords.accuracy)) {
+            setNetworkPosition(toGpsPosition(quickNetworkPosition));
+            setPermissionGranted(true);
+          }
+        } catch {
+          // Best-effort warm start only.
+        }
+
+        try {
+          const quickGpsPosition = await getCurrentPosition({
+            enableHighAccuracy: true,
+            timeout: 12000,
+            maximumAge: 0,
+          });
+
+          if (!cancelled) {
+            setGpsPosition(toGpsPosition(quickGpsPosition));
+            setPermissionGranted(true);
+            setError(null);
+          }
+        } catch {
+          // Fall back to the live watch if the immediate fix is still not available.
+        }
+      };
+
+      void primeImmediatePosition();
+
       gpsId = await watchPosition(
         (pos) => {
           const newAccuracy = pos.coords.accuracy;
@@ -284,13 +331,8 @@ export function useHybridPosition(
           }
 
           setGpsPosition({
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
+            ...toGpsPosition(pos),
             accuracy: newAccuracy,
-            altitude: pos.coords.altitude || undefined,
-            heading: pos.coords.heading ?? undefined,
-            speed: pos.coords.speed ?? undefined,
-            timestamp: pos.timestamp,
           });
           setPermissionGranted(true);
           setError(null);
@@ -308,22 +350,14 @@ export function useHybridPosition(
           enableHighAccuracy: true,
           timeout: 60000, // 60 seconds for external GPS initialization
           maximumAge: 0,
-          minimumUpdateInterval: 1000,
+          minimumUpdateInterval: 250,
         }
       );
 
       netId = await watchPosition(
         (pos) => {
           if (pos.coords.accuracy <= 100) {
-            setNetworkPosition({
-              latitude: pos.coords.latitude,
-              longitude: pos.coords.longitude,
-              accuracy: pos.coords.accuracy,
-              altitude: pos.coords.altitude || undefined,
-              heading: pos.coords.heading ?? undefined,
-              speed: pos.coords.speed ?? undefined,
-              timestamp: pos.timestamp,
-            });
+            setNetworkPosition(toGpsPosition(pos));
             setPermissionGranted(true);
           }
         },
@@ -334,7 +368,7 @@ export function useHybridPosition(
           enableHighAccuracy: false,
           timeout: 30000, // 30 seconds for network
           maximumAge: 5000,
-          minimumUpdateInterval: 2000,
+          minimumUpdateInterval: 1000,
         }
       );
     };
@@ -351,7 +385,13 @@ export function useHybridPosition(
         void clearWatch(netId);
       }
     };
-  }, [isIOS]);
+  }, [isIOS, refreshToken]);
+
+  const refreshPosition = useCallback(() => {
+    setError(null);
+    setSelectionTick((tick) => tick + 1);
+    setRefreshToken((token) => token + 1);
+  }, []);
 
   const startTracking = () => {
     setIsTracking(true);
@@ -367,6 +407,7 @@ export function useHybridPosition(
     isTracking,
     startTracking,
     stopTracking,
+    refreshPosition,
     permissionGranted,
     isCapacitor: isCapacitor(),
     isMockLocation,

@@ -6,18 +6,31 @@ import { CheckCircle, Circle, FileText, ShieldCheck, Truck, UserCircle, Upload, 
 import { useAuth } from '../../../context/AuthContext';
 import { useConfirmation } from '../../ui/ConfirmationProvider';
 import {
-  LufaImportConfig,
+  LufaPartyAddress,
   LufaStandarduntersuchungsumfang,
   OrderDraft,
+  PbsProfile,
   OrderServiceType
 } from '../../../types';
 import { generateAgrolabCsv } from '../../../services/labExportAgrolab';
 import { buildLufaImportXml } from '../../../services/labExportLufaXml';
 import { orderExportService } from '../../../services/orderExportService';
 import { orderService } from '../../../services/orderService';
+import { applySourceFieldXmlImport } from '../../../services/sourceFieldXml';
 import { firebaseGPS } from '../../../services/firebaseSync';
 import { userProfileService } from '../../../services/userProfileService';
 import { buildBalancedSamplingCells } from '../../../utils/fieldPartitioning';
+import OrderLegalModal, { type OrderLegalDocumentKey } from './OrderLegalModal';
+import {
+  createEmptyLufaCopyRecipient,
+  createDefaultLufaImport,
+  hasAnyLufaPartyValue,
+  isLufaPartyReady,
+  normalizeLufaAdrnr,
+  normalizeLufaImportConfig,
+} from '../../../utils/lufa';
+import { buildBarcodeFieldPatch, getFieldBarcodeList, setPrimaryBarcodeValue } from '../../../utils/orderBarcodes';
+import { createDefaultPbsConfig, getPbsProfileDefinition, normalizePbsConfig, PBS_NMIN_TYPE_OPTIONS } from '../../../utils/pbs';
 import type { UserProfile } from '../../../services/userProfileService';
 import type { DrawnField } from './types';
 
@@ -37,14 +50,13 @@ const defaultServiceSelection = {
 const defaultCrops = Array.from({ length: 7 }, () => ({ crop: '', yield: '' }));
 
 const createDefaultLabMeta = (): NonNullable<OrderDraft['labMeta']> => {
-  const todayIso = new Date().toISOString().slice(0, 10);
   return {
     assignedLab: '',
     labName: '',
     sampleTypeBns: '',
     version: '',
     trackingNumber: '',
-    orderDate: todayIso,
+    orderDate: '',
     storageName: '',
     internalInfo: '',
     projectId: '',
@@ -60,13 +72,12 @@ const createDefaultLabMeta = (): NonNullable<OrderDraft['labMeta']> => {
 };
 
 const createDefaultSamplingDetails = (): NonNullable<OrderDraft['samplingDetails']> => {
-  const todayIso = new Date().toISOString().slice(0, 10);
   return {
     samplerNo: '',
     advertiserNo: '',
     samplingOrderNo: '',
     priceList: '',
-    samplingDate: todayIso,
+    samplingDate: '',
     pricePerSample: '',
     pricePerHa: '',
     totalAreaHa: '',
@@ -77,90 +88,83 @@ const createDefaultSamplingDetails = (): NonNullable<OrderDraft['samplingDetails
   };
 };
 
-const createDefaultLufaImport = (
-  scope: LufaStandarduntersuchungsumfang = 'DED'
-): LufaImportConfig => ({
-  standarduntersuchungsumfang: scope,
-  kundeAdrnr: '',
-  auftraggeberAdrnr: '',
-  kostentraegerAdrnr: '',
-  durchschriftenempfaengerAdrnr: '',
-  defaultKennzeichnung: {
-    Objekt: 'BO',
-    Gruppenart: scope === 'Nmin' ? 'A' : 'AB'
-  },
-  zusatzpruefparameter: [],
-  nminLayers: [
-    { depthFromCm: 0, depthToCm: 30 },
-    { depthFromCm: 30, depthToCm: 60 },
-    { depthFromCm: 60, depthToCm: 90 }
-  ],
-  dateFormatHint: 'YYYYMMDD_HH24MISS'
-});
-
 const normalizeDraftLabConfig = (value: OrderDraft): OrderDraft => {
   const labProvider = value.labProvider || 'agrolab';
-  const scope = value.lufaImport?.standarduntersuchungsumfang || 'DED';
-  const defaults = createDefaultLufaImport(scope);
   const defaultLabMeta = createDefaultLabMeta();
   const defaultSamplingDetails = createDefaultSamplingDetails();
-  const mergedLufaImport = {
-    ...defaults,
-    ...(value.lufaImport || {}),
-    standarduntersuchungsumfang: scope,
-    nminLayers: value.lufaImport?.nminLayers?.length
-      ? value.lufaImport.nminLayers
-      : defaults.nminLayers
-  };
+  const mergedLufaImport = normalizeLufaImportConfig(value.lufaImport);
+  const mergedPbsConfig = normalizePbsConfig(value.pbsConfig);
   const mergedLabMeta = {
     ...defaultLabMeta,
     ...(value.labMeta || {})
   };
   const mergedSamplingDetails = {
     ...defaultSamplingDetails,
-    ...(value.samplingDetails || {})
+    ...(value.samplingDetails || {}),
+    samplingDate: String(value.samplingDetails?.samplingDate || '').trim()
+      || String(value.labMeta?.version || '').trim()
+      || ''
   };
-  const lufaImportEnabled = typeof value.lufaImportEnabled === 'boolean'
-    ? value.lufaImportEnabled
-    : LUFA_ADRNR_KEYS.some((key) => String(mergedLufaImport[key] || '').trim().length > 0);
+  const lufaImportEnabled = labProvider === 'lufa_nrw'
+    ? true
+    : (
+      typeof value.lufaImportEnabled === 'boolean'
+        ? value.lufaImportEnabled
+        : (
+          Boolean(String(mergedLufaImport.kundeAdrnr || '').trim())
+          || hasAnyLufaPartyValue(mergedLufaImport.auftraggeber)
+          || hasAnyLufaPartyValue(mergedLufaImport.kostentraeger)
+          || Boolean((mergedLufaImport.durchschriftenempfaenger || []).some((entry) => hasAnyLufaPartyValue(entry)))
+        )
+    );
   const agrolabMetadataEnabled = typeof value.agrolabMetadataEnabled === 'boolean'
     ? value.agrolabMetadataEnabled
     : (
-      AGROLAB_REQUIRED_LAB_META_KEYS.some((key) => String(value.labMeta?.[key] || '').trim().length > 0)
-      || AGROLAB_REQUIRED_SAMPLING_KEYS.some((key) => String(value.samplingDetails?.[key] || '').trim().length > 0)
+      AGROLAB_LAB_META_VALUE_KEYS.some((key) => String(value.labMeta?.[key] || '').trim().length > 0)
+      || AGROLAB_LAB_META_BOOLEAN_KEYS.some((key) => Boolean(value.labMeta?.[key]))
+      || AGROLAB_SAMPLING_VALUE_KEYS.some((key) => String(value.samplingDetails?.[key] || '').trim().length > 0)
       || Boolean((value.fields || []).some((field) => (
-        String(field.transportTracking || '').trim().length > 0
-        || String(field.soilType || '').trim().length > 0
-        || String(field.humusClass || '').trim().length > 0
+        AGROLAB_FIELD_META_KEYS.some((key) => String(field[key] || '').trim().length > 0)
       )))
     );
+  const pbsConfigEnabled = typeof value.pbsConfigEnabled === 'boolean'
+    ? value.pbsConfigEnabled
+    : PBS_CONFIG_VALUE_KEYS.some((key) => String(value.pbsConfig?.[key] || '').trim().length > 0);
 
   return {
     ...value,
     labProvider,
-    agrolabMetadataEnabled,
+    agrolabMetadataEnabled: labProvider === 'agrolab' ? agrolabMetadataEnabled : false,
+    pbsConfigEnabled: labProvider === 'pbs' ? pbsConfigEnabled : false,
     lufaImportEnabled,
     labMeta: mergedLabMeta,
     samplingDetails: mergedSamplingDetails,
-    lufaImport: mergedLufaImport
+    lufaImport: mergedLufaImport,
+    pbsConfig: labProvider === 'pbs' ? mergedPbsConfig : value.pbsConfig,
   };
 };
 
-type LufaAdrnrKey = 'kundeAdrnr' | 'auftraggeberAdrnr' | 'kostentraegerAdrnr' | 'durchschriftenempfaengerAdrnr';
+type LufaPartyFieldKey = 'adrnr' | 'name' | 'firstName' | 'street' | 'postalCode' | 'city' | 'country' | 'phone' | 'fax';
 
-const LUFA_ADRNR_KEYS: LufaAdrnrKey[] = [
-  'kundeAdrnr',
-  'auftraggeberAdrnr',
-  'kostentraegerAdrnr',
-  'durchschriftenempfaengerAdrnr'
+const LUFA_PARTY_FIELD_ORDER: LufaPartyFieldKey[] = [
+  'adrnr',
+  'name',
+  'firstName',
+  'street',
+  'postalCode',
+  'city',
+  'country',
+  'phone',
+  'fax'
 ];
 
-const AGROLAB_REQUIRED_LAB_META_KEYS: Array<keyof NonNullable<OrderDraft['labMeta']>> = [
+const AGROLAB_LAB_META_VALUE_KEYS: Array<keyof NonNullable<OrderDraft['labMeta']>> = [
   'assignedLab',
   'labName',
   'sampleTypeBns',
   'version',
   'trackingNumber',
+  'orderDate',
   'storageName',
   'internalInfo',
   'projectId',
@@ -168,11 +172,21 @@ const AGROLAB_REQUIRED_LAB_META_KEYS: Array<keyof NonNullable<OrderDraft['labMet
   'contactEmails'
 ];
 
-const AGROLAB_REQUIRED_SAMPLING_KEYS: Array<keyof NonNullable<OrderDraft['samplingDetails']>> = [
+const AGROLAB_LAB_META_BOOLEAN_KEYS: Array<keyof NonNullable<OrderDraft['labMeta']>> = [
+  'calDl',
+  'notDry',
+  'heavy',
+  'oneOrderPerField',
+  'postReport',
+  'postInvoice'
+];
+
+const AGROLAB_SAMPLING_VALUE_KEYS: Array<keyof NonNullable<OrderDraft['samplingDetails']>> = [
   'samplerNo',
   'advertiserNo',
   'samplingOrderNo',
   'priceList',
+  'samplingDate',
   'pricePerSample',
   'pricePerHa',
   'totalAreaHa',
@@ -182,14 +196,27 @@ const AGROLAB_REQUIRED_SAMPLING_KEYS: Array<keyof NonNullable<OrderDraft['sampli
   'sampleCount'
 ];
 
+type AgrolabFieldMetaKey = 'transportTracking' | 'soilType' | 'humusClass';
+
+const AGROLAB_FIELD_META_KEYS: AgrolabFieldMetaKey[] = [
+  'transportTracking',
+  'soilType',
+  'humusClass'
+];
+
+const PBS_CONFIG_VALUE_KEYS: Array<keyof NonNullable<OrderDraft['pbsConfig']>> = [
+  'customerNumberAgrolab',
+  'billingCustomerNumber',
+  'distributor',
+  'pn030',
+  'pn060',
+  'pn090',
+  'pn0x',
+  'anzahlPnStellen',
+];
+
 // Accept client-provided ADRNR values as-is; only require non-empty values.
 // Normalize backslash to slash to reduce keyboard-related input mistakes.
-
-const normalizeLufaAdrnr = (value: string): string => (
-  value
-    .trim()
-    .replace(/\\/g, '/')
-);
 
 const isValidLufaAdrnr = (value: string | undefined): boolean => (
   normalizeLufaAdrnr(String(value || '')).length > 0
@@ -212,6 +239,88 @@ const normalizeCrops = (crops?: Array<{ crop?: string; yield?: string }>) => (
 const areOrderedValuesEqual = <T,>(left: T[], right: T[]) => (
   left.length === right.length && left.every((value, index) => value === right[index])
 );
+
+const normalizeSelectionKey = (value: unknown) => String(value ?? '').trim().toLowerCase();
+
+const rawPropertyLookupKey = (value: string) => (
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+);
+
+const normalizeImportText = (value: unknown): string => {
+  if (value == null) return '';
+  return String(value).trim();
+};
+
+const normalizeImportJoinKey = (value: unknown): string => (
+  normalizeImportText(value)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '')
+    .toLowerCase()
+);
+
+const normalizeRawProperties = (props: Record<string, unknown> | undefined): Record<string, string> => {
+  if (!props) return {};
+
+  return Object.entries(props).reduce<Record<string, string>>((acc, [key, value]) => {
+    const normalizedValue = normalizeImportText(value);
+    if (normalizedValue.length > 0) {
+      acc[String(key)] = normalizedValue;
+    }
+    return acc;
+  }, {});
+};
+
+const buildSourceFieldJoinKeys = (candidates: unknown[]): string[] => {
+  const keys = new Set<string>();
+  candidates.forEach((candidate) => {
+    const normalized = normalizeImportJoinKey(candidate);
+    if (normalized) {
+      keys.add(normalized);
+    }
+  });
+  return Array.from(keys);
+};
+
+const resolveRawPropertyValue = (
+  props: Record<string, unknown> | undefined,
+  keys: string[],
+): string => {
+  if (!props) return '';
+
+  const entries = Object.entries(props);
+  const requestedKeys = new Set(keys.map(rawPropertyLookupKey));
+  for (const [key, value] of entries) {
+    if (!requestedKeys.has(rawPropertyLookupKey(key))) continue;
+    const normalizedValue = normalizeImportText(value);
+    if (normalizedValue.length > 0) return normalizedValue;
+  }
+
+  return '';
+};
+
+const normalizeLandUseCode = (value: unknown): string => {
+  const normalized = normalizeImportText(value);
+  if (!normalized) return '';
+
+  const upper = normalized.toUpperCase();
+  const compact = upper.replace(/[^A-Z]/g, '');
+
+  if (compact === 'ACKERLAND' || compact === 'ACKER') return 'A';
+  if (compact === 'WEIDELAND' || compact === 'WEIDE' || compact === 'PASTURE') return 'W';
+  if (compact === 'GRUNLAND' || compact === 'GRUENLAND' || compact === 'GRASSLAND' || compact === 'LAWN') return 'R';
+  if (compact === 'OBSTBAU' || compact === 'OBST') return 'O';
+  if (compact === 'SPARGEL') return 'S';
+  if (compact === 'GEHOLZE' || compact === 'GEHOELZE' || compact === 'WOOD' || compact === 'WOODYPLANTS') return 'F';
+  if (compact === 'UNTERBODEN' || compact === 'SUBSOIL') return 'U';
+  if (compact === 'SONSTIGES' || compact === 'OTHER') return 'X';
+  if (/^[AWROSFUX]$/.test(upper)) return upper;
+
+  return upper;
+};
 
 const buildSamplingCellSourceFields = (
   sourceFields: NonNullable<OrderDraft['sourceFields']>,
@@ -254,6 +363,16 @@ const buildSamplingCellSourceFields = (
       return;
     }
 
+    if (balancedCells.length === 1) {
+      const [singleCell] = balancedCells;
+      nextFields.push({
+        ...source,
+        areaHa: Number(singleCell.areaHa.toFixed(2)),
+        geometry: singleCell.geometry,
+      });
+      return;
+    }
+
     balancedCells.forEach((cell) => {
       if (remainingCellBudget <= 0) return;
       remainingCellBudget -= 1;
@@ -283,6 +402,18 @@ const buildSamplingCellSourceFields = (
           sourceBaseId: parentBaseId,
           sourceBaseName: parentBaseName,
         },
+        importMeta: source.importMeta
+          ? {
+            ...source.importMeta,
+            joinKeys: buildSourceFieldJoinKeys([
+              ...(source.importMeta.joinKeys || []),
+              cellBaseId,
+              cellBaseName,
+              parentBaseId,
+              parentBaseName,
+            ]),
+          }
+          : undefined,
       });
     });
   });
@@ -306,6 +437,7 @@ const newDraft = (ownerId: string, id: string, name?: string): OrderDraft => {
     labMeta: createDefaultLabMeta(),
     samplingDetails: createDefaultSamplingDetails(),
     agrolabMetadataEnabled: false,
+    pbsConfigEnabled: false,
     lufaImportEnabled: false,
     lufaImport: createDefaultLufaImport('DED'),
     gridSizeHa: 5,
@@ -419,12 +551,13 @@ export default function OrderWizard({
   onStep3CollapsedChange,
   onStepChange,
   mapSelectionEvent,
+  selectedFieldTargets,
   onFieldFocusRequest,
   onClearSelectionRequest,
   onFieldSummariesChange,
   draftId,
   draftName,
-  deferProjectCreation,
+  deferProjectCreation: _deferProjectCreation,
   ownerIdOverride,
   onSubmitHandlerChange,
   onSubmitStateChange,
@@ -442,6 +575,7 @@ export default function OrderWizard({
   onStep3CollapsedChange?: (collapsed: boolean) => void;
   onStepChange?: (step: number) => void;
   mapSelectionEvent?: { baseId: string; ctrlKey: boolean; timestamp: number } | null;
+  selectedFieldTargets?: string[];
   onFieldFocusRequest?: (baseId: string) => void;
   onClearSelectionRequest?: () => void;
   onFieldSummariesChange?: (summaries: Record<string, { status: 'pending' | 'completed' | 'skipped' | 'mixed'; badges: string[]; services: string[] }>) => void;
@@ -483,6 +617,7 @@ export default function OrderWizard({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isConvertingSamplingCells, setIsConvertingSamplingCells] = useState(false);
   const [showGridPreview, setShowGridPreview] = useState(true);
+  const [openLegalDocument, setOpenLegalDocument] = useState<OrderLegalDocumentKey | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const lastStepReadinessRef = useRef<{
     step1Ready: boolean;
@@ -494,6 +629,10 @@ export default function OrderWizard({
   } | null>(null);
   const lastFieldSummariesSignatureRef = useRef<string>('');
   const lastProcessedMapSelectionTsRef = useRef<number | null>(null);
+  const selectedFieldIdsRef = useRef<string[]>([]);
+  const activeFieldIdRef = useRef<string | null>(null);
+  const applyToAllRef = useRef(true);
+  const selectedFieldTargetsRef = useRef<string[]>([]);
   const onStepChangeRef = useRef(onStepChange);
   const onFieldSummariesChangeRef = useRef(onFieldSummariesChange);
   const onSubmitHandlerChangeRef = useRef(onSubmitHandlerChange);
@@ -509,6 +648,13 @@ export default function OrderWizard({
     onStepReadinessChangeRef.current = onStepReadinessChange;
     onGridPreviewChangeRef.current = onGridPreviewChange;
   }, [onFieldSummariesChange, onGridPreviewChange, onStepChange, onStepReadinessChange, onSubmitHandlerChange, onSubmitStateChange]);
+
+  useEffect(() => {
+    selectedFieldIdsRef.current = selectedFieldIds;
+    activeFieldIdRef.current = activeFieldId;
+    applyToAllRef.current = applyToAll;
+    selectedFieldTargetsRef.current = selectedFieldTargets || [];
+  }, [selectedFieldIds, activeFieldId, applyToAll, selectedFieldTargets]);
 
   const goToStep = (step: number) => {
     setCurrentStep(step);
@@ -554,7 +700,7 @@ export default function OrderWizard({
     }
   ];
 
-  const statusLabel = (status: string) => t(`orders.status.${status}`, { defaultValue: status });
+  const _statusLabel = (status: string) => t(`orders.status.${status}`, { defaultValue: status });
 
   const resolvedDrawnFields = externalDrawnFields || drawnFields;
   const resolvedOwnerId = ownerIdOverride || user?.uid || '';
@@ -626,7 +772,8 @@ export default function OrderWizard({
       geometry: null,
       labAttributes: field.labAttributes,
       samplingCell: field.samplingCell,
-      exportMapping: field.exportMapping
+      exportMapping: field.exportMapping,
+      importMeta: field.importMeta
     }));
     const compactFields = (value.fields || []).map((field) => ({
       fieldId: field.fieldId,
@@ -681,12 +828,15 @@ export default function OrderWizard({
     previousStorageKeyRef.current = storageKey;
   }, [resolvedOwnerId, storageKey, sessionStorageKey]);
 
+  /* eslint-disable react-hooks/exhaustive-deps */
+  // applySourceFields is a hoisted helper below; keeping this effect scoped to field inputs avoids redundant resets.
   useEffect(() => {
     if (!externalDrawnFields) return;
     const baseUploaded = externalSourceFields?.length ? externalSourceFields : uploadedSourceFields;
     applySourceFields(baseUploaded, externalDrawnFields);
   }, [externalDrawnFields, uploadedSourceFields, externalSourceFields]);
 
+  // applySourceFields is a hoisted helper below; keeping this effect scoped to field inputs avoids redundant resets.
   useEffect(() => {
     if (!externalSourceFields) return;
     setUploadedSourceFields(prev => {
@@ -704,6 +854,7 @@ export default function OrderWizard({
     });
     applySourceFields(externalSourceFields, resolvedDrawnFields);
   }, [externalSourceFields, resolvedDrawnFields]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   useEffect(() => {
     if (externalSourceFields) return;
@@ -771,7 +922,7 @@ export default function OrderWizard({
     return () => {
       cancelled = true;
     };
-  }, [draft?.id, resolvedOwnerId, user?.uid, user?.email, t]);
+  }, [draft, draft?.id, resolvedOwnerId, user?.uid, user?.email, t]);
 
   useEffect(() => {
     setUploadedArchives([]);
@@ -844,31 +995,46 @@ export default function OrderWizard({
     && draft.fields.every((field) => String(field.parameters?.landUseType || draft.parameters?.landUseType || '').trim().length > 0)
   );
   const isLufaLab = draft?.labProvider === 'lufa_nrw';
+  const isPbsLab = draft?.labProvider === 'pbs';
+  const isAgrolabLab = draft?.labProvider === 'agrolab';
   const agrolabMetadataEnabled = Boolean(draft?.agrolabMetadataEnabled);
-  const lufaImportEnabled = Boolean(draft?.lufaImportEnabled);
+  const pbsConfigEnabled = Boolean(draft?.pbsConfigEnabled);
+  const lufaImportEnabled = isLufaLab ? true : Boolean(draft?.lufaImportEnabled);
+  const pbsConfig = useMemo(() => normalizePbsConfig(draft?.pbsConfig), [draft?.pbsConfig]);
+  const pbsProfileDefinition = useMemo(() => getPbsProfileDefinition(pbsConfig.profile), [pbsConfig.profile]);
   const lufaConfig = useMemo(() => (
-    draft?.lufaImport || createDefaultLufaImport('DED')
+    normalizeLufaImportConfig(draft?.lufaImport)
   ), [draft?.lufaImport]);
+  const lufaPartyFieldLabels = useMemo<Record<LufaPartyFieldKey, string>>(() => ({
+    adrnr: t('orders.wizard.lufaPartyAdrnr'),
+    name: t('orders.wizard.lufaPartyName'),
+    firstName: t('orders.wizard.lufaPartyFirstName'),
+    street: t('orders.wizard.lufaPartyStreet'),
+    postalCode: t('orders.wizard.lufaPartyPostalCode'),
+    city: t('orders.wizard.lufaPartyCity'),
+    country: t('orders.wizard.lufaPartyCountry'),
+    phone: t('orders.wizard.lufaPartyPhone'),
+    fax: t('orders.wizard.lufaPartyFax'),
+  }), [t]);
 
-  const lufaAdrnrValidation = useMemo(() => {
+  const lufaRecipientValidation = useMemo(() => {
     if (!isLufaLab || !lufaImportEnabled) {
-      return { ready: true, invalidKeys: [] as string[] };
+      return { ready: true, invalidSections: [] as string[] };
     }
 
-    const checks: Array<[LufaAdrnrKey, string | undefined]> = LUFA_ADRNR_KEYS.map((key) => [
-      key,
-      lufaConfig[key]
-    ]);
-
-    const invalidKeys = checks
-      .filter(([, value]) => !isValidLufaAdrnr(value))
-      .map(([key]) => key);
+    const invalidSections: string[] = [];
+    if (!isValidLufaAdrnr(lufaConfig.kundeAdrnr)) invalidSections.push('kunde');
+    if (!isLufaPartyReady(lufaConfig.auftraggeber)) invalidSections.push('auftraggeber');
+    if (!isLufaPartyReady(lufaConfig.kostentraeger)) invalidSections.push('kostentraeger');
+    if (!(lufaConfig.durchschriftenempfaenger || []).some((entry) => isLufaPartyReady(entry))) {
+      invalidSections.push('durchschriftenempfaenger');
+    }
 
     return {
-      ready: invalidKeys.length === 0,
-      invalidKeys
+      ready: invalidSections.length === 0,
+      invalidSections
     };
-  }, [isLufaLab, lufaImportEnabled, lufaConfig.kundeAdrnr, lufaConfig.auftraggeberAdrnr, lufaConfig.kostentraegerAdrnr, lufaConfig.durchschriftenempfaengerAdrnr]);
+  }, [isLufaLab, lufaImportEnabled, lufaConfig]);
 
   const lufaNminLayerValidation = useMemo(() => {
     if (!isLufaLab || !lufaImportEnabled || lufaConfig.standarduntersuchungsumfang !== 'Nmin') {
@@ -898,50 +1064,23 @@ export default function OrderWizard({
     return { ready: true, reason: '' };
   }, [isLufaLab, lufaImportEnabled, lufaConfig.standarduntersuchungsumfang, lufaConfig.nminLayers]);
 
-  const evaluateAgrolabReadiness = useCallback((value: OrderDraft | null | undefined) => {
-    const labMeta = {
-      ...createDefaultLabMeta(),
-      ...(value?.labMeta || {})
-    };
-    const samplingDetails = {
-      ...createDefaultSamplingDetails(),
-      ...(value?.samplingDetails || {})
-    };
-    const fields = value?.fields || [];
+  const pbsValidation = useMemo(() => {
+    if (!isPbsLab || !pbsConfigEnabled) {
+      return { ready: true };
+    }
 
-    const labMetaReady = AGROLAB_REQUIRED_LAB_META_KEYS.every((key) => String(labMeta[key] || '').trim().length > 0);
-    const samplingReady = AGROLAB_REQUIRED_SAMPLING_KEYS.every((key) => String(samplingDetails[key] || '').trim().length > 0);
-    const fieldMetaReady = Boolean(
-      fields.length && fields.every((field) => (
-        String(field.transportTracking || '').trim().length > 0
-        && String(field.soilType || '').trim().length > 0
-        && String(field.humusClass || '').trim().length > 0
-      ))
-    );
+    if (pbsProfileDefinition.requiresNminType && !String(pbsConfig.nminType || '').trim()) {
+      return { ready: false };
+    }
 
-    return {
-      labMetaReady,
-      samplingReady,
-      fieldMetaReady,
-      ready: labMetaReady && samplingReady && fieldMetaReady
-    };
-  }, []);
+    return { ready: true };
+  }, [isPbsLab, pbsConfig.nminType, pbsConfigEnabled, pbsProfileDefinition.requiresNminType]);
 
-  const agrolabReadiness = useMemo(() => (
-    agrolabMetadataEnabled
-      ? evaluateAgrolabReadiness(draft)
-      : {
-        labMetaReady: true,
-        samplingReady: true,
-        fieldMetaReady: true,
-        ready: true
-      }
-  ), [draft, evaluateAgrolabReadiness, agrolabMetadataEnabled]);
-
-  // LUFA import config is optional in the current flow.
   const labConfigReady = isLufaLab
-    ? true
-    : agrolabReadiness.ready;
+    ? (lufaRecipientValidation.ready && lufaNminLayerValidation.ready)
+    : isPbsLab
+      ? pbsValidation.ready
+      : true;
   const submitReady = canContinue && fieldsReady && parametersReady && allFieldsCompleted && labConfigReady;
 
   const agrolabLabMeta = useMemo(() => ({
@@ -957,7 +1096,7 @@ export default function OrderWizard({
   const updateLufaImport = useCallback((patch: Partial<NonNullable<OrderDraft['lufaImport']>>) => {
     setDraft(prev => {
       if (!prev) return prev;
-      const current = prev.lufaImport || createDefaultLufaImport('DED');
+      const current = normalizeLufaImportConfig(prev.lufaImport);
       return {
         ...prev,
         lufaImport: {
@@ -968,22 +1107,57 @@ export default function OrderWizard({
     });
   }, []);
 
-  const setLufaImportConfigEnabled = useCallback((enabled: boolean) => {
-    setDraft(prev => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        lufaImportEnabled: enabled
-      };
-    });
-  }, []);
-
   const setAgrolabMetadataConfigEnabled = useCallback((enabled: boolean) => {
     setDraft(prev => {
       if (!prev) return prev;
       return {
         ...prev,
         agrolabMetadataEnabled: enabled
+      };
+    });
+  }, []);
+
+  const setPbsConfigEnabled = useCallback((enabled: boolean) => {
+    setDraft(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        pbsConfigEnabled: enabled
+      };
+    });
+  }, []);
+
+  const updatePbsConfig = useCallback((patch: Partial<NonNullable<OrderDraft['pbsConfig']>>) => {
+    setDraft(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        pbsConfig: {
+          ...normalizePbsConfig(prev.pbsConfig),
+          ...patch,
+        }
+      };
+    });
+  }, []);
+
+  const updatePbsProfile = useCallback((profile: PbsProfile) => {
+    setDraft(prev => {
+      if (!prev) return prev;
+      const nextProfile = getPbsProfileDefinition(profile);
+      return {
+        ...prev,
+        serviceSelection: {
+          ...prev.serviceSelection,
+          services: profile === 'boden' ? ['basic_nutrients'] : ['nmin'],
+        },
+        pbsConfig: {
+          ...createDefaultPbsConfig(profile),
+          ...normalizePbsConfig(prev.pbsConfig),
+          profile,
+          nminType: nextProfile.requiresNminType
+            ? String(normalizePbsConfig(prev.pbsConfig).nminType || PBS_NMIN_TYPE_OPTIONS[0])
+            : '',
+        },
       };
     });
   }, []);
@@ -1020,6 +1194,92 @@ export default function OrderWizard({
     updateLufaImport({ nminLayers: layers });
   }, [lufaConfig.nminLayers, updateLufaImport]);
 
+  const updateLufaParty = useCallback((
+    role: 'auftraggeber' | 'kostentraeger',
+    key: LufaPartyFieldKey,
+    value: string,
+  ) => {
+    const normalizedValue = key === 'adrnr' ? normalizeLufaAdrnr(value) : value;
+    if (role === 'auftraggeber') {
+      const nextParty: LufaPartyAddress = {
+        ...(lufaConfig.auftraggeber || {}),
+        [key]: normalizedValue,
+      };
+      updateLufaImport({
+        auftraggeber: nextParty,
+        auftraggeberAdrnr: normalizeLufaAdrnr(String(nextParty.adrnr || '')),
+      });
+      return;
+    }
+
+    const nextParty: LufaPartyAddress = {
+      ...(lufaConfig.kostentraeger || {}),
+      [key]: normalizedValue,
+    };
+    updateLufaImport({
+      kostentraeger: nextParty,
+      kostentraegerAdrnr: normalizeLufaAdrnr(String(nextParty.adrnr || '')),
+    });
+  }, [lufaConfig.auftraggeber, lufaConfig.kostentraeger, updateLufaImport]);
+
+  const updateLufaCopyRecipient = useCallback((
+    index: number,
+    key: LufaPartyFieldKey,
+    value: string,
+  ) => {
+    const normalizedValue = key === 'adrnr' ? normalizeLufaAdrnr(value) : value;
+    const nextRecipients = [...(lufaConfig.durchschriftenempfaenger || [])];
+    const current = nextRecipients[index] || createEmptyLufaCopyRecipient(`copy_${index + 1}`);
+    nextRecipients[index] = {
+      ...current,
+      [key]: normalizedValue,
+    };
+    updateLufaImport({
+      durchschriftenempfaenger: nextRecipients,
+      durchschriftenempfaengerAdrnr: normalizeLufaAdrnr(String(nextRecipients[0]?.adrnr || '')),
+    });
+  }, [lufaConfig.durchschriftenempfaenger, updateLufaImport]);
+
+  const addLufaCopyRecipient = useCallback(() => {
+    const nextRecipients = [
+      ...(lufaConfig.durchschriftenempfaenger || []),
+      createEmptyLufaCopyRecipient(`copy_${(lufaConfig.durchschriftenempfaenger || []).length + 1}`),
+    ];
+    updateLufaImport({
+      durchschriftenempfaenger: nextRecipients,
+      durchschriftenempfaengerAdrnr: normalizeLufaAdrnr(String(nextRecipients[0]?.adrnr || '')),
+    });
+  }, [lufaConfig.durchschriftenempfaenger, updateLufaImport]);
+
+  const removeLufaCopyRecipient = useCallback((index: number) => {
+    const nextRecipients = [...(lufaConfig.durchschriftenempfaenger || [])];
+    if (nextRecipients.length <= 1) return;
+    nextRecipients.splice(index, 1);
+    updateLufaImport({
+      durchschriftenempfaenger: nextRecipients,
+      durchschriftenempfaengerAdrnr: normalizeLufaAdrnr(String(nextRecipients[0]?.adrnr || '')),
+    });
+  }, [lufaConfig.durchschriftenempfaenger, updateLufaImport]);
+
+  const renderLufaPartyInputs = useCallback((
+    party: Partial<LufaPartyAddress> | undefined,
+    onChange: (key: LufaPartyFieldKey, value: string) => void,
+  ) => (
+    <div className="grid gap-3 md:grid-cols-2">
+      {LUFA_PARTY_FIELD_ORDER.map((fieldKey) => (
+        <label key={fieldKey} className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+          <span>{lufaPartyFieldLabels[fieldKey]}</span>
+          <input
+            className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
+            value={String(party?.[fieldKey] || '')}
+            onChange={(event) => onChange(fieldKey, event.target.value)}
+            placeholder={fieldKey === 'adrnr' ? '123456/1234' : undefined}
+          />
+        </label>
+      ))}
+    </div>
+  ), [lufaPartyFieldLabels]);
+
   const downloadTextFile = useCallback((fileName: string, content: string, mimeType: string) => {
     if (typeof window === 'undefined') return;
     const blob = new Blob([content], { type: mimeType });
@@ -1053,24 +1313,9 @@ export default function OrderWizard({
     });
   }, [user?.uid, draft?.id]);
 
-  const downloadAgrolabCsv = useCallback(async (targetDraft?: OrderDraft) => {
+  const _downloadAgrolabCsv = useCallback(async (targetDraft?: OrderDraft) => {
     const draftForExport = targetDraft || draft;
     if (!draftForExport) return;
-
-    const agrolabCheck = evaluateAgrolabReadiness(draftForExport);
-    const shouldValidateAgrolabMetadata = Boolean(draftForExport.agrolabMetadataEnabled);
-    if (shouldValidateAgrolabMetadata && !agrolabCheck.ready) {
-      await showConfirmation(
-        t('orders.wizard.agrolabValidationTitle'),
-        t('orders.wizard.agrolabValidationBeforeExport'),
-        {
-          type: 'warning',
-          confirmText: t('common.ok'),
-          hideCancel: true
-        }
-      );
-      return;
-    }
 
     const fileName = `${draftForExport.id || 'order'}_agrolab.csv`;
     try {
@@ -1090,27 +1335,26 @@ export default function OrderWizard({
         }
       );
     }
-  }, [draft, evaluateAgrolabReadiness, createExportLog, downloadTextFile, showConfirmation, t]);
+  }, [draft, createExportLog, downloadTextFile, showConfirmation, t]);
 
-  const downloadLufaXml = useCallback(async (targetDraft?: OrderDraft) => {
+  const _downloadLufaXml = useCallback(async (targetDraft?: OrderDraft) => {
     const draftForExport = targetDraft || draft;
     if (!draftForExport) return;
 
     const labIsLufa = draftForExport.labProvider === 'lufa_nrw';
-    const config = draftForExport.lufaImport || createDefaultLufaImport('DED');
+    const config = normalizeLufaImportConfig(draftForExport.lufaImport || createDefaultLufaImport('DED'));
     if (labIsLufa && draftForExport.lufaImportEnabled) {
-      const requiredAdrnrValues = [
-        config.kundeAdrnr,
-        config.auftraggeberAdrnr,
-        config.kostentraegerAdrnr,
-        config.durchschriftenempfaengerAdrnr
-      ];
-      const adrnrReady = requiredAdrnrValues.every((value) => isValidLufaAdrnr(value));
+      const recipientReady = Boolean(
+        isValidLufaAdrnr(config.kundeAdrnr)
+        && isLufaPartyReady(config.auftraggeber)
+        && isLufaPartyReady(config.kostentraeger)
+        && (config.durchschriftenempfaenger || []).some((entry) => isLufaPartyReady(entry))
+      );
       const layers = config.nminLayers || [];
       const nminLayersReady = config.standarduntersuchungsumfang !== 'Nmin' || (
         layers.length > 0 && layers.every((layer) => Number(layer.depthToCm) > Number(layer.depthFromCm))
       );
-      if (!adrnrReady || !nminLayersReady) {
+      if (!recipientReady || !nminLayersReady) {
         await showConfirmation(
           t('orders.wizard.lufaValidationTitle'),
           t('orders.wizard.lufaValidationBeforeExport'),
@@ -1166,7 +1410,7 @@ export default function OrderWizard({
     });
   };
 
-  const updatePricing = (key: keyof NonNullable<OrderDraft['pricing']>, value: number | string | undefined) => {
+  const _updatePricing = (key: keyof NonNullable<OrderDraft['pricing']>, value: number | string | undefined) => {
     if (!draft) return;
     setDraft({
       ...draft,
@@ -1212,7 +1456,7 @@ export default function OrderWizard({
   };
 
 
-  const updateFieldSamplingDepth = (fieldId: string, depth: string) => {
+  const _updateFieldSamplingDepth = (fieldId: string, depth: string) => {
     if (!draft || !draft.fields?.length) return;
     setDraft({
       ...draft,
@@ -1230,15 +1474,101 @@ export default function OrderWizard({
     });
   };
 
+  const updateFieldBarcodeAtIndex = useCallback((fieldId: string, index: number, value: string) => {
+    setDraft(prev => {
+      if (!prev || !prev.fields?.length) return prev;
+      return {
+        ...prev,
+        fields: prev.fields.map((field) => {
+          if (field.fieldId !== fieldId) return field;
+          const nextBarcodes = [...getFieldBarcodeList(field)];
+          while (nextBarcodes.length <= index) {
+            nextBarcodes.push('');
+          }
+          nextBarcodes[index] = value;
+          const normalizedBarcodes = nextBarcodes.map((entry) => String(entry || '').trim()).filter((entry) => entry.length > 0);
+          return {
+            ...field,
+            barcode: normalizedBarcodes[0] || undefined,
+            barcodes: normalizedBarcodes,
+          };
+        })
+      };
+    });
+  }, []);
+
+  const getFieldIdsForTargets = useCallback((
+    fields: NonNullable<OrderDraft['fields']> | undefined,
+    targets: string[]
+  ) => {
+    if (!fields?.length || !targets.length) return [] as string[];
+
+    const normalizedTargets = new Set(
+      targets
+        .map((target) => normalizeSelectionKey(target))
+        .filter((target) => target.length > 0)
+    );
+
+    if (!normalizedTargets.size) return [] as string[];
+
+    return fields
+      .filter((field) => {
+        const candidates = [
+          field.fieldId,
+          field.baseId,
+          field.baseName,
+          field.samplingCell?.parentBaseId,
+          field.samplingCell?.parentBaseName,
+          field.exportMapping?.sourceBaseId,
+          field.exportMapping?.sourceBaseName,
+        ];
+
+        return candidates.some((candidate) => {
+          const normalizedCandidate = normalizeSelectionKey(candidate);
+          return normalizedCandidate.length > 0 && normalizedTargets.has(normalizedCandidate);
+        });
+      })
+      .map((field) => field.fieldId);
+  }, []);
+
+  const getScopedFieldIds = useCallback((fields: NonNullable<OrderDraft['fields']> | undefined) => {
+    if (!fields?.length) return [] as string[];
+
+    const validIds = new Set(fields.map((field) => field.fieldId));
+    if (applyToAllRef.current) {
+      return fields.map((field) => field.fieldId);
+    }
+
+    const explicitIds = selectedFieldIdsRef.current.filter((fieldId) => validIds.has(fieldId));
+    if (explicitIds.length) {
+      return explicitIds;
+    }
+
+    const targetMatches = getFieldIdsForTargets(fields, selectedFieldTargetsRef.current);
+    if (targetMatches.length) {
+      return targetMatches;
+    }
+
+    const fallbackId = activeFieldIdRef.current;
+    return fallbackId && validIds.has(fallbackId) ? [fallbackId] : [];
+  }, [getFieldIdsForTargets]);
+
   const updateFieldServices = (services: OrderServiceType[]) => {
     setDraft(prev => {
       if (!prev || !prev.fields?.length) return prev;
-      const targetIds = new Set(getSelectedFieldIds());
-      const shouldApplyAll = applyToAll;
+      const scopedFieldIds = getScopedFieldIds(prev.fields);
+      const targetIds = new Set(scopedFieldIds);
+      const shouldApplyAll = applyToAllRef.current && scopedFieldIds.length === prev.fields.length;
       if (!shouldApplyAll && targetIds.size === 0) {
         return prev;
       }
-      const nextParameters = buildParametersForServices(services, prev.parameters);
+      const currentGlobalServices = prev.serviceSelection.services || [];
+      const globalServicesChanged = shouldApplyAll && !areOrderedValuesEqual(currentGlobalServices, services);
+      const nextGlobalParameters = shouldApplyAll
+        ? buildParametersForServices(services, prev.parameters, {
+          forceBasicDefaults: services.includes('basic_nutrients') && !(prev.serviceSelection.services || []).includes('basic_nutrients')
+        })
+        : undefined;
       const depthOptions = getDepthOptionsForServices(services);
       const defaultDepth = depthOptions.includes('0-30/30-60/60-90')
         ? '0-30/30-60/60-90'
@@ -1247,6 +1577,12 @@ export default function OrderWizard({
       const nextFields = prev.fields.map(field => {
         const shouldUpdate = shouldApplyAll || targetIds.has(field.fieldId);
         if (!shouldUpdate) return field;
+        const currentServices = field.services?.length ? field.services : (prev.serviceSelection.services || []);
+        const nextParameters = shouldApplyAll
+          ? nextGlobalParameters
+          : buildParametersForServices(services, field.parameters || prev.parameters, {
+            forceBasicDefaults: services.includes('basic_nutrients') && !currentServices.includes('basic_nutrients')
+          });
         const nextField = {
           ...field,
           services,
@@ -1260,29 +1596,34 @@ export default function OrderWizard({
         return nextField;
       });
 
-      if (!hasChanged && (!shouldApplyAll || JSON.stringify(prev.parameters || {}) === JSON.stringify(nextParameters))) {
+      const globalParametersChanged = shouldApplyAll
+        && JSON.stringify(prev.parameters || {}) !== JSON.stringify(nextGlobalParameters || {});
+
+      if (!hasChanged && !globalServicesChanged && !globalParametersChanged) {
         return prev;
       }
 
       return {
         ...prev,
-        ...(shouldApplyAll ? { parameters: nextParameters } : {}),
+        ...(shouldApplyAll ? {
+          serviceSelection: {
+            ...prev.serviceSelection,
+            services
+          }
+        } : {}),
+        ...(shouldApplyAll && nextGlobalParameters ? { parameters: nextGlobalParameters } : {}),
         fields: nextFields
       };
     });
   };
 
-  function resolveFieldValue(props: Record<string, any> | undefined, keys: string[], fallback: string) {
-    if (!props) return fallback;
-    for (const key of keys) {
-      const value = props[key];
-      if (value != null && String(value).trim().length > 0) return String(value).trim();
-    }
-    return fallback;
+  function resolveFieldValue(props: Record<string, unknown> | undefined, keys: string[], fallback: string) {
+    const rawValue = resolveRawPropertyValue(props, keys);
+    return rawValue || fallback;
   }
 
   const parseShapefileFile = useCallback(async (file: File) => {
-    let geo: any;
+    let geo: unknown;
     try {
       const buffer = await file.arrayBuffer();
       geo = await shp(buffer);
@@ -1315,16 +1656,63 @@ export default function OrderWizard({
     }
 
     const sourceFields = polygonFeatures.map((feature, index) => {
-      const props = (feature?.properties as Record<string, any>) || {};
-      const baseId = resolveFieldValue(props, ['Schlagnr', 'SCHLAGNR', 'field_id', 'FieldID', 'ID', 'id', 'FID'], `F${index + 1}`);
+      const props = (feature?.properties as Record<string, unknown>) || {};
+      const rawProperties = normalizeRawProperties(props);
+      const schlagNr = resolveRawPropertyValue(props, ['Schlag_nr', 'SCHLAG_NR', 'Schlagnr', 'SCHLAGNR']);
+      const teilschlag = resolveRawPropertyValue(props, ['Teilschlag_be', 'TEILSCHLAG_BE', 'TSCHLAG_BE', 'Teilschlag', 'TEILSCHLAG', 'subfield']);
+      const flik = resolveRawPropertyValue(props, ['FLIK']);
+      const regNr = resolveRawPropertyValue(props, ['REG_NR', 'REGNR']);
+      const objektId = resolveRawPropertyValue(props, ['OBJEKT_ID', 'OBJEKTID']);
+      const fieldIdFallback = schlagNr || flik || objektId || regNr || `F${index + 1}`;
+      const baseId = resolveFieldValue(props, ['Schlag_nr', 'SCHLAG_NR', 'Schlagnr', 'SCHLAGNR', 'field_id', 'FieldID', 'ID', 'id', 'FID'], fieldIdFallback);
       const baseName = resolveFieldValue(props, ['Schlagname', 'SCHLAGNAME', 'name', 'NAME', 'field_name', 'FieldName'], baseId);
+      const landUseCode = normalizeLandUseCode(resolveRawPropertyValue(props, [
+        'land_use',
+        'LAND_USE',
+        'land_use_type',
+        'LAND_USE_TYPE',
+        'landnutzung',
+        'LANDNUTZUNG',
+        'nutzung',
+        'NUTZUNG',
+        'nutzungscode',
+        'NUTZUNGSCODE',
+        'nutzungsart',
+        'NUTZUNGSART',
+        'lu',
+        'LU',
+      ]));
       const areaHa = Number((area(feature) / 10000).toFixed(2));
-      return { baseId, baseName, areaHa, geometry: feature.geometry };
+      return {
+        baseId,
+        baseName,
+        areaHa,
+        geometry: feature.geometry,
+        importMeta: {
+          fileName: file.name,
+          sourceType: 'shapefile',
+          rawProperties,
+          joinKeys: buildSourceFieldJoinKeys([
+            baseId,
+            baseName,
+            schlagNr,
+            teilschlag,
+            flik,
+            regNr,
+            objektId,
+            `${schlagNr}.${teilschlag}`,
+            `${flik}.${teilschlag}`,
+          ]),
+          landUseCode: landUseCode || undefined,
+          landUseLabel: resolveRawPropertyValue(props, ['NUTZUNG', 'nutzung', 'LAND_USE', 'land_use']) || undefined,
+        }
+      };
     });
 
     return sourceFields;
   }, [t]);
 
+  // applySourceFields is a hoisted helper below; suppressing the stable-callback warning avoids a larger refactor.
   const applyUploadedArchives = useCallback((archives: Array<{ id: string; name: string; fields: NonNullable<OrderDraft['sourceFields']> }>) => {
     if (!draft) return;
     const combined = archives.flatMap((archive) => archive.fields);
@@ -1372,8 +1760,12 @@ export default function OrderWizard({
     if (!draft || !selectedFiles.length) return;
     setIsLoadingShapefile(true);
     try {
+      const xmlFiles = selectedFiles.filter((file) => file.name.toLowerCase().endsWith('.xml'));
+      const geometryFiles = selectedFiles.filter((file) => !file.name.toLowerCase().endsWith('.xml'));
+
+      let nextArchives = uploadedArchives;
       const parsedArchives: Array<{ id: string; name: string; fields: NonNullable<OrderDraft['sourceFields']> }> = [];
-      for (const file of selectedFiles) {
+      for (const file of geometryFiles) {
         const fields = await parseShapefileFile(file);
         if (!fields) continue;
         parsedArchives.push({
@@ -1384,13 +1776,67 @@ export default function OrderWizard({
       }
 
       if (parsedArchives.length) {
-        const nextArchives = [...uploadedArchives, ...parsedArchives];
+        nextArchives = [...uploadedArchives, ...parsedArchives];
         setUploadedArchives(nextArchives);
         applyUploadedArchives(nextArchives);
         setUploadCollapsed(false);
-      } else {
+      } else if (!xmlFiles.length) {
         alert(t('orders.wizard.shapefileNoData'));
       }
+
+      if (xmlFiles.length) {
+        let combinedFields = nextArchives.length
+          ? nextArchives.flatMap((archive) => archive.fields)
+          : ((draft.sourceFields && draft.sourceFields.length)
+            ? [...draft.sourceFields]
+            : [...uploadedSourceFields]);
+
+        if (!combinedFields.length) {
+          alert(t('orders.wizard.xmlRequiresFieldsMessage'));
+        } else {
+          const existingLandUseCount = combinedFields.filter((field) => field.importMeta?.landUseCode).length;
+          let matchedRecordCount = 0;
+
+          for (const xmlFile of xmlFiles) {
+            const result = await applySourceFieldXmlImport(combinedFields, xmlFile);
+            combinedFields = result.sourceFields;
+            matchedRecordCount += result.matchedRecordCount;
+          }
+
+          const enrichedFieldCount = combinedFields.filter((field) => field.importMeta?.landUseCode).length;
+
+          if (nextArchives.length) {
+            let offset = 0;
+            nextArchives = nextArchives.map((archive) => {
+              const archiveFieldCount = archive.fields.length;
+              const fields = combinedFields.slice(offset, offset + archiveFieldCount);
+              offset += archiveFieldCount;
+              return {
+                ...archive,
+                fields,
+              };
+            });
+            setUploadedArchives(nextArchives);
+            applyUploadedArchives(nextArchives);
+            setUploadCollapsed(false);
+          } else {
+            setUploadedSourceFields(combinedFields);
+            applySourceFields(combinedFields, resolvedDrawnFields);
+          }
+
+          if (enrichedFieldCount > existingLandUseCount) {
+            alert(t('orders.wizard.xmlImportSummary', {
+              count: enrichedFieldCount,
+              records: matchedRecordCount,
+            }));
+          } else {
+            alert(t('orders.wizard.xmlNoMatches'));
+          }
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : (t('common.unknownError') || 'Unknown error');
+      alert(t('orders.wizard.xmlImportFailed', { message }));
     } finally {
       setIsLoadingShapefile(false);
       setSelectedFiles([]);
@@ -1419,17 +1865,35 @@ export default function OrderWizard({
   const toggleService = (service: OrderServiceType) => {
     setDraft(prev => {
       if (!prev) return prev;
+      const previousServices = prev.serviceSelection.services || [];
       const exists = prev.serviceSelection.services.includes(service);
       const services = exists
         ? prev.serviceSelection.services.filter(item => item !== service)
         : [...prev.serviceSelection.services, service];
+      const hasBasic = services.includes('basic_nutrients');
+      const hadBasic = previousServices.includes('basic_nutrients');
       return {
         ...prev,
         serviceSelection: {
           ...prev.serviceSelection,
           services
         },
-        parameters: buildParametersForServices(services, prev.parameters)
+        parameters: buildParametersForServices(services, prev.parameters, {
+          forceBasicDefaults: hasBasic && !hadBasic
+        })
+      };
+    });
+  };
+
+  const updateDraftParameter = (key: keyof NonNullable<OrderDraft['parameters']>, value: boolean) => {
+    setDraft(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        parameters: {
+          ...buildParametersForServices(prev.serviceSelection.services || [], prev.parameters),
+          [key]: value
+        }
       };
     });
   };
@@ -1464,47 +1928,42 @@ export default function OrderWizard({
     });
   };
 
-  const buildFieldsFromSource = (sourceFields: NonNullable<OrderDraft['sourceFields']>, gridSize: 3 | 5) => {
+  const buildFieldsFromSource = useCallback((sourceFields: NonNullable<OrderDraft['sourceFields']>, _gridSize: 3 | 5) => {
     return sourceFields.flatMap(source => {
-      if (source.samplingCell) {
-        return [{
-          fieldId: source.baseId,
-          fieldName: source.baseName,
-          status: 'pending' as const,
-          areaHa: Number(source.areaHa || 0),
-          baseId: source.baseId,
-          baseName: source.baseName,
-          labAttributes: source.labAttributes,
-          samplingCell: source.samplingCell,
-          exportMapping: source.exportMapping,
-        }];
-      }
+      const fieldId = source.samplingCell
+        ? source.baseId
+        : (source.exportMapping?.sampleKey || source.baseId);
+      const fieldName = source.samplingCell
+        ? source.baseName
+        : (source.exportMapping?.sampleDisplayName || source.baseName);
+      const importedLandUseCode = source.importMeta?.landUseCode;
 
-      const splitCount = Math.max(1, Math.ceil(source.areaHa / gridSize));
-      return Array.from({ length: splitCount }, (_, index) => {
-        const suffix = index + 1;
-        const fieldId = `${source.baseId}.${suffix}`;
-        const fieldName = `${source.baseName}.${suffix}`;
-        return {
-          fieldId,
-          fieldName,
-          status: 'pending' as const,
-          areaHa: Number((source.areaHa / splitCount).toFixed(2)),
-          baseId: source.baseId,
-          baseName: source.baseName,
-          labAttributes: source.labAttributes,
-          exportMapping: {
-            sampleKey: fieldId,
-            sampleDisplayName: fieldName,
-            sourceBaseId: source.baseId,
-            sourceBaseName: source.baseName,
-          },
-        };
-      });
+      return [{
+        fieldId,
+        fieldName,
+        status: importedLandUseCode ? 'completed' as const : 'pending' as const,
+        areaHa: Number(source.areaHa || 0),
+        baseId: source.baseId,
+        baseName: source.baseName,
+        labAttributes: source.labAttributes,
+        samplingCell: source.samplingCell,
+        exportMapping: source.exportMapping || {
+          sampleKey: fieldId,
+          sampleDisplayName: fieldName,
+          sourceBaseId: source.baseId,
+          sourceBaseName: source.baseName,
+        },
+        parameters: importedLandUseCode
+          ? {
+            ...buildParametersForServices([], undefined),
+            landUseType: importedLandUseCode,
+          }
+          : undefined,
+      }];
     });
-  };
+  }, [buildParametersForServices]);
 
-  const toggleFieldSelection = (fieldId: string, multiSelect: boolean, baseId?: string) => {
+  const _toggleFieldSelection = (fieldId: string, multiSelect: boolean, baseId?: string) => {
     if (applyToAll) {
       setApplyToAll(false);
     }
@@ -1551,21 +2010,57 @@ export default function OrderWizard({
     'phosphorusReleaseRate'
   ]), []);
 
-  const buildParametersForServices = useCallback((services: OrderServiceType[], base?: OrderDraft['parameters']) => {
+  const buildParametersForServices = useCallback((
+    services: OrderServiceType[],
+    base?: OrderDraft['parameters'],
+    options?: { forceBasicDefaults?: boolean }
+  ) => {
     const hasBasic = services.includes('basic_nutrients');
+    const forceBasicDefaults = Boolean(options?.forceBasicDefaults);
+    const hasStoredSelections = [
+      base?.traceElements,
+      base?.organicMatter,
+      base?.cnRatio,
+      base?.potassiumFixation,
+      base?.calcium,
+      base?.cecEffective,
+      base?.cecPotential,
+      base?.particleSizeDistribution,
+      base?.phosphorusReleaseRate
+    ].some((value) => value !== undefined);
+
+    const defaultParameters = {
+      standardPackage: true,
+      traceElements: hasBasic,
+      organicMatter: false,
+      cnRatio: false,
+      potassiumFixation: false,
+      calcium: false,
+      cecEffective: false,
+      cecPotential: false,
+      particleSizeDistribution: false,
+      phosphorusReleaseRate: false
+    };
+
+    const preservedParameters = hasStoredSelections
+      ? {
+        standardPackage: true,
+        traceElements: Boolean(base?.traceElements),
+        organicMatter: Boolean(base?.organicMatter),
+        cnRatio: Boolean(base?.cnRatio),
+        potassiumFixation: Boolean(base?.potassiumFixation),
+        calcium: Boolean(base?.calcium),
+        cecEffective: Boolean(base?.cecEffective),
+        cecPotential: Boolean(base?.cecPotential),
+        particleSizeDistribution: Boolean(base?.particleSizeDistribution),
+        phosphorusReleaseRate: Boolean(base?.phosphorusReleaseRate)
+      }
+      : defaultParameters;
+
     return {
       landUseType: base?.landUseType,
       cropResiduesRemoved: base?.cropResiduesRemoved,
-      standardPackage: true,
-      traceElements: false,
-      organicMatter: hasBasic,
-      cnRatio: hasBasic,
-      potassiumFixation: hasBasic,
-      calcium: hasBasic,
-      cecEffective: hasBasic,
-      cecPotential: hasBasic,
-      particleSizeDistribution: hasBasic,
-      phosphorusReleaseRate: hasBasic
+      ...(forceBasicDefaults && hasBasic ? defaultParameters : preservedParameters)
     };
   }, []);
 
@@ -1588,16 +2083,21 @@ export default function OrderWizard({
       baseId: field.baseId,
       baseName: field.baseName,
       areaHa: field.areaHa,
-      geometry: field.geometry
+      geometry: field.geometry,
+      importMeta: {
+        sourceType: 'drawn' as const,
+        joinKeys: buildSourceFieldJoinKeys([field.baseId, field.baseName]),
+      }
     }));
 
-  const buildGeometrySignature = useCallback((geometry: any) => {
+  const buildGeometrySignature = useCallback((geometry: unknown) => {
     if (!geometry || typeof geometry !== 'object') return 'none';
-    const type = String(geometry.type || 'unknown');
+    const geometryShape = geometry as { type?: unknown; coordinates?: unknown };
+    const type = String(geometryShape.type || 'unknown');
     let pointCount = 0;
     let branchCount = 0;
 
-    const walk = (node: any) => {
+    const walk = (node: unknown) => {
       if (!Array.isArray(node)) return;
       if (!node.length) return;
       if (typeof node[0] === 'number') {
@@ -1608,7 +2108,7 @@ export default function OrderWizard({
       node.forEach(walk);
     };
 
-    walk(geometry.coordinates);
+    walk(geometryShape.coordinates);
     return `${type}:${branchCount}:${pointCount}`;
   }, []);
 
@@ -1617,7 +2117,9 @@ export default function OrderWizard({
       field.baseId || '',
       field.baseName || '',
       Number(field.areaHa || 0).toFixed(4),
-      buildGeometrySignature(field.geometry)
+      buildGeometrySignature(field.geometry),
+      JSON.stringify(field.importMeta?.joinKeys || []),
+      field.importMeta?.landUseCode || '',
     ].join('|')).join('||')
   ), [buildGeometrySignature]);
 
@@ -1628,7 +2130,8 @@ export default function OrderWizard({
       field.baseName || '',
       Number(field.areaHa || 0).toFixed(4),
       field.status || 'pending',
-      field.samplingDepthCm || ''
+      field.samplingDepthCm || '',
+      field.parameters?.landUseType || '',
     ].join('|')).join('||')
   ), []);
 
@@ -1655,7 +2158,7 @@ export default function OrderWizard({
       const existing = existingFieldMap.get(field.fieldId);
       return existing ? { ...field, ...existing } : field;
     });
-  }, []);
+  }, [buildFieldsFromSource]);
 
   const rebuildFieldsFromSource = useCallback((sourceFields: NonNullable<OrderDraft['sourceFields']>) => {
     return mergeFieldsFromSource(sourceFields, draft?.fields, draft?.gridSizeHa || 5);
@@ -1665,7 +2168,7 @@ export default function OrderWizard({
     draft?.fields?.length
       ? draft.fields
       : (resolvedSourceFields.length ? buildFieldsFromSource(resolvedSourceFields, draft?.gridSizeHa || 5) : [])
-  ), [draft?.fields, draft?.gridSizeHa, resolvedSourceFields]);
+  ), [draft?.fields, draft?.gridSizeHa, resolvedSourceFields, buildFieldsFromSource]);
 
 
   const serviceDepthOptions = useMemo(() => {
@@ -1683,7 +2186,7 @@ export default function OrderWizard({
     return Array.from(options);
   }, [draft?.serviceSelection?.services]);
 
-  const derivedDraftParameters = useMemo(() => (
+  const editableDraftParameters = useMemo(() => (
     buildParametersForServices(draft?.serviceSelection?.services || [], draft?.parameters)
   ), [draft?.serviceSelection?.services, draft?.parameters, buildParametersForServices]);
 
@@ -1781,7 +2284,7 @@ export default function OrderWizard({
         };
       });
     }
-  }, [draft?.serviceSelection?.services, buildParametersForServices, areServiceParametersAligned]);
+  }, [draft, draft?.serviceSelection?.services, buildParametersForServices, areServiceParametersAligned]);
 
   useEffect(() => {
     buildFieldSummaries();
@@ -1813,7 +2316,7 @@ export default function OrderWizard({
     setFieldServiceSelection((prev) => (
       areOrderedValuesEqual(prev, nextFieldServiceSelection) ? prev : nextFieldServiceSelection
     ));
-  }, [activeFieldId, applyToAll, draft?.fields, draft?.serviceSelection?.services, selectedFieldIds]);
+  }, [activeFieldId, applyToAll, draft, draft?.fields, draft?.serviceSelection?.services, selectedFieldIds]);
 
   useEffect(() => {
     if (!selectedFieldIds.length) return;
@@ -1837,7 +2340,8 @@ export default function OrderWizard({
   );
   const step3Ready = Boolean(resolvedSourceFields.length || uploadedSourceFields.length || draft?.sourceFields?.length);
   const step4Ready = Boolean(draft?.gridSizeHa);
-  const step5Ready = fieldsReady && parametersReady && allFieldsCompleted;
+  const fieldReviewScopeReady = fieldsReady && (applyToAll || selectedFieldIds.length > 0);
+  const step5Ready = fieldReviewScopeReady && fieldServiceSelection.length > 0;
   const samplingCellCount = useMemo(() => (
     (draft?.sourceFields || []).filter((field) => Boolean(field.samplingCell)).length
   ), [draft?.sourceFields]);
@@ -1871,14 +2375,9 @@ export default function OrderWizard({
     onStepReadinessChangeRef.current?.(nextReadiness);
   }, [step1Ready, step2Ready, step3Ready, step4Ready, step5Ready, submitReady]);
 
-  const getSelectedFieldIds = useCallback(() => {
-    const resolvedIds = getResolvedFields().map((field) => field.fieldId);
-    const resolvedIdSet = new Set(resolvedIds);
-    if (applyToAll) {
-      return resolvedIds;
-    }
-    return selectedFieldIds.filter((id) => resolvedIdSet.has(id));
-  }, [applyToAll, getResolvedFields, selectedFieldIds]);
+  const _getSelectedFieldIds = useCallback(() => (
+    getScopedFieldIds(getResolvedFields())
+  ), [getResolvedFields, getScopedFieldIds]);
 
   const switchToAllScope = useCallback(() => {
     setApplyToAll(true);
@@ -1888,11 +2387,13 @@ export default function OrderWizard({
   }, [onClearSelectionRequest]);
 
   const switchToSelectedScope = useCallback(() => {
-    const resolvedIds = getResolvedFields().map(field => field.fieldId);
+    const resolvedFields = getResolvedFields();
+    const resolvedIds = resolvedFields.map(field => field.fieldId);
+    const preferredSelection = getFieldIdsForTargets(resolvedFields, selectedFieldTargets || []);
     const preservedSelection = selectedFieldIds.filter((id) => resolvedIds.includes(id));
-    const fallbackId = (activeFieldId && resolvedIds.includes(activeFieldId))
+    const fallbackId = preferredSelection[0] || ((activeFieldId && resolvedIds.includes(activeFieldId))
       ? activeFieldId
-      : (selectedFieldIds.find(id => resolvedIds.includes(id)) || resolvedIds[0] || null);
+      : (selectedFieldIds.find(id => resolvedIds.includes(id)) || resolvedIds[0] || null));
 
     setApplyToAll(false);
     if (!fallbackId) {
@@ -1901,9 +2402,9 @@ export default function OrderWizard({
       return;
     }
 
-    setSelectedFieldIds(preservedSelection.length ? preservedSelection : [fallbackId]);
+    setSelectedFieldIds(preferredSelection.length ? preferredSelection : (preservedSelection.length ? preservedSelection : [fallbackId]));
     setActiveFieldId(fallbackId);
-  }, [activeFieldId, selectedFieldIds, getResolvedFields]);
+  }, [activeFieldId, selectedFieldIds, getResolvedFields, getFieldIdsForTargets, selectedFieldTargets]);
 
   useEffect(() => {
     if (!applyToAll) return;
@@ -1917,16 +2418,26 @@ export default function OrderWizard({
 
   useEffect(() => {
     if (applyToAll) return;
-    if (currentStep !== 5) return;
+    if (currentStep !== 4 && currentStep !== 5) return;
     const fields = getResolvedFields();
     if (!fields.length) return;
+    const preferredSelection = getFieldIdsForTargets(fields, selectedFieldTargets || []);
+    if (preferredSelection.length) {
+      setSelectedFieldIds((prev) => (
+        areOrderedValuesEqual(prev, preferredSelection) ? prev : preferredSelection
+      ));
+      if (!activeFieldId || !preferredSelection.includes(activeFieldId)) {
+        setActiveFieldId(preferredSelection[0]);
+      }
+      return;
+    }
     if (!selectedFieldIds.length) {
       setSelectedFieldIds([fields[0].fieldId]);
     }
     if (!activeFieldId || !fields.some(field => field.fieldId === activeFieldId)) {
       setActiveFieldId(fields[0].fieldId);
     }
-  }, [currentStep, getResolvedFields, selectedFieldIds.length, activeFieldId, applyToAll]);
+  }, [currentStep, getResolvedFields, selectedFieldIds.length, activeFieldId, applyToAll, getFieldIdsForTargets, selectedFieldTargets]);
 
   useEffect(() => {
     if (!mapSelectionEvent || !draft?.fields?.length) return;
@@ -1939,12 +2450,11 @@ export default function OrderWizard({
     }
     lastProcessedMapSelectionTsRef.current = mapSelectionEvent.timestamp;
 
-    const normalizeKey = (value: unknown) => String(value ?? '').trim().toLowerCase();
-    const target = normalizeKey(mapSelectionEvent.baseId);
+    const target = normalizeSelectionKey(mapSelectionEvent.baseId);
     const matchingIds = draft.fields
       .filter(field => (
-        (field.baseId && normalizeKey(field.baseId) === target)
-        || (field.baseName && normalizeKey(field.baseName) === target)
+        (field.baseId && normalizeSelectionKey(field.baseId) === target)
+        || (field.baseName && normalizeSelectionKey(field.baseName) === target)
         || (field.fieldId && field.fieldId.startsWith(`${String(mapSelectionEvent.baseId).trim()}.`))
       ))
       .map(field => field.fieldId);
@@ -2053,6 +2563,7 @@ export default function OrderWizard({
     }
   }, [draft, serviceDepthOptions, activeFieldId, applyToAll, selectedFieldIds.length, getDepthOptionsForServices]);
 
+  /* eslint-disable react-hooks/exhaustive-deps */
   function applySourceFields(
     uploaded: NonNullable<OrderDraft['sourceFields']>,
     drawn: DrawnField[],
@@ -2098,6 +2609,7 @@ export default function OrderWizard({
       };
     });
   }
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   useEffect(() => {
     if (!resolvedSourceFields.length) return;
@@ -2202,6 +2714,11 @@ export default function OrderWizard({
 
       setUploadedSourceFields(convertedSourceFields);
       onFieldsLoaded?.(convertedSourceFields);
+      if (externalDrawnFields && onExternalDrawnFieldsChange) {
+        onExternalDrawnFieldsChange([]);
+      } else {
+        setDrawnFields([]);
+      }
       setDraft((prev) => {
         if (!prev) return prev;
         return {
@@ -2229,24 +2746,24 @@ export default function OrderWizard({
     } finally {
       setIsConvertingSamplingCells(false);
     }
-  }, [draft, buildFieldsFromSource, onFieldsLoaded, showConfirmation, t]);
+  }, [draft, buildFieldsFromSource, externalDrawnFields, onExternalDrawnFieldsChange, onFieldsLoaded, showConfirmation, t]);
 
   const updateParameters = (key: keyof NonNullable<OrderDraft['parameters']>, value: boolean | string) => {
     setDraft(prev => {
       if (!prev) return prev;
-      const nextParameters = {
-        ...(prev.parameters || buildParametersForServices(prev.serviceSelection.services || [], prev.parameters)),
-        standardPackage: true,
+      const nextDraftParameters = {
+        ...buildParametersForServices(prev.serviceSelection.services || [], prev.parameters),
         [key]: value
       };
       if (!prev.fields?.length) {
         return {
           ...prev,
-          parameters: nextParameters
+          parameters: nextDraftParameters
         };
       }
-      const targetIds = new Set(getSelectedFieldIds());
-      const shouldApplyAll = applyToAll;
+      const scopedFieldIds = getScopedFieldIds(prev.fields);
+      const targetIds = new Set(scopedFieldIds);
+      const shouldApplyAll = applyToAllRef.current && scopedFieldIds.length === prev.fields.length;
       if (!shouldApplyAll && targetIds.size === 0) {
         return prev;
       }
@@ -2254,14 +2771,22 @@ export default function OrderWizard({
         shouldApplyAll || targetIds.has(field.fieldId)
           ? {
             ...field,
-            parameters: nextParameters,
+            parameters: shouldApplyAll
+              ? nextDraftParameters
+              : {
+                ...buildParametersForServices(
+                  field.services?.length ? field.services : (prev.serviceSelection.services || []),
+                  field.parameters || prev.parameters
+                ),
+                [key]: value
+              },
             status: 'completed' as const
           }
           : field
       ));
       return {
         ...prev,
-        ...(shouldApplyAll ? { parameters: nextParameters } : {}),
+        ...(shouldApplyAll ? { parameters: nextDraftParameters } : {}),
         fields: updatedFields
       };
     });
@@ -2459,7 +2984,7 @@ export default function OrderWizard({
   );
 
 
-  const submitOrder = async () => {
+  const submitOrder = useCallback(async () => {
     if (!draft || !resolvedOwnerId) return;
     if (isSubmitting) return;
     if (!submitReady) return;
@@ -2636,7 +3161,7 @@ export default function OrderWizard({
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, [draft, resolvedOwnerId, isSubmitting, submitReady, showConfirmation, t, onComplete]);
 
   useEffect(() => {
     const submitHandlerChange = onSubmitHandlerChangeRef.current;
@@ -2758,22 +3283,13 @@ export default function OrderWizard({
                     {t('orders.wizard.parametersDerivedHint')}
                   </div>
                   <div className="grid gap-2">
-                    {([
-                      ['traceElements', t('orders.wizard.paramTraceElements')],
-                      ['organicMatter', t('orders.wizard.paramOrganicMatter')],
-                      ['cnRatio', t('orders.wizard.paramCnRatio')],
-                      ['potassiumFixation', t('orders.wizard.paramPotassiumFixation')],
-                      ['calcium', t('orders.wizard.paramCalcium')],
-                      ['cecEffective', t('orders.wizard.paramCecEffective')],
-                      ['cecPotential', t('orders.wizard.paramCecPotential')],
-                      ['particleSizeDistribution', t('orders.wizard.paramParticleSize')],
-                      ['phosphorusReleaseRate', t('orders.wizard.paramPhosphorusRelease')]
-                    ] as Array<[keyof NonNullable<OrderDraft['parameters']>, string]>).map(([key, label]) => (
+                    {parameterOptions.map(([key, label]) => (
                       <label key={key} className="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-200">
                         <input
                           type="checkbox"
-                          checked={Boolean(derivedDraftParameters[key])}
-                          disabled
+                          checked={Boolean(editableDraftParameters[key])}
+                          onChange={(event) => updateDraftParameter(key, event.target.checked)}
+                          disabled={!draft.serviceSelection.services.length}
                         />
                         <span>{label}</span>
                       </label>
@@ -3032,7 +3548,7 @@ export default function OrderWizard({
                           id="shapefile-upload"
                           type="file"
                           multiple
-                          accept=".zip,.shp"
+                          accept=".zip,.shp,.xml"
                           ref={fileInputRef}
                           onChange={(e) => {
                             const files = Array.from(e.target.files || []);
@@ -3055,6 +3571,9 @@ export default function OrderWizard({
                             ? `${selectedFiles.length} file(s) selected`
                             : (t('orders.wizard.noFileChosen'))}
                         </span>
+                      </div>
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                        {t('orders.wizard.xmlImportHint')}
                       </div>
                       {selectedFiles.length > 0 && (
                         <div className="space-y-2">
@@ -3417,7 +3936,188 @@ export default function OrderWizard({
 
                 <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">
                   <div className="space-y-4">
-                    {!isLufaLab && (
+                    {isPbsLab && (
+                      <div className="space-y-3">
+                        <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-2">
+                          <label className="flex items-center gap-3 text-sm font-semibold text-gray-900 dark:text-white">
+                            <input
+                              type="checkbox"
+                              checked={pbsConfigEnabled}
+                              onChange={(event) => setPbsConfigEnabled(event.target.checked)}
+                            />
+                            {t('orders.wizard.pbsConfigOptionalToggle', { defaultValue: 'Enable PBS configuration (optional)' })}
+                          </label>
+                          <div className="text-xs text-gray-600 dark:text-gray-400">
+                            {t('orders.wizard.pbsConfigOptionalHint', { defaultValue: 'When disabled, PBS-specific metadata is optional and only entered values will be exported.' })}
+                          </div>
+                        </div>
+
+                        {pbsConfigEnabled && (
+                          <>
+                            <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-3">
+                              <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                                {t('orders.wizard.pbsConfigTitle', { defaultValue: 'PBS configuration' })}
+                              </div>
+                              <div className="grid gap-3 md:grid-cols-2">
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                  <span>{t('orders.contractPbsProfileLabel', { defaultValue: 'PBS workflow' })}</span>
+                                  <select
+                                    className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
+                                    value={pbsConfig.profile}
+                                    onChange={(event) => updatePbsProfile(event.target.value as PbsProfile)}
+                                  >
+                                    <option value="boden">{t('orders.pbsProfileBoden', { defaultValue: 'PBS Boden' })}</option>
+                                    <option value="nmin">{t('orders.pbsProfileNmin', { defaultValue: 'PBS Nmin' })}</option>
+                                    <option value="n306090">{t('orders.pbsProfileN306090', { defaultValue: 'PBS N306090' })}</option>
+                                  </select>
+                                </label>
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                  <span>{t('orders.wizard.pbsCustomerNumberAgrolab', { defaultValue: 'Customer number AGROLAB' })}</span>
+                                  <input
+                                    className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
+                                    value={pbsConfig.customerNumberAgrolab || ''}
+                                    onChange={(event) => updatePbsConfig({ customerNumberAgrolab: event.target.value })}
+                                  />
+                                </label>
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                  <span>{t('orders.wizard.pbsBillingCustomerNumber', { defaultValue: 'Billing customer number' })}</span>
+                                  <input
+                                    className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
+                                    value={pbsConfig.billingCustomerNumber || ''}
+                                    onChange={(event) => updatePbsConfig({ billingCustomerNumber: event.target.value })}
+                                  />
+                                </label>
+                                {pbsProfileDefinition.usesDistributor && (
+                                  <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                    <span>{t('orders.wizard.pbsDistributor', { defaultValue: 'Auftragsverteiler' })}</span>
+                                    <input
+                                      className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
+                                      value={pbsConfig.distributor || ''}
+                                      onChange={(event) => updatePbsConfig({ distributor: event.target.value })}
+                                    />
+                                  </label>
+                                )}
+                                {pbsProfileDefinition.requiresNminType && (
+                                  <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                    <span>{t('orders.wizard.pbsNminType', { defaultValue: 'Nmin type' })}</span>
+                                    <select
+                                      className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
+                                      value={pbsConfig.nminType || ''}
+                                      onChange={(event) => updatePbsConfig({ nminType: event.target.value })}
+                                    >
+                                      {PBS_NMIN_TYPE_OPTIONS.map((option) => (
+                                        <option key={option} value={option}>{option}</option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                )}
+                              </div>
+                              {!pbsValidation.ready && (
+                                <div className="rounded-lg border border-red-200 dark:border-red-700 bg-red-50/70 dark:bg-red-900/20 p-2 text-xs text-red-700 dark:text-red-300">
+                                  {t('orders.wizard.pbsValidationMessage', { defaultValue: 'Select an Nmin type for PBS Nmin exports.' })}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-3">
+                              <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                                {t('orders.wizard.labMetaTitle')}
+                              </div>
+                              <div className="grid gap-3 md:grid-cols-2">
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                  <span>{t('orders.wizard.trackingNumber')}</span>
+                                  <input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={agrolabLabMeta.trackingNumber || ''} onChange={(event) => updateLabMeta('trackingNumber', event.target.value)} />
+                                </label>
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                  <span>{t('orders.wizard.orderDate')}</span>
+                                  <input type="date" className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={agrolabLabMeta.orderDate || ''} onChange={(event) => updateLabMeta('orderDate', event.target.value)} />
+                                </label>
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                  <span>{t('orders.wizard.storageName')}</span>
+                                  <input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={agrolabLabMeta.storageName || ''} onChange={(event) => updateLabMeta('storageName', event.target.value)} />
+                                </label>
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                  <span>{t('orders.wizard.internalInfo')}</span>
+                                  <input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={agrolabLabMeta.internalInfo || ''} onChange={(event) => updateLabMeta('internalInfo', event.target.value)} />
+                                </label>
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                  <span>{t('orders.wizard.projectId')}</span>
+                                  <input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={agrolabLabMeta.projectId || ''} onChange={(event) => updateLabMeta('projectId', event.target.value)} />
+                                </label>
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                  <span>{t('orders.wizard.projectName')}</span>
+                                  <input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={agrolabLabMeta.projectName || ''} onChange={(event) => updateLabMeta('projectName', event.target.value)} />
+                                </label>
+                              </div>
+                              <div className="grid gap-2 md:grid-cols-2">
+                                <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-200"><input type="checkbox" checked={Boolean(agrolabLabMeta.calDl)} onChange={() => updateLabMeta('calDl', !agrolabLabMeta.calDl)} />{t('orders.wizard.calDl')}</label>
+                                <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-200"><input type="checkbox" checked={Boolean(agrolabLabMeta.notDry)} onChange={() => updateLabMeta('notDry', !agrolabLabMeta.notDry)} />{t('orders.wizard.notDry')}</label>
+                                <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-200"><input type="checkbox" checked={Boolean(agrolabLabMeta.heavy)} onChange={() => updateLabMeta('heavy', !agrolabLabMeta.heavy)} />{t('orders.wizard.heavy')}</label>
+                                <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-200"><input type="checkbox" checked={Boolean(agrolabLabMeta.oneOrderPerField)} onChange={() => updateLabMeta('oneOrderPerField', !agrolabLabMeta.oneOrderPerField)} />{t('orders.wizard.oneOrderPerField')}</label>
+                                <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-200"><input type="checkbox" checked={Boolean(agrolabLabMeta.postReport)} onChange={() => updateLabMeta('postReport', !agrolabLabMeta.postReport)} />{t('orders.wizard.postReport')}</label>
+                                <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-200"><input type="checkbox" checked={Boolean(agrolabLabMeta.postInvoice)} onChange={() => updateLabMeta('postInvoice', !agrolabLabMeta.postInvoice)} />{t('orders.wizard.postInvoice')}</label>
+                              </div>
+                            </div>
+
+                            <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-3">
+                              <div className="text-sm font-semibold text-gray-900 dark:text-white">{t('orders.wizard.samplingDetailsTitle')}</div>
+                              <div className="grid gap-3 md:grid-cols-2">
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200"><span>{t('orders.wizard.samplerNo')}</span><input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={agrolabSamplingDetails.samplerNo || ''} onChange={(event) => updateSamplingDetails('samplerNo', event.target.value)} /></label>
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200"><span>{t('orders.wizard.advertiserNo')}</span><input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={agrolabSamplingDetails.advertiserNo || ''} onChange={(event) => updateSamplingDetails('advertiserNo', event.target.value)} /></label>
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200"><span>{t('orders.wizard.samplingOrderNo')}</span><input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={agrolabSamplingDetails.samplingOrderNo || ''} onChange={(event) => updateSamplingDetails('samplingOrderNo', event.target.value)} /></label>
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200"><span>{t('orders.wizard.priceList')}</span><input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={agrolabSamplingDetails.priceList || ''} onChange={(event) => updateSamplingDetails('priceList', event.target.value)} /></label>
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200"><span>{t('orders.wizard.samplingDate')}</span><input type="date" className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={agrolabSamplingDetails.samplingDate || ''} onChange={(event) => updateSamplingDetails('samplingDate', event.target.value)} /></label>
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200"><span>{t('orders.wizard.pricePerSample')}</span><input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={agrolabSamplingDetails.pricePerSample || ''} onChange={(event) => updateSamplingDetails('pricePerSample', event.target.value)} /></label>
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200"><span>{t('orders.wizard.pricePerHa')}</span><input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={agrolabSamplingDetails.pricePerHa || ''} onChange={(event) => updateSamplingDetails('pricePerHa', event.target.value)} /></label>
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200"><span>{t('orders.wizard.totalAreaHa')}</span><input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={agrolabSamplingDetails.totalAreaHa || ''} onChange={(event) => updateSamplingDetails('totalAreaHa', event.target.value)} /></label>
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200"><span>{t('orders.wizard.travelCost')}</span><input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={agrolabSamplingDetails.travelCost || ''} onChange={(event) => updateSamplingDetails('travelCost', event.target.value)} /></label>
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200"><span>{t('orders.wizard.travelCostPerKm')}</span><input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={agrolabSamplingDetails.travelCostPerKm || ''} onChange={(event) => updateSamplingDetails('travelCostPerKm', event.target.value)} /></label>
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200"><span>{t('orders.wizard.km')}</span><input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={agrolabSamplingDetails.km || ''} onChange={(event) => updateSamplingDetails('km', event.target.value)} /></label>
+                                <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200"><span>{t('orders.wizard.sampleCount')}</span><input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={agrolabSamplingDetails.sampleCount || ''} onChange={(event) => updateSamplingDetails('sampleCount', event.target.value)} /></label>
+                                {pbsProfileDefinition.requiresNminType && (
+                                  <>
+                                    <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200"><span>{t('orders.wizard.pbsPn030', { defaultValue: 'PN0-30' })}</span><input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={pbsConfig.pn030 || ''} onChange={(event) => updatePbsConfig({ pn030: event.target.value })} /></label>
+                                    <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200"><span>{t('orders.wizard.pbsPn060', { defaultValue: 'PN0-60' })}</span><input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={pbsConfig.pn060 || ''} onChange={(event) => updatePbsConfig({ pn060: event.target.value })} /></label>
+                                    <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200"><span>{t('orders.wizard.pbsPn090', { defaultValue: 'PN0-90' })}</span><input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={pbsConfig.pn090 || ''} onChange={(event) => updatePbsConfig({ pn090: event.target.value })} /></label>
+                                    <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200"><span>{t('orders.wizard.pbsPn0x', { defaultValue: 'PN0-x' })}</span><input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={pbsConfig.pn0x || ''} onChange={(event) => updatePbsConfig({ pn0x: event.target.value })} /></label>
+                                    {pbsProfileDefinition.includesAnzahlPnStellen && (
+                                      <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200"><span>{t('orders.wizard.pbsAnzahlPnStellen', { defaultValue: 'Anzahl PN-Stellen' })}</span><input className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white" value={pbsConfig.anzahlPnStellen || ''} onChange={(event) => updatePbsConfig({ anzahlPnStellen: event.target.value })} /></label>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-3">
+                              <div className="text-sm font-semibold text-gray-900 dark:text-white">{t('orders.wizard.fieldMetaTitle')}</div>
+                              <div className="space-y-2">
+                                {(draft.fields || []).map((field) => {
+                                  const barcodes = getFieldBarcodeList(field);
+                                  return (
+                                    <div key={`pbs-meta-${field.fieldId}`} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2">
+                                      <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">{field.fieldName || field.fieldId}</div>
+                                      <div className="grid gap-2 md:grid-cols-2">
+                                        <input className="w-full rounded border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-2 py-1.5 text-xs text-gray-900 dark:text-white" placeholder={t('orders.wizard.transportTracking')} value={field.transportTracking || ''} onChange={(event) => updateFieldMeta(field.fieldId, { transportTracking: event.target.value })} />
+                                        <input className="w-full rounded border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-2 py-1.5 text-xs text-gray-900 dark:text-white" placeholder={t('orders.wizard.soilType')} value={field.soilType || ''} onChange={(event) => updateFieldMeta(field.fieldId, { soilType: event.target.value })} />
+                                        <input className="w-full rounded border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-2 py-1.5 text-xs text-gray-900 dark:text-white" placeholder={t('orders.wizard.humusClass')} value={field.humusClass || ''} onChange={(event) => updateFieldMeta(field.fieldId, { humusClass: event.target.value })} />
+                                        {!pbsProfileDefinition.supportsMultipleBarcodes && (
+                                          <input className="w-full rounded border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-2 py-1.5 text-xs text-gray-900 dark:text-white" placeholder={t('orders.wizard.barcodeOptional')} value={barcodes[0] || ''} onChange={(event) => updateFieldMeta(field.fieldId, buildBarcodeFieldPatch(setPrimaryBarcodeValue(getFieldBarcodeList(field), event.target.value)))} />
+                                        )}
+                                        {pbsProfileDefinition.supportsMultipleBarcodes && [0, 1, 2].map((index) => (
+                                          <input key={`pbs-barcode-${field.fieldId}-${index}`} className="w-full rounded border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-2 py-1.5 text-xs text-gray-900 dark:text-white" placeholder={`${t('orders.wizard.barcodeOptional')} ${index + 1}`} value={barcodes[index] || ''} onChange={(event) => updateFieldBarcodeAtIndex(field.fieldId, index, event.target.value)} />
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {isAgrolabLab && (
                       <div className="space-y-3">
                         <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-2">
                           <label className="flex items-center gap-3 text-sm font-semibold text-gray-900 dark:text-white">
@@ -3438,6 +4138,9 @@ export default function OrderWizard({
                             <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-3">
                           <div className="text-sm font-semibold text-gray-900 dark:text-white">
                             {t('orders.wizard.labMetaTitle')}
+                          </div>
+                          <div className="text-xs text-gray-600 dark:text-gray-400">
+                            {t('orders.wizard.agrolabCsvEnteredValuesHint', { defaultValue: 'Agrolab CSV only includes values that were entered.' })}
                           </div>
                           <div className="grid gap-3 md:grid-cols-2">
                             <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
@@ -3465,20 +4168,15 @@ export default function OrderWizard({
                               />
                             </label>
                             <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
-                              <span>{t('orders.wizard.version')}</span>
-                              <input
-                                className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
-                                value={agrolabLabMeta.version || ''}
-                                onChange={(event) => updateLabMeta('version', event.target.value)}
-                              />
-                            </label>
-                            <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
                               <span>{t('orders.wizard.trackingNumber')}</span>
                               <input
                                 className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
                                 value={agrolabLabMeta.trackingNumber || ''}
                                 onChange={(event) => updateLabMeta('trackingNumber', event.target.value)}
                               />
+                              <span className="block text-[11px] font-normal text-gray-500 dark:text-gray-400">
+                                {t('orders.wizard.trackingNumberHint', { defaultValue: 'Enter this only once the parcel shipment to Agrolab has a tracking number.' })}
+                              </span>
                             </label>
                             <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
                               <span>{t('orders.wizard.orderDate')}</span>
@@ -3495,14 +4193,6 @@ export default function OrderWizard({
                                 className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
                                 value={agrolabLabMeta.storageName || ''}
                                 onChange={(event) => updateLabMeta('storageName', event.target.value)}
-                              />
-                            </label>
-                            <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
-                              <span>{t('orders.wizard.internalInfo')}</span>
-                              <input
-                                className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
-                                value={agrolabLabMeta.internalInfo || ''}
-                                onChange={(event) => updateLabMeta('internalInfo', event.target.value)}
                               />
                             </label>
                             <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
@@ -3585,6 +4275,9 @@ export default function OrderWizard({
                         <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-3">
                           <div className="text-sm font-semibold text-gray-900 dark:text-white">
                             {t('orders.wizard.samplingDetailsTitle')}
+                          </div>
+                          <div className="text-xs text-gray-600 dark:text-gray-400">
+                            {t('orders.wizard.samplingDateCsvHint', { defaultValue: 'This sampling date is written into the Agrolab CSV Version and Probenahmedatum columns.' })}
                           </div>
                           <div className="grid gap-3 md:grid-cols-2">
                             <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
@@ -3670,8 +4363,13 @@ export default function OrderWizard({
                                   <input
                                     className="w-full rounded border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-2 py-1.5 text-xs text-gray-900 dark:text-white"
                                     placeholder={t('orders.wizard.barcodeOptional')}
-                                    value={field.barcode || ''}
-                                    onChange={(event) => updateFieldMeta(field.fieldId, { barcode: event.target.value })}
+                                    value={getFieldBarcodeList(field)[0] || ''}
+                                    onChange={(event) => updateFieldMeta(
+                                      field.fieldId,
+                                      buildBarcodeFieldPatch(
+                                        setPrimaryBarcodeValue(getFieldBarcodeList(field), event.target.value),
+                                      ),
+                                    )}
                                   />
                                 </div>
                               </div>
@@ -3685,182 +4383,241 @@ export default function OrderWizard({
 
                     {isLufaLab && (
                       <div className="space-y-3">
-                        <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-2">
-                          <label className="flex items-center gap-3 text-sm font-semibold text-gray-900 dark:text-white">
-                            <input
-                              type="checkbox"
-                              checked={lufaImportEnabled}
-                              onChange={(event) => setLufaImportConfigEnabled(event.target.checked)}
-                            />
-                            {t('orders.wizard.lufaImportConfigOptionalToggle', { defaultValue: 'Enable LUFA import configuration (optional)' })}
-                          </label>
-                          <div className="text-xs text-gray-600 dark:text-gray-400">
-                            {t('orders.wizard.lufaImportConfigOptionalHint', { defaultValue: 'When disabled, LUFA ADRNR and label values are ignored.' })}
+                        <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-4">
+                          <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                            {t('orders.wizard.lufaImportConfigTitle')}
                           </div>
-                        </div>
 
-                        {lufaImportEnabled && (
-                          <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-4">
-                            <div className="text-sm font-semibold text-gray-900 dark:text-white">
-                              {t('orders.wizard.lufaImportConfigTitle')}
-                            </div>
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                              <span>{t('orders.wizard.lufaScopeLabel')}</span>
+                              <select
+                                className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
+                                value={lufaConfig.standarduntersuchungsumfang}
+                                onChange={(event) => {
+                                  const nextScope = event.target.value as LufaStandarduntersuchungsumfang;
+                                  const currentDefaults = lufaConfig.defaultKennzeichnung || {};
+                                  const nextDefaults = {
+                                    ...currentDefaults,
+                                    Gruppenart: currentDefaults.Gruppenart
+                                      || (nextScope === 'Nmin' ? 'A' : 'AB')
+                                  };
 
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
-                            <span>{t('orders.wizard.lufaScopeLabel')}</span>
-                            <select
-                              className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
-                              value={lufaConfig.standarduntersuchungsumfang}
-                              onChange={(event) => {
-                                const nextScope = event.target.value as LufaStandarduntersuchungsumfang;
-                                const currentDefaults = lufaConfig.defaultKennzeichnung || {};
-                                const nextDefaults = {
-                                  ...currentDefaults,
-                                  Gruppenart: currentDefaults.Gruppenart
-                                    || (nextScope === 'Nmin' ? 'A' : 'AB')
-                                };
+                                  updateLufaImport({
+                                    standarduntersuchungsumfang: nextScope,
+                                    defaultKennzeichnung: nextDefaults,
+                                    nminLayers: nextScope === 'Nmin' && !(lufaConfig.nminLayers || []).length
+                                      ? createDefaultLufaImport('Nmin').nminLayers
+                                      : lufaConfig.nminLayers
+                                  });
+                                }}
+                              >
+                                <option value="DED">DED</option>
+                                <option value="Nmin">Nmin</option>
+                              </select>
+                            </label>
 
-                                updateLufaImport({
-                                  standarduntersuchungsumfang: nextScope,
-                                  defaultKennzeichnung: nextDefaults,
-                                  nminLayers: nextScope === 'Nmin' && !(lufaConfig.nminLayers || []).length
-                                    ? createDefaultLufaImport('Nmin').nminLayers
-                                    : lufaConfig.nminLayers
-                                });
-                              }}
-                            >
-                              <option value="DED">DED</option>
-                              <option value="Nmin">Nmin</option>
-                            </select>
-                          </label>
-                        </div>
-
-                        <div className="grid gap-3 md:grid-cols-2">
-                          {[
-                            { key: 'kundeAdrnr' as LufaAdrnrKey, label: t('orders.wizard.lufaKundeAdrnr') },
-                            { key: 'auftraggeberAdrnr' as LufaAdrnrKey, label: t('orders.wizard.lufaAuftraggeberAdrnr') },
-                            { key: 'kostentraegerAdrnr' as LufaAdrnrKey, label: t('orders.wizard.lufaKostentraegerAdrnr') },
-                            { key: 'durchschriftenempfaengerAdrnr' as LufaAdrnrKey, label: t('orders.wizard.lufaDurchschriftAdrnr') }
-                          ].map(({ key, label }) => (
-                            <label key={key} className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
-                              <span>{label}</span>
+                            <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                              <span>{t('orders.wizard.lufaKundeAdrnr')}</span>
                               <input
                                 className={`w-full rounded-lg border px-3 py-2 text-sm bg-white/80 dark:bg-gray-900/60 text-gray-900 dark:text-white ${
-                                  lufaAdrnrValidation.invalidKeys.includes(key)
+                                  lufaRecipientValidation.invalidSections.includes('kunde')
                                     ? 'border-red-400 dark:border-red-500'
                                     : 'border-gray-200 dark:border-gray-700'
                                 }`}
-                                value={String(lufaConfig[key] || '')}
-                                onChange={(event) => updateLufaImport({ [key]: normalizeLufaAdrnr(event.target.value) } as Partial<NonNullable<OrderDraft['lufaImport']>>)}
+                                value={String(lufaConfig.kundeAdrnr || '')}
+                                onChange={(event) => updateLufaImport({ kundeAdrnr: normalizeLufaAdrnr(event.target.value) })}
                                 placeholder="123456/1234"
                               />
                             </label>
-                          ))}
-                        </div>
+                          </div>
 
-                        <div className="text-xs text-gray-600 dark:text-gray-400">
-                          {t('orders.wizard.lufaAdrnrHint')}
-                        </div>
+                          <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                            <span>{t('orders.wizard.lufaActionCode')}</span>
+                            <input
+                              className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
+                              value={String(lufaConfig.actionCode || '')}
+                              onChange={(event) => updateLufaImport({ actionCode: event.target.value })}
+                              placeholder="AKTION-NR"
+                            />
+                          </label>
 
-                        <div className="grid gap-3 md:grid-cols-2">
-                          {[
-                            ['Ort', t('orders.wizard.lufaKennzeichnungOrt')],
-                            ['Serie', t('orders.wizard.lufaKennzeichnungSerie')],
-                            ['Termin', t('orders.wizard.lufaKennzeichnungTermin')],
-                            ['Bezeichnung', t('orders.wizard.lufaKennzeichnungBezeichnung')],
-                            ['Gruppenart', t('orders.wizard.lufaKennzeichnungGruppenart')]
-                          ].map(([key, label]) => (
-                            <label key={key} className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
-                              <span>{label}</span>
-                              <input
-                                className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
-                                value={String((lufaConfig.defaultKennzeichnung || {})[key] || '')}
-                                onChange={(event) => updateLufaKennzeichnungValue(key, event.target.value)}
-                              />
-                            </label>
-                          ))}
-                        </div>
+                          <div className="text-xs text-gray-600 dark:text-gray-400">
+                            {t('orders.wizard.lufaAdrnrHint')}
+                          </div>
 
-                        <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
-                          <span>{t('orders.wizard.lufaZusatzpruefparameter')}</span>
-                          <input
-                            className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
-                            value={(lufaConfig.zusatzpruefparameter || []).join(', ')}
-                            onChange={(event) => {
-                              const next = event.target.value
-                                .split(',')
-                                .map((value) => value.trim())
-                                .filter(Boolean);
-                              updateLufaImport({ zusatzpruefparameter: next });
-                            }}
-                            placeholder="Ntot, Smin"
-                          />
-                        </label>
+                          <div className={`rounded-lg border p-3 space-y-3 ${
+                            lufaRecipientValidation.invalidSections.includes('auftraggeber')
+                              ? 'border-red-300 dark:border-red-700'
+                              : 'border-gray-200 dark:border-gray-700'
+                          }`}>
+                            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+                              {t('orders.wizard.lufaAuftraggeberSection')}
+                            </div>
+                            {renderLufaPartyInputs(lufaConfig.auftraggeber, (key, value) => updateLufaParty('auftraggeber', key, value))}
+                          </div>
 
-                        {lufaConfig.standarduntersuchungsumfang === 'Nmin' && (
-                          <div className="space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
-                            <div className="flex items-center justify-between">
-                              <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-                                {t('orders.wizard.lufaNminLayersTitle')}
+                          <div className={`rounded-lg border p-3 space-y-3 ${
+                            lufaRecipientValidation.invalidSections.includes('kostentraeger')
+                              ? 'border-red-300 dark:border-red-700'
+                              : 'border-gray-200 dark:border-gray-700'
+                          }`}>
+                            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+                              {t('orders.wizard.lufaKostentraegerSection')}
+                            </div>
+                            {renderLufaPartyInputs(lufaConfig.kostentraeger, (key, value) => updateLufaParty('kostentraeger', key, value))}
+                          </div>
+
+                          <div className={`rounded-lg border p-3 space-y-3 ${
+                            lufaRecipientValidation.invalidSections.includes('durchschriftenempfaenger')
+                              ? 'border-red-300 dark:border-red-700'
+                              : 'border-gray-200 dark:border-gray-700'
+                          }`}>
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+                                  {t('orders.wizard.lufaCopyRecipientsSection')}
+                                </div>
+                                <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                  {t('orders.wizard.lufaCopyRecipientsHint')}
+                                </div>
                               </div>
                               <button
                                 type="button"
-                                onClick={addLufaNminLayer}
+                                onClick={addLufaCopyRecipient}
                                 className="h-8 w-8 sm:w-auto sm:px-2 rounded border border-gray-300 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center"
-                                title={t('orders.wizard.lufaAddLayer')}
-                                aria-label={t('orders.wizard.lufaAddLayer')}
+                                title={t('orders.wizard.lufaAddCopyRecipient')}
+                                aria-label={t('orders.wizard.lufaAddCopyRecipient')}
                               >
                                 <span className="text-sm leading-none sm:hidden">+</span>
-                                <span className="hidden sm:inline">{t('orders.wizard.lufaAddLayer')}</span>
+                                <span className="hidden sm:inline">{t('orders.wizard.lufaAddCopyRecipient')}</span>
                               </button>
                             </div>
-                            <div className="space-y-2">
-                              {(lufaConfig.nminLayers || []).map((layer, index) => (
-                                <div key={`layer-${index}`} className="grid gap-2 [grid-template-columns:1fr_1fr_auto] items-center">
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    className="w-full rounded border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-2 py-1 text-xs text-gray-900 dark:text-white"
-                                    value={Number(layer.depthFromCm)}
-                                    onChange={(event) => updateLufaNminLayer(index, 'depthFromCm', Number(event.target.value))}
-                                    aria-label={t('orders.wizard.lufaLayerFrom')}
-                                  />
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    className="w-full rounded border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-2 py-1 text-xs text-gray-900 dark:text-white"
-                                    value={Number(layer.depthToCm)}
-                                    onChange={(event) => updateLufaNminLayer(index, 'depthToCm', Number(event.target.value))}
-                                    aria-label={t('orders.wizard.lufaLayerTo')}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => removeLufaNminLayer(index)}
-                                    className="h-8 w-8 sm:w-auto sm:px-2 rounded border border-gray-300 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center"
-                                    title={t('orders.wizard.lufaRemoveLayer')}
-                                    aria-label={t('orders.wizard.lufaRemoveLayer')}
-                                  >
-                                    <span className="text-sm leading-none sm:hidden">×</span>
-                                    <span className="hidden sm:inline">{t('orders.wizard.lufaRemoveLayer')}</span>
-                                  </button>
+                            <div className="space-y-3">
+                              {(lufaConfig.durchschriftenempfaenger || []).map((recipient, index) => (
+                                <div key={recipient.id || `copy-${index}`} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-3">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                      {t('orders.wizard.lufaCopyRecipientLabel', { index: index + 1 })}
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => removeLufaCopyRecipient(index)}
+                                      disabled={(lufaConfig.durchschriftenempfaenger || []).length <= 1}
+                                      className="h-8 w-8 sm:w-auto sm:px-2 rounded border border-gray-300 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                                      title={t('orders.wizard.lufaRemoveCopyRecipient')}
+                                      aria-label={t('orders.wizard.lufaRemoveCopyRecipient')}
+                                    >
+                                      <span className="text-sm leading-none sm:hidden">×</span>
+                                      <span className="hidden sm:inline">{t('orders.wizard.lufaRemoveCopyRecipient')}</span>
+                                    </button>
+                                  </div>
+                                  {renderLufaPartyInputs(recipient, (key, value) => updateLufaCopyRecipient(index, key, value))}
                                 </div>
                               ))}
                             </div>
                           </div>
-                        )}
 
-                        {!lufaAdrnrValidation.ready && (
-                          <div className="rounded-lg border border-red-200 dark:border-red-700 bg-red-50/70 dark:bg-red-900/20 p-2 text-xs text-red-700 dark:text-red-300">
-                            {t('orders.wizard.lufaValidationAdrnr')}
+                          <div className="grid gap-3 md:grid-cols-2">
+                            {[
+                              ['Ort', t('orders.wizard.lufaKennzeichnungOrt')],
+                              ['Serie', t('orders.wizard.lufaKennzeichnungSerie')],
+                              ['Termin', t('orders.wizard.lufaKennzeichnungTermin')],
+                              ['Bezeichnung', t('orders.wizard.lufaKennzeichnungBezeichnung')],
+                              ['Gruppenart', t('orders.wizard.lufaKennzeichnungGruppenart')],
+                              ['Objekt', t('orders.wizard.lufaKennzeichnungObjekt')],
+                              ['Kürzel', t('orders.wizard.lufaKennzeichnungKuerzel')]
+                            ].map(([key, label]) => (
+                              <label key={key} className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                <span>{label}</span>
+                                <input
+                                  className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
+                                  value={String((lufaConfig.defaultKennzeichnung || {})[key] || '')}
+                                  onChange={(event) => updateLufaKennzeichnungValue(key, event.target.value)}
+                                />
+                              </label>
+                            ))}
                           </div>
-                        )}
-                        {!lufaNminLayerValidation.ready && (
-                          <div className="rounded-lg border border-red-200 dark:border-red-700 bg-red-50/70 dark:bg-red-900/20 p-2 text-xs text-red-700 dark:text-red-300">
-                            {t('orders.wizard.lufaValidationLayers')}
-                          </div>
-                        )}
-                          </div>
-                        )}
+
+                          <label className="space-y-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                            <span>{t('orders.wizard.lufaZusatzpruefparameter')}</span>
+                            <input
+                              className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm text-gray-900 dark:text-white"
+                              value={(lufaConfig.zusatzpruefparameter || []).join(', ')}
+                              onChange={(event) => {
+                                const next = event.target.value
+                                  .split(',')
+                                  .map((value) => value.trim())
+                                  .filter(Boolean);
+                                updateLufaImport({ zusatzpruefparameter: next });
+                              }}
+                              placeholder="Ntot, Smin"
+                            />
+                          </label>
+
+                          {lufaConfig.standarduntersuchungsumfang === 'Nmin' && (
+                            <div className="space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                              <div className="flex items-center justify-between">
+                                <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                  {t('orders.wizard.lufaNminLayersTitle')}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={addLufaNminLayer}
+                                  className="h-8 w-8 sm:w-auto sm:px-2 rounded border border-gray-300 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center"
+                                  title={t('orders.wizard.lufaAddLayer')}
+                                  aria-label={t('orders.wizard.lufaAddLayer')}
+                                >
+                                  <span className="text-sm leading-none sm:hidden">+</span>
+                                  <span className="hidden sm:inline">{t('orders.wizard.lufaAddLayer')}</span>
+                                </button>
+                              </div>
+                              <div className="space-y-2">
+                                {(lufaConfig.nminLayers || []).map((layer, index) => (
+                                  <div key={`layer-${index}`} className="grid gap-2 [grid-template-columns:1fr_1fr_auto] items-center">
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      className="w-full rounded border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-2 py-1 text-xs text-gray-900 dark:text-white"
+                                      value={Number(layer.depthFromCm)}
+                                      onChange={(event) => updateLufaNminLayer(index, 'depthFromCm', Number(event.target.value))}
+                                      aria-label={t('orders.wizard.lufaLayerFrom')}
+                                    />
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      className="w-full rounded border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/60 px-2 py-1 text-xs text-gray-900 dark:text-white"
+                                      value={Number(layer.depthToCm)}
+                                      onChange={(event) => updateLufaNminLayer(index, 'depthToCm', Number(event.target.value))}
+                                      aria-label={t('orders.wizard.lufaLayerTo')}
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => removeLufaNminLayer(index)}
+                                      className="h-8 w-8 sm:w-auto sm:px-2 rounded border border-gray-300 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center"
+                                      title={t('orders.wizard.lufaRemoveLayer')}
+                                      aria-label={t('orders.wizard.lufaRemoveLayer')}
+                                    >
+                                      <span className="text-sm leading-none sm:hidden">×</span>
+                                      <span className="hidden sm:inline">{t('orders.wizard.lufaRemoveLayer')}</span>
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {!lufaRecipientValidation.ready && (
+                            <div className="rounded-lg border border-red-200 dark:border-red-700 bg-red-50/70 dark:bg-red-900/20 p-2 text-xs text-red-700 dark:text-red-300">
+                              {t('orders.wizard.lufaValidationAdrnr')}
+                            </div>
+                          )}
+                          {!lufaNminLayerValidation.ready && (
+                            <div className="rounded-lg border border-red-200 dark:border-red-700 bg-red-50/70 dark:bg-red-900/20 p-2 text-xs text-red-700 dark:text-red-300">
+                              {t('orders.wizard.lufaValidationLayers')}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
 
@@ -3875,7 +4632,13 @@ export default function OrderWizard({
                           checked={draft.consent?.dataProtectionAccepted}
                           onChange={() => updateConsent('dataProtectionAccepted')}
                         />
-                        {t('orders.wizard.consentDataProtection')}
+                        <button
+                          type="button"
+                          onClick={() => setOpenLegalDocument('privacy')}
+                          className="text-left underline decoration-dotted underline-offset-2 hover:text-blue-700 dark:hover:text-blue-300"
+                        >
+                          {t('orders.wizard.consentDataProtection')}
+                        </button>
                       </label>
                       <label className="flex items-start gap-3 text-sm text-gray-700 dark:text-gray-200">
                         <input
@@ -3884,7 +4647,13 @@ export default function OrderWizard({
                           checked={draft.consent?.dataProcessingAccepted}
                           onChange={() => updateConsent('dataProcessingAccepted')}
                         />
-                        {t('orders.wizard.consentDataProcessing')}
+                        <button
+                          type="button"
+                          onClick={() => setOpenLegalDocument('processing')}
+                          className="text-left underline decoration-dotted underline-offset-2 hover:text-blue-700 dark:hover:text-blue-300"
+                        >
+                          {t('orders.wizard.consentDataProcessing')}
+                        </button>
                       </label>
                       <label className="flex items-start gap-3 text-sm text-gray-700 dark:text-gray-200">
                         <input
@@ -3893,7 +4662,13 @@ export default function OrderWizard({
                           checked={draft.consent?.digitalDocsOnlyAccepted}
                           onChange={() => updateConsent('digitalDocsOnlyAccepted')}
                         />
-                        {t('orders.wizard.consentDigitalDocs')}
+                        <button
+                          type="button"
+                          onClick={() => setOpenLegalDocument('digital')}
+                          className="text-left underline decoration-dotted underline-offset-2 hover:text-blue-700 dark:hover:text-blue-300"
+                        >
+                          {t('orders.wizard.consentDigitalDocs')}
+                        </button>
                       </label>
                       <label className="flex items-start gap-3 text-sm text-gray-700 dark:text-gray-200">
                         <input
@@ -3902,7 +4677,13 @@ export default function OrderWizard({
                           checked={draft.consent?.termsAccepted}
                           onChange={() => updateConsent('termsAccepted')}
                         />
-                        {t('orders.wizard.consentTerms')}
+                        <button
+                          type="button"
+                          onClick={() => setOpenLegalDocument('terms')}
+                          className="text-left underline decoration-dotted underline-offset-2 hover:text-blue-700 dark:hover:text-blue-300"
+                        >
+                          {t('orders.wizard.consentTerms')}
+                        </button>
                       </label>
                     </div>
 
@@ -3924,26 +4705,22 @@ export default function OrderWizard({
                         <span>{parametersReady ? '✅' : '⚠️'}</span>
                         <span>{t('orders.wizard.landUseSelected')}</span>
                       </div>
-                      {!isLufaLab && agrolabMetadataEnabled && (
-                        <>
-                          <div className="flex items-center gap-2">
-                            <span>{agrolabReadiness.labMetaReady ? '✅' : '⚠️'}</span>
-                            <span>{t('orders.wizard.labMetaComplete')}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span>{agrolabReadiness.samplingReady ? '✅' : '⚠️'}</span>
-                            <span>{t('orders.wizard.samplingDetailsComplete')}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span>{agrolabReadiness.fieldMetaReady ? '✅' : '⚠️'}</span>
-                            <span>{t('orders.wizard.fieldMetaComplete')}</span>
-                          </div>
-                        </>
+                      {isAgrolabLab && agrolabMetadataEnabled && (
+                        <div className="flex items-center gap-2">
+                          <span>ℹ️</span>
+                          <span>{t('orders.wizard.agrolabCsvEnteredValuesHint', { defaultValue: 'Agrolab CSV only includes values that were entered.' })}</span>
+                        </div>
                       )}
-                      {!isLufaLab && !agrolabMetadataEnabled && (
+                      {isAgrolabLab && !agrolabMetadataEnabled && (
                         <div className="flex items-center gap-2">
                           <span>✅</span>
                           <span>{t('orders.wizard.agrolabMetadataOptionalDisabled', { defaultValue: 'Agrolab metadata optional (disabled)' })}</span>
+                        </div>
+                      )}
+                      {isPbsLab && !pbsConfigEnabled && (
+                        <div className="flex items-center gap-2">
+                          <span>✅</span>
+                          <span>{t('orders.wizard.pbsConfigOptionalDisabled', { defaultValue: 'PBS configuration optional (disabled)' })}</span>
                         </div>
                       )}
                       <div className="flex items-center gap-2">
@@ -3959,6 +4736,12 @@ export default function OrderWizard({
           </div>
         </section>
       </div>
+      {openLegalDocument && (
+        <OrderLegalModal
+          documentKey={openLegalDocument}
+          onClose={() => setOpenLegalDocument(null)}
+        />
+      )}
     </div>
   );
 }

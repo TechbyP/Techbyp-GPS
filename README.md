@@ -243,8 +243,13 @@ Replace these together on the server each time:
 - `index.html`
 - `sw.js`
 - `manifest.webmanifest`
+- `.htaccess`
 - `assets/`
 - any copied static files like `app-logo.png`, `leaflet/`, and `tiles/`
+
+For Apache-based hosting such as many IONOS webspace plans, the generated `.htaccess`
+in `dist/` redirects all HTTP traffic to HTTPS and sends a conservative HSTS header.
+Upload it together with the other root files from `dist/`.
 
 This app registers a production service worker for PWA/offline behavior. If desktop/local preview looks correct but iPhone still shows old sizing after upload, the most common cause is stale cached HTML/CSS/JS on the phone.
 

@@ -31,6 +31,7 @@
     "@capacitor/network": "^7.0.3",
     "@capacitor/preferences": "^7.0.3",
     "@capacitor/splash-screen": "^7.0.4",
+    "@mapbox/shp-write": "^0.4.3",
     "@turf/area": "^6.5.0",
     "@turf/helpers": "^7.3.5",
     "@turf/intersect": "^7.3.5",
@@ -61,7 +62,8 @@
     "react-leaflet-draw": "0.20.0",
     "react-router-dom": "^7.3.1",
     "shpjs": "^6.2.0",
-    "tsx": "^4.21.0"
+    "tsx": "^4.21.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

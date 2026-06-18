@@ -2,21 +2,41 @@ import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useDarkMode } from '../../hooks/useDarkMode';
 import { useLanguage } from '../../hooks/useLanguage';
-import { Mail, Lock, Globe, Download, Loader } from 'lucide-react';
+import { Mail, Lock, Globe, Loader, Smartphone } from 'lucide-react';
 import { AnimatedLoader } from '../ui/AnimatedLoader';
 import { RegistrationForm } from './RegistrationForm';
 import toast from 'react-hot-toast';
-import { isCapacitorApp, getPlatformInfo } from '../../utils/platform';
+import { isCapacitorApp } from '../../utils/platform';
 
 export function AuthScreen() {
   const [isDark] = useDarkMode();
   const { t, language, changeLanguage } = useLanguage();
   const { login } = useAuth();
+  const apkDownloadFilename = 'TECHBYP-GPS Pro.apk';
+  const apkDownloadPath = `/${encodeURIComponent(apkDownloadFilename)}`;
 
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const secondaryActionCardClass = `w-full rounded-xl border p-3 text-left transition-colors ${
+    isDark
+      ? 'border-gray-700 bg-gray-900/50 hover:bg-gray-900/70'
+      : 'border-gray-200 bg-gray-50 hover:bg-white'
+  }`;
+  const secondaryActionTitleClass = `text-sm font-semibold ${isDark ? 'text-gray-100' : 'text-gray-900'}`;
+  const secondaryActionBodyClass = `mt-1 text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'}`;
+  const androidAppCardClass = `w-full rounded-2xl border p-3 transition-colors ${
+    isDark
+      ? 'border-gray-700 bg-gray-900/50 hover:bg-gray-900/70'
+      : 'border-gray-200 bg-gray-50 hover:bg-white'
+  }`;
+  const androidIconTileClass = 'relative flex h-14 w-14 items-center justify-center rounded-[1.1rem] bg-gradient-to-br from-green-500 to-emerald-600 shadow-lg';
+  const androidIconBadgeClass = `absolute -right-1 -top-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] ${
+    isDark ? 'bg-gray-900 text-green-300 border border-green-500/30' : 'bg-white text-green-700 border border-green-200'
+  }`;
+  const androidMetaClass = `text-[11px] font-medium uppercase tracking-[0.16em] ${isDark ? 'text-green-300' : 'text-green-700'}`;
+  const isInstalledApp = isCapacitorApp();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,12 +53,6 @@ export function AuthScreen() {
       setLoading(false);
     }
   };
-
-  // Check if running as installed app
-  const isInstalledApp = isCapacitorApp();
-
-  // Debug logging disabled to reduce console spam
-  // Platform info available via getPlatformInfo() if needed for debugging
 
   // Show loading screen during auth
   if (loading) {
@@ -61,7 +75,7 @@ export function AuthScreen() {
             <h1 className={`text-lg sm:text-xl font-bold mb-1.5 ${
               isDark ? 'text-gray-100' : 'text-gray-900'
             }`}>
-              {t('app.name') || 'TECHBYP GPS'}
+              {t('app.name') || 'TECHBYP - GPS Pro'}
             </h1>
             <p className={`text-xs sm:text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
               {t('auth.signupTitle') || 'Create your account'}
@@ -88,13 +102,8 @@ export function AuthScreen() {
           <h1 className={`text-lg sm:text-xl font-bold mb-1.5 ${
             isDark ? 'text-gray-100' : 'text-gray-900'
           }`}>
-            {t('app.name') || 'TECHBYP GPS'}
+            {t('app.name') || 'TECHBYP - GPS Pro'}
           </h1>
-          <p className={`text-xs sm:text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-            {isSignUp
-              ? t('auth.signupTitle') || 'Create your account'
-              : t('auth.loginTitle') || 'Welcome back'}
-          </p>
         </div>
 
         {/* Form */}
@@ -178,70 +187,47 @@ export function AuthScreen() {
           </button>
         </form>
 
-        {/* Toggle */}
-        <div className="mt-3 sm:mt-4 text-center">
-          <p className={`text-[10px] sm:text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-            {t('auth.noAccount') || "Don't have an account?"}
-            {' '}
-            <button
-              type="button"
-              onClick={() => {
-                setIsSignUp(true);
-              }}
-              className="text-blue-600 hover:text-blue-700 font-medium"
-            >
-              {t('auth.signupInstead') || 'Sign up'}
-            </button>
-          </p>
-        </div>
+        {(!navigator.onLine || !isInstalledApp) && (
+          <div className={`mt-4 pt-4 border-t ${isDark ? 'border-gray-700/50' : 'border-gray-200'} space-y-2.5`}>
+            {!navigator.onLine && (
+              <button
+                type="button"
+                onClick={() => {
+                  const guestUser = {
+                    uid: 'offline_guest',
+                    email: 'offline@guest.local',
+                    emailVerified: false,
+                    isAnonymous: true,
+                    displayName: t('auth.offlineUser') || 'Offline User',
+                    photoURL: null,
+                    phoneNumber: null,
+                    providerId: 'offline',
+                    providerData: []
+                  } as any;
+                  
+                  window.dispatchEvent(new CustomEvent('offline-auth', { detail: guestUser }));
+                  toast.success(t('auth.offlineMode') || 'Using offline mode');
+                }}
+                className={secondaryActionCardClass}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="text-lg">📱</div>
+                  <div>
+                    <div className={secondaryActionTitleClass}>{t('auth.useOffline') || 'Use Offline Mode'}</div>
+                    <div className={secondaryActionBodyClass}>{t('auth.offlineNote') || 'Local data only, no cloud sync'}</div>
+                  </div>
+                </div>
+              </button>
+            )}
 
-        {/* Offline Mode */}
-        {!navigator.onLine && (
-          <div className="mt-3 sm:mt-4">
-            <button
-              type="button"
-              onClick={() => {
-                // Set guest mode
-                const guestUser = {
-                  uid: 'offline_guest',
-                  email: 'offline@guest.local',
-                  emailVerified: false,
-                  isAnonymous: true,
-                  displayName: t('auth.offlineUser') || 'Offline User',
-                  photoURL: null,
-                  phoneNumber: null,
-                  providerId: 'offline',
-                  providerData: []
-                } as any;
-                
-                // Manually trigger auth state (bypass Firebase)
-                window.dispatchEvent(new CustomEvent('offline-auth', { detail: guestUser }));
-                toast.success(t('auth.offlineMode') || 'Using offline mode');
-              }}
-              className={`w-full py-1.5 sm:py-2 rounded-lg font-medium text-xs transition-colors border-2 border-dashed ${
-                isDark 
-                  ? 'border-gray-600 text-gray-300 hover:border-gray-500 hover:bg-gray-800/50' 
-                  : 'border-gray-400 text-gray-600 hover:border-gray-500 hover:bg-gray-50'
-              }`}
-            >
-              📱 {t('auth.useOffline') || 'Use Offline Mode'}
-            </button>
-            <p className={`text-[9px] sm:text-[10px] mt-1 text-center ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
-              {t('auth.offlineNote') || 'Local data only, no cloud sync'}
-            </p>
-          </div>
-        )}
-
-        {/* APK Download Link - Only show in browser, not in installed app */}
-        {!isInstalledApp && (
-          <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-gray-700/50">
-            <button
+            {!isInstalledApp && (
+              <button
               onClick={() => {
                 try {
-                  console.log('📦 Starting APK download from:', '/gps-tracker.apk');
+                  console.log('📦 Starting APK download from:', apkDownloadPath);
                   
                   // Try fetch first to check if file exists
-                  fetch('/gps-tracker.apk', { method: 'HEAD' })
+                  fetch(apkDownloadPath, { method: 'HEAD' })
                     .then(response => {
                       if (!response.ok) {
                         console.error('❌ APK not found or not accessible. Status:', response.status);
@@ -252,8 +238,8 @@ export function AuthScreen() {
                       console.log('✅ APK found, starting download...');
                       // Create download link
                       const link = document.createElement('a');
-                      link.href = '/gps-tracker.apk';
-                      link.download = 'gps-tracker.apk';
+                      link.href = apkDownloadPath;
+                      link.download = apkDownloadFilename;
                       link.style.display = 'none';
                       document.body.appendChild(link);
                       link.click();
@@ -264,8 +250,8 @@ export function AuthScreen() {
                       console.error('❌ Error checking APK:', error);
                       // Try download anyway
                       const link = document.createElement('a');
-                      link.href = '/gps-tracker.apk';
-                      link.download = 'gps-tracker.apk';
+                      link.href = apkDownloadPath;
+                      link.download = apkDownloadFilename;
                       link.style.display = 'none';
                       document.body.appendChild(link);
                       link.click();
@@ -276,18 +262,21 @@ export function AuthScreen() {
                   toast.error(t('auth.apkDownloadFailed') || 'Failed to download APK');
                 }
               }}
-              className={`flex items-center justify-center gap-1.5 sm:gap-2 w-full py-2 sm:py-2.5 rounded-lg font-medium text-xs sm:text-sm transition-colors ${
-                isDark
-                  ? 'bg-green-600/10 hover:bg-green-600/20 text-green-400 border border-green-600/30'
-                  : 'bg-green-50 hover:bg-green-100 text-green-700 border border-green-200'
-              }`}
-            >
-              <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              {t('auth.downloadApk') || 'Download Android APK'}
-            </button>
-            <p className={`text-[10px] sm:text-xs text-center mt-1.5 sm:mt-2 ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
-              {t('auth.installOnTablet') || 'Install on your Android tablet'}
-            </p>
+                className={androidAppCardClass}
+                aria-label={t('auth.downloadApk') || 'Download Android APK'}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={androidIconTileClass}>
+                    <Smartphone className="w-7 h-7 text-white" />
+                    <span className={androidIconBadgeClass}>APK</span>
+                  </div>
+                  <div className="min-w-0 flex-1 text-left">
+                    <div className={androidMetaClass}>{t('auth.androidApp') || 'Android App'}</div>
+                    <div className={secondaryActionBodyClass}>{t('auth.installOnTablet') || 'Install on your Android tablet'}</div>
+                  </div>
+                </div>
+              </button>
+            )}
           </div>
         )}
 

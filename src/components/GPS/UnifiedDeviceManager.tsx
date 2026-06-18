@@ -4,7 +4,7 @@
  * Supports: TCP/WiFi (Emlid Reach RS3), Bluetooth LE (GPS devices), USB Serial GPS
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useDarkMode } from '../../hooks/useDarkMode';
 import { useLanguage } from '../../hooks/useLanguage';
@@ -27,7 +27,6 @@ import {
   Loader,
   Satellite,
   CheckCircle,
-  AlertCircle,
   Edit,
   Save
 } from 'lucide-react';
@@ -82,6 +81,7 @@ export default function UnifiedDeviceManager({
     vendorId?: number;
     productId?: number;
   }>>([]);
+  const addDeviceFormRef = useRef<HTMLDivElement | null>(null);
 
   const REACH_RS3_PRESET = {
     name: 'Emlid Reach RS3',
@@ -444,7 +444,7 @@ export default function UnifiedDeviceManager({
         
         // Pass the position callback to parent
         if (onDeviceConnected) {
-          onDeviceConnected(device, (pos: GpsPositionUpdate) => {
+          onDeviceConnected(device, (_pos: GpsPositionUpdate) => {
             // This callback will be called by useTcpGPS hook
           });
         }
@@ -457,7 +457,7 @@ export default function UnifiedDeviceManager({
         
         // Pass the position callback to parent
         if (onDeviceConnected) {
-          onDeviceConnected(device, (pos: GpsPositionUpdate) => {
+          onDeviceConnected(device, (_pos: GpsPositionUpdate) => {
             // This callback will be called by useBluetoothGPS hook
           });
         }
@@ -480,7 +480,7 @@ export default function UnifiedDeviceManager({
           setActiveDevice(device);
           
           if (onDeviceConnected) {
-            onDeviceConnected(device, (pos: GpsPositionUpdate) => {
+            onDeviceConnected(device, (_pos: GpsPositionUpdate) => {
               // Position updates handled by native manager callbacks
             });
           }
@@ -516,7 +516,7 @@ export default function UnifiedDeviceManager({
         
         // Pass the position callback to parent
         if (onDeviceConnected) {
-          onDeviceConnected(device, (pos: GpsPositionUpdate) => {
+          onDeviceConnected(device, (_pos: GpsPositionUpdate) => {
             // This callback will be called by useSerialGPS hook
           });
         }
@@ -848,6 +848,29 @@ export default function UnifiedDeviceManager({
     setEditingDevice(null);
   };
 
+  const openManualDeviceForm = () => {
+    setEditingDevice(null);
+    setDeviceName('');
+    setDeviceType('wifi');
+    setIpAddress('');
+    setPort('9001');
+    setBluetoothId('');
+    setShowAddDevice(true);
+  };
+
+  useEffect(() => {
+    if (!showAddDevice) return;
+
+    const frame = requestAnimationFrame(() => {
+      addDeviceFormRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start'
+      });
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [showAddDevice]);
+
   const handleAddReachRs3Preset = async () => {
     const newDevice: GpsDevice = {
       id: Date.now(),
@@ -944,14 +967,32 @@ export default function UnifiedDeviceManager({
               ? (t('gps.devices.usb') || 'USB Serial')
               : (t('gps.devices.sourceUnknown') || 'Unknown');
   const lastUpdateSeconds = activePosition ? Math.max(0, Math.floor((Date.now() - activePosition.timestamp) / 1000)) : null;
+  const summaryCardClass = `${isDark ? 'bg-gray-900/70 border-gray-700/70' : 'bg-gray-50 border-gray-200'} rounded-xl border p-2.5 md:p-3`;
+  const summaryActionCardClass = `${summaryCardClass} text-left transition-colors ${
+    isDark ? 'hover:border-blue-500/60 hover:bg-gray-900' : 'hover:border-blue-300 hover:bg-white'
+  }`;
+  const summaryLabelClass = `text-[11px] font-semibold uppercase tracking-[0.14em] ${isDark ? 'text-gray-500' : 'text-gray-500'}`;
+  const summaryValueClass = `mt-0.5 text-sm md:text-[15px] font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`;
+  const summaryMetaClass = `mt-0.5 text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'}`;
+  const quickActionButtonClass = `${isDark ? 'bg-gray-900/70 border-gray-700/70 hover:border-blue-500/60' : 'bg-white border-gray-200 hover:border-blue-300'} rounded-xl border p-3 text-left transition-colors`;
+  const quickActionTitleClass = `text-[13px] md:text-sm font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`;
+  const quickActionDescriptionClass = `mt-0.5 text-xs leading-snug ${isDark ? 'text-gray-400' : 'text-gray-600'}`;
+  const deviceConnectionState = mockLocationActive
+    ? (t('gps.devices.inUse') || 'In Use')
+    : isConnected
+      ? (t('common.connected') || 'Connected')
+      : isConnecting
+        ? (t('common.connecting') || 'Connecting')
+        : (t('gps.devices.readyToConnect') || 'Ready to connect');
+  const activeDeviceLabel = activeDevice?.name || (t('gps.devices.noneSelected') || 'No active device');
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6 bg-black/50 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-5 bg-black/50 backdrop-blur-sm">
       <div className={`w-full max-w-2xl md:max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden ${
         isDark ? 'bg-gray-800' : 'bg-white'
       }`}>
         {/* Header */}
-        <div className={`flex-shrink-0 px-6 md:px-8 py-4 md:py-6 border-b flex items-center justify-between ${
+        <div className={`flex-shrink-0 px-5 md:px-6 py-3 md:py-4 border-b flex items-center justify-between ${
           isDark ? 'bg-gray-900 border-gray-700' : 'bg-gray-50 border-gray-200'
         }`}>
           <div className="flex items-center gap-3 md:gap-4">
@@ -980,21 +1021,52 @@ export default function UnifiedDeviceManager({
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 md:p-8">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-5">
+          <div className="grid grid-cols-2 gap-2.5 mb-5 lg:grid-cols-4">
+            <div className={summaryCardClass}>
+              <div className={summaryLabelClass}>{t('gps.devices.connectionState') || 'Connection'}</div>
+              <div className={summaryValueClass}>{deviceConnectionState}</div>
+              <div className={summaryMetaClass}>{connectionSource}</div>
+            </div>
+            <div className={summaryCardClass}>
+              <div className={summaryLabelClass}>{t('gps.devices.activeDevice') || 'Active device'}</div>
+              <div className={summaryValueClass}>{activeDeviceLabel}</div>
+              <div className={summaryMetaClass}>{savedDevices.length} {t('gps.devices.savedDevices') || 'saved devices'}</div>
+            </div>
+            <div className={summaryCardClass}>
+              <div className={summaryLabelClass}>{t('gps.devices.lastUpdate') || 'Last update'}</div>
+              <div className={summaryValueClass}>
+                {lastUpdateSeconds != null
+                  ? (t('gps.devices.secondsAgo', { seconds: lastUpdateSeconds }) || `${lastUpdateSeconds}s ago`)
+                  : (t('gps.devices.noTelemetry') || 'No live telemetry yet.')}
+              </div>
+              <div className={summaryMetaClass}>{t('gps.devices.connectedToGps') || 'Connected to GPS device'}</div>
+            </div>
+            <button
+              type="button"
+              onClick={openManualDeviceForm}
+              className={summaryActionCardClass}
+            >
+              <div className={summaryLabelClass}>{t('gps.devices.quickActions') || 'Quick actions'}</div>
+              <div className={summaryValueClass}>{t('gps.devices.addDevice') || 'Add Device'}</div>
+              <div className={summaryMetaClass}>{t('gps.devices.connectExternalGPS') || 'Connect external GPS'}</div>
+            </button>
+          </div>
+
           {/* Add/Edit Device Form */}
           {showAddDevice && (
-            <div className={`mb-6 p-4 md:p-6 rounded-xl border-2 ${
+            <div className={`mb-5 p-3 md:p-4 rounded-xl border-2 ${
               isDark ? 'bg-gray-900 border-blue-500' : 'bg-blue-50 border-blue-300'
-            }`}>
-              <h3 className={`text-lg md:text-xl font-semibold mb-4 md:mb-6 ${
+            }`} ref={addDeviceFormRef}>
+              <h3 className={`text-base md:text-lg font-semibold mb-3 md:mb-4 ${
                 isDark ? 'text-white' : 'text-gray-900'
               }`}>
                 {editingDevice ? (t('gps.devices.editDevice') || 'Edit Device') : (t('gps.devices.addManualDevice') || 'Add New Device')}
               </h3>
               
               {/* Device Name */}
-              <div className="mb-4 md:mb-6">
-                <label className={`block text-sm md:text-base font-medium mb-2 md:mb-3 ${
+              <div className="mb-3 md:mb-4">
+                <label className={`block text-sm md:text-base font-medium mb-1.5 md:mb-2 ${
                   isDark ? 'text-gray-300' : 'text-gray-700'
                 }`}>
                   {t('gps.devices.deviceName') || 'Device Name'}
@@ -1004,7 +1076,7 @@ export default function UnifiedDeviceManager({
                   value={deviceName}
                   onChange={(e) => setDeviceName(e.target.value)}
                   placeholder={t('gps.devices.deviceNamePlaceholder') || 'e.g., Emlid Reach RS3'}
-                  className={`w-full px-4 md:px-5 py-3 md:py-4 rounded-lg border text-base md:text-lg ${
+                  className={`w-full px-3 md:px-4 py-2.5 md:py-3 rounded-lg border text-sm md:text-base ${
                     isDark 
                       ? 'bg-gray-800 border-gray-700 focus:border-blue-500 text-white' 
                       : 'bg-white border-gray-300 focus:border-blue-500 text-gray-900'
@@ -1013,30 +1085,30 @@ export default function UnifiedDeviceManager({
               </div>
 
               {/* Connection Type */}
-              <div className="mb-4 md:mb-6">
-                <label className={`block text-sm md:text-base font-medium mb-2 md:mb-3 ${
+              <div className="mb-3 md:mb-4">
+                <label className={`block text-sm md:text-base font-medium mb-1.5 md:mb-2 ${
                   isDark ? 'text-gray-300' : 'text-gray-700'
                 }`}>
                   {t('gps.devices.connectionType') || 'Connection Type'}
                 </label>
-                <p className={`text-xs md:text-sm mb-3 md:mb-4 ${
+                <p className={`text-xs md:text-sm mb-2.5 md:mb-3 ${
                   isDark ? 'text-gray-400' : 'text-gray-600'
                 }`}>
                   {t('gps.devices.mockLocationNote') || '💡 If you\'re using Mock Location (external GNSS app), you don\'t need to add devices here'}
                 </p>
-                <div className="grid grid-cols-3 gap-3 md:gap-4">
+                <div className="grid grid-cols-3 gap-2.5 md:gap-3">
                   <button
                     onClick={() => setDeviceType('wifi')}
-                    className={`p-4 md:p-6 rounded-lg border-2 transition-all ${
+                    className={`p-3 md:p-4 rounded-lg border-2 transition-all ${
                       deviceType === 'wifi'
                         ? 'border-blue-500 bg-blue-500/10'
                         : isDark ? 'border-gray-700 hover:border-gray-600' : 'border-gray-300 hover:border-gray-400'
                     }`}
                   >
-                    <Wifi className={`w-6 h-6 md:w-8 md:h-8 mx-auto mb-2 ${
+                    <Wifi className={`w-5 h-5 md:w-6 md:h-6 mx-auto mb-1.5 ${
                       deviceType === 'wifi' ? 'text-blue-500' : (isDark ? 'text-gray-400' : 'text-gray-600')
                     }`} />
-                    <div className={`text-sm md:text-base font-medium ${
+                    <div className={`text-xs md:text-sm font-medium ${
                       isDark ? 'text-white' : 'text-gray-900'
                     }`}>
                       {t('gps.devices.wifiTcp') || 'WiFi / TCP'}
@@ -1044,16 +1116,16 @@ export default function UnifiedDeviceManager({
                   </button>
                   <button
                     onClick={() => setDeviceType('bluetooth')}
-                    className={`p-4 md:p-6 rounded-lg border-2 transition-all ${
+                    className={`p-3 md:p-4 rounded-lg border-2 transition-all ${
                       deviceType === 'bluetooth'
                         ? 'border-blue-500 bg-blue-500/10'
                         : isDark ? 'border-gray-700 hover:border-gray-600' : 'border-gray-300 hover:border-gray-400'
                     }`}
                   >
-                    <Bluetooth className={`w-6 h-6 md:w-8 md:h-8 mx-auto mb-2 ${
+                    <Bluetooth className={`w-5 h-5 md:w-6 md:h-6 mx-auto mb-1.5 ${
                       deviceType === 'bluetooth' ? 'text-blue-500' : (isDark ? 'text-gray-400' : 'text-gray-600')
                     }`} />
-                    <div className={`text-sm md:text-base font-medium ${
+                    <div className={`text-xs md:text-sm font-medium ${
                       isDark ? 'text-white' : 'text-gray-900'
                     }`}>
                       {t('gps.devices.bluetooth') || 'Bluetooth'}
@@ -1061,16 +1133,16 @@ export default function UnifiedDeviceManager({
                   </button>
                   <button
                     onClick={() => setDeviceType('usb')}
-                    className={`p-4 md:p-6 rounded-lg border-2 transition-all ${
+                    className={`p-3 md:p-4 rounded-lg border-2 transition-all ${
                       deviceType === 'usb'
                         ? 'border-blue-500 bg-blue-500/10'
                         : isDark ? 'border-gray-700 hover:border-gray-600' : 'border-gray-300 hover:border-gray-400'
                     }`}
                   >
-                    <Usb className={`w-6 h-6 md:w-8 md:h-8 mx-auto mb-2 ${
+                    <Usb className={`w-5 h-5 md:w-6 md:h-6 mx-auto mb-1.5 ${
                       deviceType === 'usb' ? 'text-blue-500' : (isDark ? 'text-gray-400' : 'text-gray-600')
                     }`} />
-                    <div className={`text-sm md:text-base font-medium ${
+                    <div className={`text-xs md:text-sm font-medium ${
                       isDark ? 'text-white' : 'text-gray-900'
                     }`}>
                       {t('gps.devices.usb') || 'USB Serial'}
@@ -1131,8 +1203,8 @@ export default function UnifiedDeviceManager({
                 <>
                   <Button
                     onClick={handleScanBluetooth}
-                    className="w-full mb-4"
-                    size="lg"
+                    className="w-full mb-3"
+                    size="md"
                   >
                     <Bluetooth className="w-5 h-5 mr-2" />
                     {t('gps.devices.scanBluetooth') || 'Scan for Bluetooth Devices'}
@@ -1154,7 +1226,7 @@ export default function UnifiedDeviceManager({
                     <Button
                       onClick={handleConnectUSB}
                       className="w-full"
-                      size="lg"
+                      size="md"
                       variant="primary"
                     >
                       <Usb className="w-5 h-5 mr-2" />
@@ -1163,7 +1235,7 @@ export default function UnifiedDeviceManager({
                     <Button
                       onClick={handleScanUSB}
                       className="w-full"
-                      size="lg"
+                      size="md"
                       variant="secondary"
                     >
                       <Satellite className="w-5 h-5 mr-2" />
@@ -1186,11 +1258,11 @@ export default function UnifiedDeviceManager({
               )}
 
               {/* Action Buttons */}
-              <div className="flex gap-3 mt-4">
+              <div className="flex gap-2 mt-3">
                 <Button
                   onClick={handleAddDevice}
                   variant="primary"
-                  size="lg"
+                  size="md"
                   className="flex-1"
                 >
                   <Save className="w-5 h-5 mr-2" />
@@ -1199,7 +1271,7 @@ export default function UnifiedDeviceManager({
                 <Button
                   onClick={cancelEdit}
                   variant="secondary"
-                  size="lg"
+                  size="md"
                 >
                   {t('common.cancel') || 'Cancel'}
                 </Button>
@@ -1210,46 +1282,68 @@ export default function UnifiedDeviceManager({
           {/* Add Device Button (when not showing form) */}
           {!showAddDevice && (
             <>
-              <Button
-                onClick={handleAddReachRs3Preset}
-                variant="primary"
-                size="lg"
-                className="w-full mb-3 text-left justify-start whitespace-normal leading-tight"
-              >
-                <Wifi className="w-5 h-5 mr-2" />
-                {t('gps.devices.addReachPreset') || 'Add Reach RS3 Preset (WiFi)'}
-              </Button>
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className={`text-sm font-semibold uppercase tracking-[0.14em] ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                  {t('gps.devices.quickActions') || 'Quick actions'}
+                </h3>
+              </div>
+              <div className="grid grid-cols-1 gap-2.5 mb-5 md:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={handleAddReachRs3Preset}
+                  className={quickActionButtonClass}
+                >
+                  <div className="flex items-start gap-3">
+                    <Wifi className="w-5 h-5 mt-0.5 text-blue-500 flex-shrink-0" />
+                    <div>
+                      <div className={quickActionTitleClass}>{t('gps.devices.addReachPreset') || 'Add Reach RS3 Preset (WiFi)'}</div>
+                      <div className={quickActionDescriptionClass}>{t('gps.devices.reachPresetDescription') || 'Save the default Reach hotspot settings and connect faster in the field.'}</div>
+                    </div>
+                  </div>
+                </button>
 
-              <Button
-                onClick={applyReachRs3PresetToForm}
-                variant="secondary"
-                size="lg"
-                className="w-full mb-4 text-left justify-start whitespace-normal leading-tight"
-              >
-                <Edit className="w-5 h-5 mr-2" />
-                {t('gps.devices.customizeReachPreset') || 'Customize Reach RS3 Preset'}
-              </Button>
+                <button
+                  type="button"
+                  onClick={applyReachRs3PresetToForm}
+                  className={quickActionButtonClass}
+                >
+                  <div className="flex items-start gap-3">
+                    <Edit className="w-5 h-5 mt-0.5 text-blue-500 flex-shrink-0" />
+                    <div>
+                      <div className={quickActionTitleClass}>{t('gps.devices.customizeReachPreset') || 'Customize Reach RS3 Preset'}</div>
+                      <div className={quickActionDescriptionClass}>{t('gps.devices.customizeReachPresetDescription') || 'Pre-fill the form and change IP, port, or naming before saving.'}</div>
+                    </div>
+                  </div>
+                </button>
 
-              <Button
-                onClick={() => setShowAddDevice(true)}
-                variant="primary"
-                size="lg"
-                className="w-full mb-4 text-left justify-start whitespace-normal leading-tight"
-              >
-                <Plus className="w-5 h-5 mr-2" />
-                {t('gps.devices.addManualDevice') || 'Add New Device'}
-              </Button>
-              
-              {/* Scan for Mock Location Button */}
-              <Button
-                onClick={handleScanMockLocation}
-                variant="secondary"
-                size="lg"
-                className="w-full mb-6 text-left justify-start whitespace-normal leading-tight"
-              >
-                <Satellite className="w-5 h-5 mr-2" />
-                {t('gps.devices.scanMockLocation') || 'Scan for Mock Location (External GNSS)'}
-              </Button>
+                <button
+                  type="button"
+                  onClick={openManualDeviceForm}
+                  className={quickActionButtonClass}
+                >
+                  <div className="flex items-start gap-3">
+                    <Plus className="w-5 h-5 mt-0.5 text-blue-500 flex-shrink-0" />
+                    <div>
+                      <div className={quickActionTitleClass}>{t('gps.devices.addManualDevice') || 'Add New Device'}</div>
+                      <div className={quickActionDescriptionClass}>{t('gps.devices.addManualDeviceDescription') || 'Create a WiFi, Bluetooth, or USB profile manually for saved reuse.'}</div>
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleScanMockLocation}
+                  className={quickActionButtonClass}
+                >
+                  <div className="flex items-start gap-3">
+                    <Satellite className="w-5 h-5 mt-0.5 text-blue-500 flex-shrink-0" />
+                    <div>
+                      <div className={quickActionTitleClass}>{t('gps.devices.scanMockLocation') || 'Scan for Mock Location (External GNSS)'}</div>
+                      <div className={quickActionDescriptionClass}>{t('gps.devices.scanMockLocationDescription') || 'Detect whether an external GNSS app is already feeding location into Android.'}</div>
+                    </div>
+                  </div>
+                </button>
+              </div>
             </>
           )}
 

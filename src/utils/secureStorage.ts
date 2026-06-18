@@ -10,8 +10,9 @@
 import { Preferences } from '@capacitor/preferences';
 import { isCapacitorApp } from './platform';
 import { indexedDBService } from '../services/indexedDBService';
+import { getUserAccessSnapshot, type UserAccessShape } from './userAccess';
 
-interface OfflineAuthToken {
+interface OfflineAuthToken extends UserAccessShape {
   uid: string;
   email: string;
   token: string; // Signed JWT-like token
@@ -151,15 +152,17 @@ class SecureStorageService {
    * Store offline auth credentials (NO PASSWORD)
    * Only stores uid, email, and signed token
    */
-  async storeOfflineAuth(uid: string, email: string): Promise<void> {
+  async storeOfflineAuth(uid: string, email: string, accessSnapshot?: UserAccessShape): Promise<void> {
     try {
       const token = await this.createOfflineToken(uid, email);
+      const normalizedAccessSnapshot = getUserAccessSnapshot(accessSnapshot);
       const authData: OfflineAuthToken = {
         uid,
         email,
         token,
         expiresAt: Date.now() + (this.TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
-        installId: this.installId || ''
+        installId: this.installId || '',
+        ...normalizedAccessSnapshot
       };
 
       if (isCapacitorApp()) {

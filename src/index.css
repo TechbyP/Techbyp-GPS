@@ -67,6 +67,16 @@ code {
     monospace;
 }
 
+.admin-date-input::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.admin-date-input::-webkit-clear-button,
+.admin-date-input::-webkit-inner-spin-button {
+  display: none;
+}
+
 /* Hide Leaflet top-left control icon on offline PMTiles maps */
 .pmtiles-active .leaflet-top.leaflet-left .leaflet-control {
   display: none !important;
@@ -87,11 +97,6 @@ code {
 }
 
 /* Keep field boundary strokes consistent during zoom */
-.field-vectors-pane svg path,
-.field-vectors-pane svg polygon {
-  vector-effect: non-scaling-stroke;
-}
-
 /* Prevent apparent GPS accuracy-ring drift during zoom transform handoff */
 .leaflet-zoom-anim .gps-accuracy-circle {
   opacity: 0 !important;

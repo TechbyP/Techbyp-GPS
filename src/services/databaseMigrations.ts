@@ -481,7 +481,6 @@ export async function applyMigrations(db: SQLiteDBConnection): Promise<void> {
     logger.info('Migration', `Applying migration v${migration.version}: ${migration.description}`);
     
     const startTime = Date.now();
-    let success = false;
     let errorMessage: string | undefined;
     
     try {
@@ -504,8 +503,7 @@ export async function applyMigrations(db: SQLiteDBConnection): Promise<void> {
       try {
         // Apply migration
         await migration.up(db);
-        
-        success = true;
+
         const duration = Date.now() - startTime;
         
         // Record successful migration INSIDE transaction before committing
@@ -522,7 +520,7 @@ export async function applyMigrations(db: SQLiteDBConnection): Promise<void> {
           try {
             await db.run('ROLLBACK');
             logger.warn('Migration', 'Transaction rolled back');
-          } catch (rollbackError) {
+          } catch {
             // Rollback might fail if transaction wasn't started - this is okay
             logger.warn('Migration', 'Rollback unnecessary or failed (may be normal)');
           }

@@ -28,8 +28,6 @@ export function useWindowsGeolocation(options: UseWindowsGeolocationOptions = {}
     enableHighAccuracy = true,
     timeout = 10000,
     maximumAge = 0,
-    onPosition,
-    onError
   } = options;
 
   const [state, setState] = useState<WindowsGeolocationState>({

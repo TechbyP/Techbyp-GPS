@@ -4,8 +4,6 @@
  * Fixes Issue #23: Translation keys missing for error messages
  */
 
-import { ERROR_MESSAGES } from '../config/constants';
-
 export type ErrorCategory = 
   | 'database'
   | 'sync' 

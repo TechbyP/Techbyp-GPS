@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap, Polygon, useM
 import L from 'leaflet';
 import { Capacitor } from '@capacitor/core';
 import { GpsPosition, GpsFieldBoundary } from '../../../types';
-import { getBlankTileUrl, createTileLoadStartHandler, getBundledGermanyPmtilesUrl } from '../../../utils/tileUtils';
+import { getBlankTileUrl, createTileLoadStartHandler, getBundledGermanyPmtilesUrl, getTileLayerCrossOrigin } from '../../../utils/tileUtils';
 import { getDefaultPack, getPackForLocation, OFFLINE_MAP_PACKS } from '../../../config/offlineMapPacks';
 import { useLanguage } from '../../../hooks/useLanguage';
 import { useDarkMode } from '../../../hooks/useDarkMode';
@@ -18,6 +18,7 @@ import 'leaflet-defaulticon-compatibility';
 const offlinePmtilesUrl = getBundledGermanyPmtilesUrl();
 const onlineTileUrl = (window as any).__VITE_ONLINE_TILE_URL__ || (import.meta.env.VITE_ONLINE_TILE_URL as string | undefined);
 const offlineTilesDisabledByEnv = ((import.meta.env.VITE_DISABLE_OFFLINE_TILES as string | undefined) || '').toLowerCase() === 'true';
+const LEAFLET_WORLD_BOUNDS: L.LatLngBoundsExpression = [[-85.05112878, -180], [85.05112878, 180]];
 
 const getBoundaryAreaScore = (boundary: GpsFieldBoundary, fallbackBounds: L.LatLngBounds): number => {
   const bbox = boundary.render_meta?.bbox;
@@ -335,7 +336,7 @@ function CurrentPositionTracker({
         }
       }
     }
-  }, [position, isNavigating, followUser, autoRotate, forceRotate, map]);
+  }, [position, isNavigating, followUser, autoRotate, forceRotate, map, headingOverride]);
 
   return null;
 }
@@ -735,7 +736,6 @@ export default function NavigationMap({
   const [tileProbeComplete, setTileProbeComplete] = useState(false);
   const [tileProbeCounter, setTileProbeCounter] = useState(0);
   const [showOfflinePrompt, setShowOfflinePrompt] = useState(false);
-  const pmtilesVersion = import.meta.env.VITE_PMTILES_VERSION || '20260122';
   const isNative = Capacitor.isNativePlatform();
   const isTabletPerformanceMode = isNative;
   const [mapBounds, setMapBounds] = useState<L.LatLngBounds | null>(null);
@@ -925,7 +925,7 @@ export default function NavigationMap({
     };
     probe();
     return () => { cancelled = true; };
-  }, [offlinePmtilesUrl, isOnline, tileProbeCounter, activePack]);
+  }, [isOnline, tileProbeCounter, activePack]);
 
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
@@ -990,7 +990,7 @@ export default function NavigationMap({
       setTileProbeCounter((v) => v + 1);
       setShowOfflinePrompt(false);
     }
-  }, [isDownloadingOffline, t, activePack]);
+  }, [isDownloadingOffline, isOnline, t, activePack]);
 
   const uniqueFieldBoundaries = useMemo(() => {
     const seen = new Set<string>();
@@ -1110,6 +1110,15 @@ export default function NavigationMap({
     const points = selectedRoute.coordinates.map(([lat, lng]) => L.latLng(lat, lng));
     return L.latLngBounds(points);
   }, [selectedRoute]);
+
+  const selectDestinationBounds = useMemo(() => {
+    if (!projectBounds) return null;
+    if (!currentPosition) return projectBounds;
+
+    const bounds = L.latLngBounds(projectBounds.getSouthWest(), projectBounds.getNorthEast());
+    bounds.extend([currentPosition.latitude, currentPosition.longitude]);
+    return bounds;
+  }, [currentPosition, projectBounds]);
 
   const boundaryRenderData = useMemo(() => {
     return uniqueFieldBoundaries.map((boundary) => {
@@ -1357,6 +1366,7 @@ export default function NavigationMap({
 
   const [followUser, setFollowUser] = useState(true);
   const [forceSnap, setForceSnap] = useState(false);
+  const [hasLockedSelectDestinationBounds, setHasLockedSelectDestinationBounds] = useState(false);
   const userInteractingRef = useRef(false);
   const lastNavStageRef = useRef(navStage);
   const lastPositionRef = useRef<GpsPosition | null>(null);
@@ -1454,6 +1464,25 @@ export default function NavigationMap({
     };
   }, [mapRef, navStage]);
 
+  useEffect(() => {
+    setHasLockedSelectDestinationBounds(false);
+  }, [fieldBoundaries]);
+
+  useEffect(() => {
+    if (navStage !== 'select-destination') {
+      if (hasLockedSelectDestinationBounds) {
+        setHasLockedSelectDestinationBounds(false);
+      }
+      return;
+    }
+
+    if (!selectDestinationBounds || hasLockedSelectDestinationBounds) {
+      return;
+    }
+
+    setHasLockedSelectDestinationBounds(true);
+  }, [hasLockedSelectDestinationBounds, navStage, selectDestinationBounds]);
+
   // Re-enable follow on explicit recenter
   useEffect(() => {
     if (!recenterToken) return;
@@ -1516,6 +1545,9 @@ export default function NavigationMap({
         maxZoom={22}
         zoomSnap={0}
         zoomDelta={1}
+        worldCopyJump={true}
+        maxBounds={LEAFLET_WORLD_BOUNDS}
+        maxBoundsViscosity={1}
         inertia={mapPanInertia}
         bounceAtZoomLimits={mapBounceAtZoomLimits}
         className={`h-full w-full ${shouldUseOfflineTiles ? 'pmtiles-active' : ''}`}
@@ -1552,7 +1584,7 @@ export default function NavigationMap({
       <MapController
         bounds={
           navStage === 'select-destination'
-            ? projectBounds
+            ? (hasLockedSelectDestinationBounds ? projectBounds : selectDestinationBounds)
             : navStage === 'route-preview'
               ? routeBounds
               : null
@@ -1585,8 +1617,9 @@ export default function NavigationMap({
               minZoom={1}
               maxZoom={20}
               maxNativeZoom={19}
+              noWrap={true}
               attribution='© OpenStreetMap contributors'
-              crossOrigin="anonymous"
+              crossOrigin={getTileLayerCrossOrigin('https://tile.openstreetmap.org/{z}/{x}/{y}.png')}
               keepBuffer={tileKeepBuffer}
               updateWhenIdle={tileUpdateWhenIdle}
               updateWhenZooming={tileUpdateWhenZooming}
@@ -1603,8 +1636,9 @@ export default function NavigationMap({
               minZoom={1}
               maxZoom={19}
               maxNativeZoom={19}
+              noWrap={true}
               attribution='© Esri'
-              crossOrigin="anonymous"
+              crossOrigin={getTileLayerCrossOrigin('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}')}
               keepBuffer={satelliteTileKeepBuffer}
               updateWhenIdle={tileUpdateWhenIdle}
               updateWhenZooming={satelliteUpdateWhenZooming}
@@ -1622,9 +1656,10 @@ export default function NavigationMap({
               minZoom={1}
               maxZoom={18}
               maxNativeZoom={12}
+              noWrap={true}
               attribution='Offline Maps - Germany Base Map (OpenStreetMap Data)'
               errorTileUrl='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
-              crossOrigin="anonymous"
+              crossOrigin={getTileLayerCrossOrigin('/tiles/germany/{z}/{x}/{y}.png')}
               keepBuffer={tileKeepBuffer}
               updateWhenIdle={tileUpdateWhenIdle}
               updateWhenZooming={tileUpdateWhenZooming}
@@ -1645,9 +1680,10 @@ export default function NavigationMap({
               minZoom={1}
               maxZoom={18}
               maxNativeZoom={12}
+              noWrap={true}
               attribution='Offline Maps - Germany Base Map (OpenStreetMap Data)'
               errorTileUrl='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
-              crossOrigin="anonymous"
+              crossOrigin={getTileLayerCrossOrigin('/tiles/germany/{z}/{x}/{y}.png')}
               keepBuffer={tileKeepBuffer}
               updateWhenIdle={tileUpdateWhenIdle}
               updateWhenZooming={tileUpdateWhenZooming}
@@ -1667,6 +1703,7 @@ export default function NavigationMap({
               pmtilesUrl={offlinePmtilesUri}
               maxZoom={19}
               maxDataZoom={15}
+              noWrap={true}
               attribution='© OpenStreetMap contributors | Offline PMTiles'
               theme={Capacitor.isNativePlatform() && isDarkMode ? 'dark' : 'light'}
               schema="openmaptiles"
@@ -1689,6 +1726,7 @@ export default function NavigationMap({
               minZoom={1}
               maxZoom={18}
               maxNativeZoom={18}
+              noWrap={true}
               attribution='Offline fallback (no tiles available)'
               tileSize={256}
             />
@@ -1706,8 +1744,9 @@ export default function NavigationMap({
                 minZoom={1}
                 maxZoom={20}
                 maxNativeZoom={19}
+                noWrap={true}
                 attribution={onlineTileUrl ? 'Self-hosted tiles' : '© OpenStreetMap contributors'}
-                crossOrigin="anonymous"
+                crossOrigin={getTileLayerCrossOrigin(probeUrl)}
                 keepBuffer={tileKeepBuffer}
                 updateWhenIdle={tileUpdateWhenIdle}
                 updateWhenZooming={tileUpdateWhenZooming}
@@ -1724,6 +1763,7 @@ export default function NavigationMap({
               minZoom={1}
               maxZoom={18}
               maxNativeZoom={18}
+              noWrap={true}
               attribution='Loading tiles...'
               tileSize={256}
             />
@@ -1743,6 +1783,7 @@ export default function NavigationMap({
               minZoom={1}
               maxZoom={18}
               maxNativeZoom={18}
+              noWrap={true}
               attribution='Online tiles unavailable'
               tileSize={256}
             />
@@ -1754,8 +1795,9 @@ export default function NavigationMap({
             url={baseOnlineUrl}
             minZoom={1}
             maxZoom={20}
+            noWrap={true}
             attribution={onlineTileUrl || rasterFallback ? 'Self-hosted tiles | GPS Navigation' : '© OpenStreetMap contributors | GPS Navigation'}
-            crossOrigin="anonymous"
+            crossOrigin={getTileLayerCrossOrigin(baseOnlineUrl)}
             tileSize={256}
             keepBuffer={tileKeepBuffer}
             updateWhenIdle={tileUpdateWhenIdle}
@@ -1839,7 +1881,7 @@ export default function NavigationMap({
       ))}
       </MapContainer>
 
-      {false && showOfflinePrompt && (
+      {import.meta.env.VITE_ENABLE_OFFLINE_PROMPT_BANNER === 'true' && showOfflinePrompt && (
         <div className={`fixed top-2 left-1/2 z-[6000] w-[92%] max-w-lg -translate-x-1/2 px-4 py-3 text-xs shadow-lg md:text-sm glass-panel ${isDarkMode ? 'glass-panel-dark text-white' : 'glass-panel-light text-gray-900'}`}>
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div className="font-medium">

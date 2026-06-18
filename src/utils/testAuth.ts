@@ -10,7 +10,7 @@ export const testAuthPersistence = () => {
   // Check current auth state
   if (auth.currentUser) {
     // Listen for auth state changes
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, (_user) => {
       // Auth state updated
     });
     

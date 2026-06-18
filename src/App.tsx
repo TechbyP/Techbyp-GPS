@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { useEffect, useState } from 'react';
 import OrdersMainPage from './components/Web/Orders/OrdersMainPage';
 import AdminPage from './components/Web/Admin/AdminPage';
-import { DatabaseStatusIndicator } from './components/GPS/DatabaseStatusIndicator';
 import AuthScreen from './components/Auth/AuthScreen';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { useDarkMode } from './hooks/useDarkMode';

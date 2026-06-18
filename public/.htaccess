@@ -1,0 +1,13 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Redirect plain HTTP requests to HTTPS while avoiding proxy-related redirect loops.
+  RewriteCond %{HTTPS} !=on
+  RewriteCond %{HTTP:X-Forwarded-Proto} !https [NC]
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301,NE]
+</IfModule>
+
+<IfModule mod_headers.c>
+  # Start with a conservative HSTS policy. Extend max-age later after production verification.
+  Header always set Strict-Transport-Security "max-age=2592000"
+</IfModule>

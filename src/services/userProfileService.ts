@@ -14,6 +14,10 @@ export interface UserProfile {
   phone?: string;
   country?: string;
   federalState?: string;
+  accessDisabled?: boolean;
+  accessDisabledAt?: string | null;
+  accessExpiresAt?: string | null;
+  accessUpdatedAt?: string;
   createdAt: string;
   updatedAt: string;
 }

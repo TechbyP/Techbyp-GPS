@@ -50,6 +50,34 @@ export function isMobileDevice(): boolean {
 }
 
 /**
+ * Detect compact landscape screens, primarily phones used in landscape.
+ * This intentionally excludes tablets and larger touch devices.
+ */
+export function isCompactLandscapeScreen(): boolean {
+  if (typeof window === 'undefined') return false;
+
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= height) {
+    return false;
+  }
+
+  const shortSide = Math.min(width, height);
+  const longSide = Math.max(width, height);
+  const userAgent = navigator.userAgent.toLowerCase();
+  const hasTouch = 'ontouchstart' in window ||
+    navigator.maxTouchPoints > 0 ||
+    (navigator as any).msMaxTouchPoints > 0;
+  const looksLikeTablet = userAgent.includes('ipad') || userAgent.includes('tablet') || userAgent.includes('surface');
+
+  if (!hasTouch || looksLikeTablet) {
+    return false;
+  }
+
+  return isMobileDevice() && shortSide <= 600 && longSide <= 960;
+}
+
+/**
  * Detect if device has GPS capabilities
  */
 export function hasGPSCapability(): boolean {
@@ -70,6 +98,7 @@ export function getDeviceInfo() {
   return {
     isWindowsTablet: isWindowsTablet(),
     isMobile: isMobileDevice(),
+    isCompactLandscape: isCompactLandscapeScreen(),
     hasGPS: hasGPSCapability(),
     hasSerialAPI: supportsSerialAPI(),
     userAgent: navigator.userAgent,

@@ -1,0 +1,1079 @@
+<?xml version="1.0" encoding="ISO-8859-15"?>
+<Export Exportdatum="11072025_131042" Exportdatei="FM-XML_11072025_131042_25-A-011458.xml">
+  <Auftrag anr="25-A-011458">
+    <Auftragsnummer>25-A-011458</Auftragsnummer>
+    <Aktion/>
+    <Auftraggeber adrnr="100000" ansprechNr="35">
+      <AdrNr>100000/35</AdrNr>
+      <Name>LUFA Nordrhein-Westfalen</Name>
+      <Strasse>Nevinghoff 40</Strasse>
+      <PLZ>48147</PLZ>
+      <Ort>Münster</Ort>
+      <Land>DE</Land>
+    </Auftraggeber>
+    <Pruefbereich>Boden</Pruefbereich>
+    <Pruefgegenstand>Mineralboden</Pruefgegenstand>
+    <Auftragseingang>11072025_110628</Auftragseingang>
+    <Berichtsdatum>11072025_131038</Berichtsdatum>
+    <Probenahme>
+      <Probenehmer/>
+      <Probenahmeort/>
+      <Probenahmedatum/>
+    </Probenahme>
+    <Probe pnr="25-P-405300">
+      <Probenummer>25-P-405300</Probenummer>
+      <Bezeichnung/>
+      <Fremdkennung>3182440010030408</Fremdkennung>
+      <Probeneingang>11072025_110628</Probeneingang>
+      <Pruefbeginn>11072025_110628</Pruefbeginn>
+      <Pruefende>11072025_131001</Pruefende>
+      <Eingangstemperatur/>
+      <Aufbewahrungstemperatur/>
+      <Material>
+        <Kennung>000037</Kennung>
+        <Bezeichnung>Mineralboden</Bezeichnung>
+      </Material>
+      <Kennzeichnung knr="Flächenbezeichnung">
+        <Kennung>Flächenbezeichnung</Kennung>
+        <Bezeichnung>Flächenbezeichnung</Bezeichnung>
+        <Wert>Testserie</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Bodenartcode">
+        <Kennung>Bodenartcode</Kennung>
+        <Bezeichnung>Bodenartcode</Bezeichnung>
+        <Wert>2</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Bodenart Kürzel">
+        <Kennung>Bodenart Kürzel</Kennung>
+        <Bezeichnung>Bodenart Kürzel</Bezeichnung>
+        <Wert>lS,sU</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Bodenart">
+        <Kennung>Bodenart</Kennung>
+        <Bezeichnung>Bodenart</Bezeichnung>
+        <Wert>lehmiger Sand, sandiger Schluff</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nutzungscode">
+        <Kennung>Nutzungscode</Kennung>
+        <Bezeichnung>Nutzungscode</Bezeichnung>
+        <Wert>A</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nutzung">
+        <Kennung>Nutzung</Kennung>
+        <Bezeichnung>Nutzung</Bezeichnung>
+        <Wert>Ackerland</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Tüten-Nr.">
+        <Kennung>Tüten-Nr.</Kennung>
+        <Bezeichnung>Tüten-Nr.</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht von [cm]">
+        <Kennung>Schicht von [cm]</Kennung>
+        <Bezeichnung>Schicht von [cm]</Bezeichnung>
+        <Wert>0</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Termin">
+        <Kennung>Termin</Kennung>
+        <Bezeichnung>Termin</Bezeichnung>
+        <Wert>Testtermin</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Serie">
+        <Kennung>Serie</Kennung>
+        <Bezeichnung>Serie</Bezeichnung>
+        <Wert>ohne organische Dgg./N2: optimale N-Dgg.</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Ort">
+        <Kennung>Ort</Kennung>
+        <Bezeichnung>Ort</Bezeichnung>
+        <Wert>Testhausen</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="PIAFKennung">
+        <Kennung>PIAFKennung</Kennung>
+        <Bezeichnung>PIAFKennung</Bezeichnung>
+        <Wert>3182440010030408</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Wdh">
+        <Kennung>Wdh</Kennung>
+        <Bezeichnung>Wdh</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Kürzel">
+        <Kennung>Kürzel</Kennung>
+        <Bezeichnung>Kürzel</Bezeichnung>
+        <Wert>1/3/*</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Gruppenart">
+        <Kennung>Gruppenart</Kennung>
+        <Bezeichnung>Gruppenart</Bezeichnung>
+        <Wert>AB</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Objekt">
+        <Kennung>Objekt</Kennung>
+        <Bezeichnung>Objekt</Bezeichnung>
+        <Wert>BO</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="DED Bodenart">
+        <Kennung>DED Bodenart</Kennung>
+        <Bezeichnung>DED Bodenart</Bezeichnung>
+        <Wert>2</Wert>
+      </Kennzeichnung>
+      <Pruefparameter untersuchung="000176">
+        <Kennung>000176</Kennung>
+        <Bezeichnung>pH-Wert in CaCl2</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 5.1.1</Methode>
+        <Ergebnis1>4.7</Ergebnis1>
+        <Einheit1>-</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001454">
+        <Kennung>001454</Kennung>
+        <Bezeichnung>Phosphor (P2O5) in CAL</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I,  A 6.2.1.1</Methode>
+        <Ergebnis1>9</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001455">
+        <Kennung>001455</Kennung>
+        <Bezeichnung>Kalium (K2O) in CAL</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I,  A 6.2.1.1</Methode>
+        <Ergebnis1>4</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000016">
+        <Kennung>000016</Kennung>
+        <Bezeichnung>Magnesium (Mg) in CaCl2</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.2.4.1</Methode>
+        <Ergebnis1>2</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000026">
+        <Kennung>000026</Kennung>
+        <Bezeichnung>Kupfer (Cu) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>1.5</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000029">
+        <Kennung>000029</Kennung>
+        <Bezeichnung>Mangan (Mn) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>30</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000032">
+        <Kennung>000032</Kennung>
+        <Bezeichnung>Zink (Zn) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>7.4</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000035">
+        <Kennung>000035</Kennung>
+        <Bezeichnung>Bor (B) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>0.31</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001523">
+        <Kennung>001523</Kennung>
+        <Bezeichnung>Natrium (Na) in CaCl2</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.2.1.7</Methode>
+        <Ergebnis1>3.0</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000887">
+        <Kennung>000887</Kennung>
+        <Bezeichnung>Gesamt organischer Kohlenstoff (TOC)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 4.1.3.2</Methode>
+        <Ergebnis1>0.63</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001456">
+        <Kennung>001456</Kennung>
+        <Bezeichnung>Humus</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 4.1.3.2</Methode>
+        <Ergebnis1>1.1</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000011">
+        <Kennung>000011</Kennung>
+        <Bezeichnung>Gesamt-Stickstoff (TN) in FS</Bezeichnung>
+        <Methode>DIN EN 16168</Methode>
+        <Ergebnis1>4.80</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000012">
+        <Kennung>000012</Kennung>
+        <Bezeichnung>Gesamt-Stickstoff (TN) in TS</Bezeichnung>
+        <Methode>DIN EN 16168</Methode>
+        <Ergebnis1>5.11</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000004">
+        <Kennung>000004</Kennung>
+        <Bezeichnung>Trockensubstanz (TS)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 2.1.1</Methode>
+        <Ergebnis1>94.0</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+    </Probe>
+    <Probe pnr="25-P-405301">
+      <Probenummer>25-P-405301</Probenummer>
+      <Bezeichnung/>
+      <Fremdkennung>3182440020030405</Fremdkennung>
+      <Probeneingang>11072025_110628</Probeneingang>
+      <Pruefbeginn>11072025_110628</Pruefbeginn>
+      <Pruefende>11072025_131004</Pruefende>
+      <Eingangstemperatur/>
+      <Aufbewahrungstemperatur/>
+      <Material>
+        <Kennung>000037</Kennung>
+        <Bezeichnung>Mineralboden</Bezeichnung>
+      </Material>
+      <Kennzeichnung knr="Flächenbezeichnung">
+        <Kennung>Flächenbezeichnung</Kennung>
+        <Bezeichnung>Flächenbezeichnung</Bezeichnung>
+        <Wert>Testserie</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Bodenartcode">
+        <Kennung>Bodenartcode</Kennung>
+        <Bezeichnung>Bodenartcode</Bezeichnung>
+        <Wert>3</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Bodenart Kürzel">
+        <Kennung>Bodenart Kürzel</Kennung>
+        <Bezeichnung>Bodenart Kürzel</Bezeichnung>
+        <Wert>ssL,lU</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Bodenart">
+        <Kennung>Bodenart</Kennung>
+        <Bezeichnung>Bodenart</Bezeichnung>
+        <Wert>stark sandiger Lehm, lehmiger Schluff</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nutzungscode">
+        <Kennung>Nutzungscode</Kennung>
+        <Bezeichnung>Nutzungscode</Bezeichnung>
+        <Wert>A</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nutzung">
+        <Kennung>Nutzung</Kennung>
+        <Bezeichnung>Nutzung</Bezeichnung>
+        <Wert>Ackerland</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Tüten-Nr.">
+        <Kennung>Tüten-Nr.</Kennung>
+        <Bezeichnung>Tüten-Nr.</Bezeichnung>
+        <Wert>2</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht von [cm]">
+        <Kennung>Schicht von [cm]</Kennung>
+        <Bezeichnung>Schicht von [cm]</Bezeichnung>
+        <Wert>0</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Termin">
+        <Kennung>Termin</Kennung>
+        <Bezeichnung>Termin</Bezeichnung>
+        <Wert>Testtermin</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Serie">
+        <Kennung>Serie</Kennung>
+        <Bezeichnung>Serie</Bezeichnung>
+        <Wert>Kompost/N2: optimale N-Dgg.</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Ort">
+        <Kennung>Ort</Kennung>
+        <Bezeichnung>Ort</Bezeichnung>
+        <Wert>Testhausen</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="PIAFKennung">
+        <Kennung>PIAFKennung</Kennung>
+        <Bezeichnung>PIAFKennung</Bezeichnung>
+        <Wert>3182440020030405</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Wdh">
+        <Kennung>Wdh</Kennung>
+        <Bezeichnung>Wdh</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Kürzel">
+        <Kennung>Kürzel</Kennung>
+        <Bezeichnung>Kürzel</Bezeichnung>
+        <Wert>2/3/*</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Gruppenart">
+        <Kennung>Gruppenart</Kennung>
+        <Bezeichnung>Gruppenart</Bezeichnung>
+        <Wert>AB</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Objekt">
+        <Kennung>Objekt</Kennung>
+        <Bezeichnung>Objekt</Bezeichnung>
+        <Wert>BO</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="DED Bodenart">
+        <Kennung>DED Bodenart</Kennung>
+        <Bezeichnung>DED Bodenart</Bezeichnung>
+        <Wert>3</Wert>
+      </Kennzeichnung>
+      <Pruefparameter untersuchung="000176">
+        <Kennung>000176</Kennung>
+        <Bezeichnung>pH-Wert in CaCl2</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 5.1.1</Methode>
+        <Ergebnis1>5.0</Ergebnis1>
+        <Einheit1>-</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001454">
+        <Kennung>001454</Kennung>
+        <Bezeichnung>Phosphor (P2O5) in CAL</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I,  A 6.2.1.1</Methode>
+        <Ergebnis1>6</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001455">
+        <Kennung>001455</Kennung>
+        <Bezeichnung>Kalium (K2O) in CAL</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I,  A 6.2.1.1</Methode>
+        <Ergebnis1>2</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000016">
+        <Kennung>000016</Kennung>
+        <Bezeichnung>Magnesium (Mg) in CaCl2</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.2.4.1</Methode>
+        <Ergebnis1>7</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000026">
+        <Kennung>000026</Kennung>
+        <Bezeichnung>Kupfer (Cu) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>5.2</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000029">
+        <Kennung>000029</Kennung>
+        <Bezeichnung>Mangan (Mn) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>30</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000032">
+        <Kennung>000032</Kennung>
+        <Bezeichnung>Zink (Zn) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>7.5</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000035">
+        <Kennung>000035</Kennung>
+        <Bezeichnung>Bor (B) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>3.2</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001523">
+        <Kennung>001523</Kennung>
+        <Bezeichnung>Natrium (Na) in CaCl2</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.2.1.7</Methode>
+        <Ergebnis1>0.5</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000887">
+        <Kennung>000887</Kennung>
+        <Bezeichnung>Gesamt organischer Kohlenstoff (TOC)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 4.1.3.2</Methode>
+        <Ergebnis1>1.00</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001456">
+        <Kennung>001456</Kennung>
+        <Bezeichnung>Humus</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 4.1.3.2</Methode>
+        <Ergebnis1>1.7</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000011">
+        <Kennung>000011</Kennung>
+        <Bezeichnung>Gesamt-Stickstoff (TN) in FS</Bezeichnung>
+        <Methode>DIN EN 16168</Methode>
+        <Ergebnis1>3.85</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000012">
+        <Kennung>000012</Kennung>
+        <Bezeichnung>Gesamt-Stickstoff (TN) in TS</Bezeichnung>
+        <Methode>DIN EN 16168</Methode>
+        <Ergebnis1>5.13</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000004">
+        <Kennung>000004</Kennung>
+        <Bezeichnung>Trockensubstanz (TS)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 2.1.1</Methode>
+        <Ergebnis1>75.0</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+    </Probe>
+    <Probe pnr="25-P-405302">
+      <Probenummer>25-P-405302</Probenummer>
+      <Bezeichnung/>
+      <Fremdkennung>3182440030030402</Fremdkennung>
+      <Probeneingang>11072025_110628</Probeneingang>
+      <Pruefbeginn>11072025_110628</Pruefbeginn>
+      <Pruefende>11072025_131004</Pruefende>
+      <Eingangstemperatur/>
+      <Aufbewahrungstemperatur/>
+      <Material>
+        <Kennung>000037</Kennung>
+        <Bezeichnung>Mineralboden</Bezeichnung>
+      </Material>
+      <Kennzeichnung knr="Flächenbezeichnung">
+        <Kennung>Flächenbezeichnung</Kennung>
+        <Bezeichnung>Flächenbezeichnung</Bezeichnung>
+        <Wert>Testserie</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Bodenartcode">
+        <Kennung>Bodenartcode</Kennung>
+        <Bezeichnung>Bodenartcode</Bezeichnung>
+        <Wert>2</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Bodenart Kürzel">
+        <Kennung>Bodenart Kürzel</Kennung>
+        <Bezeichnung>Bodenart Kürzel</Bezeichnung>
+        <Wert>lS,sU</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Bodenart">
+        <Kennung>Bodenart</Kennung>
+        <Bezeichnung>Bodenart</Bezeichnung>
+        <Wert>lehmiger Sand, sandiger Schluff</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nutzungscode">
+        <Kennung>Nutzungscode</Kennung>
+        <Bezeichnung>Nutzungscode</Bezeichnung>
+        <Wert>A</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nutzung">
+        <Kennung>Nutzung</Kennung>
+        <Bezeichnung>Nutzung</Bezeichnung>
+        <Wert>Ackerland</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Tüten-Nr.">
+        <Kennung>Tüten-Nr.</Kennung>
+        <Bezeichnung>Tüten-Nr.</Bezeichnung>
+        <Wert>3</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht von [cm]">
+        <Kennung>Schicht von [cm]</Kennung>
+        <Bezeichnung>Schicht von [cm]</Bezeichnung>
+        <Wert>0</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Termin">
+        <Kennung>Termin</Kennung>
+        <Bezeichnung>Termin</Bezeichnung>
+        <Wert>Testtermin</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Serie">
+        <Kennung>Serie</Kennung>
+        <Bezeichnung>Serie</Bezeichnung>
+        <Wert>Champignonerde/N2: optimale N-Dgg.</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Ort">
+        <Kennung>Ort</Kennung>
+        <Bezeichnung>Ort</Bezeichnung>
+        <Wert>Testhausen</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="PIAFKennung">
+        <Kennung>PIAFKennung</Kennung>
+        <Bezeichnung>PIAFKennung</Bezeichnung>
+        <Wert>3182440030030402</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Wdh">
+        <Kennung>Wdh</Kennung>
+        <Bezeichnung>Wdh</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Kürzel">
+        <Kennung>Kürzel</Kennung>
+        <Bezeichnung>Kürzel</Bezeichnung>
+        <Wert>3/3/*</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Gruppenart">
+        <Kennung>Gruppenart</Kennung>
+        <Bezeichnung>Gruppenart</Bezeichnung>
+        <Wert>AB</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Objekt">
+        <Kennung>Objekt</Kennung>
+        <Bezeichnung>Objekt</Bezeichnung>
+        <Wert>BO</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="DED Bodenart">
+        <Kennung>DED Bodenart</Kennung>
+        <Bezeichnung>DED Bodenart</Bezeichnung>
+        <Wert>2</Wert>
+      </Kennzeichnung>
+      <Pruefparameter untersuchung="000176">
+        <Kennung>000176</Kennung>
+        <Bezeichnung>pH-Wert in CaCl2</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 5.1.1</Methode>
+        <Ergebnis1>4.3</Ergebnis1>
+        <Einheit1>-</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001454">
+        <Kennung>001454</Kennung>
+        <Bezeichnung>Phosphor (P2O5) in CAL</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I,  A 6.2.1.1</Methode>
+        <Ergebnis1>18</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001455">
+        <Kennung>001455</Kennung>
+        <Bezeichnung>Kalium (K2O) in CAL</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I,  A 6.2.1.1</Methode>
+        <Ergebnis1>11</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000016">
+        <Kennung>000016</Kennung>
+        <Bezeichnung>Magnesium (Mg) in CaCl2</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.2.4.1</Methode>
+        <Ergebnis1>7</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000026">
+        <Kennung>000026</Kennung>
+        <Bezeichnung>Kupfer (Cu) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>1.0</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000029">
+        <Kennung>000029</Kennung>
+        <Bezeichnung>Mangan (Mn) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>29</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000032">
+        <Kennung>000032</Kennung>
+        <Bezeichnung>Zink (Zn) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>6.3</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000035">
+        <Kennung>000035</Kennung>
+        <Bezeichnung>Bor (B) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>0.67</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001523">
+        <Kennung>001523</Kennung>
+        <Bezeichnung>Natrium (Na) in CaCl2</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.2.1.7</Methode>
+        <Ergebnis1>5.0</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000887">
+        <Kennung>000887</Kennung>
+        <Bezeichnung>Gesamt organischer Kohlenstoff (TOC)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 4.1.3.2</Methode>
+        <Ergebnis1>6.30</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001456">
+        <Kennung>001456</Kennung>
+        <Bezeichnung>Humus</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 4.1.3.2</Methode>
+        <Ergebnis1>10.9</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000011">
+        <Kennung>000011</Kennung>
+        <Bezeichnung>Gesamt-Stickstoff (TN) in FS</Bezeichnung>
+        <Methode>DIN EN 16168</Methode>
+        <Ergebnis1>5.73</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000012">
+        <Kennung>000012</Kennung>
+        <Bezeichnung>Gesamt-Stickstoff (TN) in TS</Bezeichnung>
+        <Methode>DIN EN 16168</Methode>
+        <Ergebnis1>7.63</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000004">
+        <Kennung>000004</Kennung>
+        <Bezeichnung>Trockensubstanz (TS)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 2.1.1</Methode>
+        <Ergebnis1>75.0</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+    </Probe>
+    <Probe pnr="25-P-405303">
+      <Probenummer>25-P-405303</Probenummer>
+      <Bezeichnung/>
+      <Fremdkennung>3182440040030409</Fremdkennung>
+      <Probeneingang>11072025_110628</Probeneingang>
+      <Pruefbeginn>11072025_110628</Pruefbeginn>
+      <Pruefende>11072025_131004</Pruefende>
+      <Eingangstemperatur/>
+      <Aufbewahrungstemperatur/>
+      <Material>
+        <Kennung>000037</Kennung>
+        <Bezeichnung>Mineralboden</Bezeichnung>
+      </Material>
+      <Kennzeichnung knr="Flächenbezeichnung">
+        <Kennung>Flächenbezeichnung</Kennung>
+        <Bezeichnung>Flächenbezeichnung</Bezeichnung>
+        <Wert>Testserie</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Bodenartcode">
+        <Kennung>Bodenartcode</Kennung>
+        <Bezeichnung>Bodenartcode</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Bodenart Kürzel">
+        <Kennung>Bodenart Kürzel</Kennung>
+        <Bezeichnung>Bodenart Kürzel</Bezeichnung>
+        <Wert>S</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Bodenart">
+        <Kennung>Bodenart</Kennung>
+        <Bezeichnung>Bodenart</Bezeichnung>
+        <Wert>Sand</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nutzungscode">
+        <Kennung>Nutzungscode</Kennung>
+        <Bezeichnung>Nutzungscode</Bezeichnung>
+        <Wert>A</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nutzung">
+        <Kennung>Nutzung</Kennung>
+        <Bezeichnung>Nutzung</Bezeichnung>
+        <Wert>Ackerland</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Tüten-Nr.">
+        <Kennung>Tüten-Nr.</Kennung>
+        <Bezeichnung>Tüten-Nr.</Bezeichnung>
+        <Wert>4</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht von [cm]">
+        <Kennung>Schicht von [cm]</Kennung>
+        <Bezeichnung>Schicht von [cm]</Bezeichnung>
+        <Wert>0</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Termin">
+        <Kennung>Termin</Kennung>
+        <Bezeichnung>Termin</Bezeichnung>
+        <Wert>Testtermin</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Serie">
+        <Kennung>Serie</Kennung>
+        <Bezeichnung>Serie</Bezeichnung>
+        <Wert>Kompost+Gärrest/N2: optimale N-Dgg.</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Ort">
+        <Kennung>Ort</Kennung>
+        <Bezeichnung>Ort</Bezeichnung>
+        <Wert>Testhausen</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="PIAFKennung">
+        <Kennung>PIAFKennung</Kennung>
+        <Bezeichnung>PIAFKennung</Bezeichnung>
+        <Wert>3182440040030409</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Wdh">
+        <Kennung>Wdh</Kennung>
+        <Bezeichnung>Wdh</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Kürzel">
+        <Kennung>Kürzel</Kennung>
+        <Bezeichnung>Kürzel</Bezeichnung>
+        <Wert>4/3/*</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Gruppenart">
+        <Kennung>Gruppenart</Kennung>
+        <Bezeichnung>Gruppenart</Bezeichnung>
+        <Wert>AB</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Objekt">
+        <Kennung>Objekt</Kennung>
+        <Bezeichnung>Objekt</Bezeichnung>
+        <Wert>BO</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="DED Bodenart">
+        <Kennung>DED Bodenart</Kennung>
+        <Bezeichnung>DED Bodenart</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Pruefparameter untersuchung="000176">
+        <Kennung>000176</Kennung>
+        <Bezeichnung>pH-Wert in CaCl2</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 5.1.1</Methode>
+        <Ergebnis1>4.6</Ergebnis1>
+        <Einheit1>-</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001454">
+        <Kennung>001454</Kennung>
+        <Bezeichnung>Phosphor (P2O5) in CAL</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I,  A 6.2.1.1</Methode>
+        <Ergebnis1>16</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001455">
+        <Kennung>001455</Kennung>
+        <Bezeichnung>Kalium (K2O) in CAL</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I,  A 6.2.1.1</Methode>
+        <Ergebnis1>6</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000016">
+        <Kennung>000016</Kennung>
+        <Bezeichnung>Magnesium (Mg) in CaCl2</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.2.4.1</Methode>
+        <Ergebnis1>5</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000026">
+        <Kennung>000026</Kennung>
+        <Bezeichnung>Kupfer (Cu) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>1.1</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000029">
+        <Kennung>000029</Kennung>
+        <Bezeichnung>Mangan (Mn) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>1.3</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000032">
+        <Kennung>000032</Kennung>
+        <Bezeichnung>Zink (Zn) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>1.4</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000035">
+        <Kennung>000035</Kennung>
+        <Bezeichnung>Bor (B) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>1.5</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001523">
+        <Kennung>001523</Kennung>
+        <Bezeichnung>Natrium (Na) in CaCl2</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.2.1.7</Methode>
+        <Ergebnis1>4.0</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000887">
+        <Kennung>000887</Kennung>
+        <Bezeichnung>Gesamt organischer Kohlenstoff (TOC)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 4.1.3.2</Methode>
+        <Ergebnis1>1.00</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001456">
+        <Kennung>001456</Kennung>
+        <Bezeichnung>Humus</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 4.1.3.2</Methode>
+        <Ergebnis1>1.7</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000011">
+        <Kennung>000011</Kennung>
+        <Bezeichnung>Gesamt-Stickstoff (TN) in FS</Bezeichnung>
+        <Methode>DIN EN 16168</Methode>
+        <Ergebnis1>5.97</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000012">
+        <Kennung>000012</Kennung>
+        <Bezeichnung>Gesamt-Stickstoff (TN) in TS</Bezeichnung>
+        <Methode>DIN EN 16168</Methode>
+        <Ergebnis1>6.94</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000004">
+        <Kennung>000004</Kennung>
+        <Bezeichnung>Trockensubstanz (TS)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 2.1.1</Methode>
+        <Ergebnis1>86.0</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+    </Probe>
+    <Probe pnr="25-P-405304">
+      <Probenummer>25-P-405304</Probenummer>
+      <Bezeichnung/>
+      <Fremdkennung>3182440050030406</Fremdkennung>
+      <Probeneingang>11072025_110628</Probeneingang>
+      <Pruefbeginn>11072025_110628</Pruefbeginn>
+      <Pruefende>11072025_131005</Pruefende>
+      <Eingangstemperatur/>
+      <Aufbewahrungstemperatur/>
+      <Material>
+        <Kennung>000037</Kennung>
+        <Bezeichnung>Mineralboden</Bezeichnung>
+      </Material>
+      <Kennzeichnung knr="Flächenbezeichnung">
+        <Kennung>Flächenbezeichnung</Kennung>
+        <Bezeichnung>Flächenbezeichnung</Bezeichnung>
+        <Wert>Testserie</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Bodenartcode">
+        <Kennung>Bodenartcode</Kennung>
+        <Bezeichnung>Bodenartcode</Bezeichnung>
+        <Wert>4</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Bodenart Kürzel">
+        <Kennung>Bodenart Kürzel</Kennung>
+        <Bezeichnung>Bodenart Kürzel</Bezeichnung>
+        <Wert>sL,uL,L</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Bodenart">
+        <Kennung>Bodenart</Kennung>
+        <Bezeichnung>Bodenart</Bezeichnung>
+        <Wert>sandiger Lehm, schluffiger Lehm, Lehm</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nutzungscode">
+        <Kennung>Nutzungscode</Kennung>
+        <Bezeichnung>Nutzungscode</Bezeichnung>
+        <Wert>A</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Nutzung">
+        <Kennung>Nutzung</Kennung>
+        <Bezeichnung>Nutzung</Bezeichnung>
+        <Wert>Ackerland</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Tüten-Nr.">
+        <Kennung>Tüten-Nr.</Kennung>
+        <Bezeichnung>Tüten-Nr.</Bezeichnung>
+        <Wert>5</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Schicht von [cm]">
+        <Kennung>Schicht von [cm]</Kennung>
+        <Bezeichnung>Schicht von [cm]</Bezeichnung>
+        <Wert>0</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Termin">
+        <Kennung>Termin</Kennung>
+        <Bezeichnung>Termin</Bezeichnung>
+        <Wert>Testtermin</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Serie">
+        <Kennung>Serie</Kennung>
+        <Bezeichnung>Serie</Bezeichnung>
+        <Wert>Gärrest/N2: optimale N-Dgg.</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Ort">
+        <Kennung>Ort</Kennung>
+        <Bezeichnung>Ort</Bezeichnung>
+        <Wert>Testhausen</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="PIAFKennung">
+        <Kennung>PIAFKennung</Kennung>
+        <Bezeichnung>PIAFKennung</Bezeichnung>
+        <Wert>3182440050030406</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Wdh">
+        <Kennung>Wdh</Kennung>
+        <Bezeichnung>Wdh</Bezeichnung>
+        <Wert>1</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Kürzel">
+        <Kennung>Kürzel</Kennung>
+        <Bezeichnung>Kürzel</Bezeichnung>
+        <Wert>5/3/*</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Gruppenart">
+        <Kennung>Gruppenart</Kennung>
+        <Bezeichnung>Gruppenart</Bezeichnung>
+        <Wert>AB</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="Objekt">
+        <Kennung>Objekt</Kennung>
+        <Bezeichnung>Objekt</Bezeichnung>
+        <Wert>BO</Wert>
+      </Kennzeichnung>
+      <Kennzeichnung knr="DED Bodenart">
+        <Kennung>DED Bodenart</Kennung>
+        <Bezeichnung>DED Bodenart</Bezeichnung>
+        <Wert>4</Wert>
+      </Kennzeichnung>
+      <Pruefparameter untersuchung="000176">
+        <Kennung>000176</Kennung>
+        <Bezeichnung>pH-Wert in CaCl2</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 5.1.1</Methode>
+        <Ergebnis1>4.7</Ergebnis1>
+        <Einheit1>-</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001454">
+        <Kennung>001454</Kennung>
+        <Bezeichnung>Phosphor (P2O5) in CAL</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I,  A 6.2.1.1</Methode>
+        <Ergebnis1>15</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001455">
+        <Kennung>001455</Kennung>
+        <Bezeichnung>Kalium (K2O) in CAL</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I,  A 6.2.1.1</Methode>
+        <Ergebnis1>98</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000016">
+        <Kennung>000016</Kennung>
+        <Bezeichnung>Magnesium (Mg) in CaCl2</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.2.4.1</Methode>
+        <Ergebnis1>4</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000026">
+        <Kennung>000026</Kennung>
+        <Bezeichnung>Kupfer (Cu) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>2.3</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000029">
+        <Kennung>000029</Kennung>
+        <Bezeichnung>Mangan (Mn) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>2.4</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000032">
+        <Kennung>000032</Kennung>
+        <Bezeichnung>Zink (Zn) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>2.5</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000035">
+        <Kennung>000035</Kennung>
+        <Bezeichnung>Bor (B) in CAT</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.4.1</Methode>
+        <Ergebnis1>2.6</Ergebnis1>
+        <Einheit1>mg/kg</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001523">
+        <Kennung>001523</Kennung>
+        <Bezeichnung>Natrium (Na) in CaCl2</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 6.2.1.7</Methode>
+        <Ergebnis1>4.5</Ergebnis1>
+        <Einheit1>mg/100g</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000887">
+        <Kennung>000887</Kennung>
+        <Bezeichnung>Gesamt organischer Kohlenstoff (TOC)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 4.1.3.2</Methode>
+        <Ergebnis1>1.00</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="001456">
+        <Kennung>001456</Kennung>
+        <Bezeichnung>Humus</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 4.1.3.2</Methode>
+        <Ergebnis1>1.7</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000011">
+        <Kennung>000011</Kennung>
+        <Bezeichnung>Gesamt-Stickstoff (TN) in FS</Bezeichnung>
+        <Methode>DIN EN 16168</Methode>
+        <Ergebnis1>3.30</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000012">
+        <Kennung>000012</Kennung>
+        <Bezeichnung>Gesamt-Stickstoff (TN) in TS</Bezeichnung>
+        <Methode>DIN EN 16168</Methode>
+        <Ergebnis1>3.47</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+      <Pruefparameter untersuchung="000004">
+        <Kennung>000004</Kennung>
+        <Bezeichnung>Trockensubstanz (TS)</Bezeichnung>
+        <Methode>VDLUFA Methodenbuch Band I, A 2.1.1</Methode>
+        <Ergebnis1>95.0</Ergebnis1>
+        <Einheit1>%</Einheit1>
+        <extern>nein</extern>
+      </Pruefparameter>
+    </Probe>
+  </Auftrag>
+</Export>

@@ -468,7 +468,6 @@ export const firebaseGPS = {
       ]) as any;
       clearTimeout(timeoutTracker);
       
-      const duration = Date.now() - startTime;
       // Firebase snapshot received - logging suppressed to reduce console spam
       const projects = snapshot.docs.map((doc: any) => ({ id: doc.id, ...convertFirestoreData(doc.data()) }));
 
