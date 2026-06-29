@@ -6,7 +6,7 @@ import type {
   OrderServiceType
 } from '../../../types';
 import { createDefaultLufaImport } from '../../../utils/lufa';
-import { createDefaultPbsConfig } from '../../../utils/pbs';
+import { createDefaultPbsConfig, getPbsProfileDefinition } from '../../../utils/pbs';
 
 const defaultConsent = {
   dataProtectionAccepted: false,
@@ -38,6 +38,7 @@ export const createOrderDraft = (
   const labProvider = options?.labProvider || 'agrolab';
   const lufaScope = options?.lufaScope || 'DED';
   const pbsProfile = options?.pbsProfile || 'boden';
+  const pbsProfileDefinition = getPbsProfileDefinition(pbsProfile);
   const defaultServices: OrderServiceType[] = labProvider === 'pbs'
     ? (pbsProfile === 'boden' ? ['basic_nutrients'] : ['nmin'])
     : ['basic_nutrients'];
@@ -89,7 +90,7 @@ export const createOrderDraft = (
       km: '',
       sampleCount: ''
     },
-    pbsConfigEnabled: false,
+    pbsConfigEnabled: labProvider === 'pbs' ? pbsProfileDefinition.requiresNminType : false,
     lufaImport: createDefaultLufaImport(lufaScope),
     pbsConfig: labProvider === 'pbs' ? createDefaultPbsConfig(pbsProfile) : undefined,
     gridSizeHa: 5,

@@ -205,6 +205,7 @@ const AGROLAB_FIELD_META_KEYS: AgrolabFieldMetaKey[] = [
 ];
 
 const PBS_CONFIG_VALUE_KEYS: Array<keyof NonNullable<OrderDraft['pbsConfig']>> = [
+  'nminType',
   'customerNumberAgrolab',
   'billingCustomerNumber',
   'distributor',
@@ -1928,6 +1929,60 @@ export default function OrderWizard({
     });
   };
 
+  const buildParametersForServices = useCallback((
+    services: OrderServiceType[],
+    base?: OrderDraft['parameters'],
+    options?: { forceBasicDefaults?: boolean }
+  ) => {
+    const hasBasic = services.includes('basic_nutrients');
+    const forceBasicDefaults = Boolean(options?.forceBasicDefaults);
+    const hasStoredSelections = [
+      base?.traceElements,
+      base?.organicMatter,
+      base?.cnRatio,
+      base?.potassiumFixation,
+      base?.calcium,
+      base?.cecEffective,
+      base?.cecPotential,
+      base?.particleSizeDistribution,
+      base?.phosphorusReleaseRate
+    ].some((value) => value !== undefined);
+
+    const defaultParameters = {
+      standardPackage: true,
+      traceElements: hasBasic,
+      organicMatter: false,
+      cnRatio: false,
+      potassiumFixation: false,
+      calcium: false,
+      cecEffective: false,
+      cecPotential: false,
+      particleSizeDistribution: false,
+      phosphorusReleaseRate: false
+    };
+
+    const preservedParameters = hasStoredSelections
+      ? {
+        standardPackage: true,
+        traceElements: Boolean(base?.traceElements),
+        organicMatter: Boolean(base?.organicMatter),
+        cnRatio: Boolean(base?.cnRatio),
+        potassiumFixation: Boolean(base?.potassiumFixation),
+        calcium: Boolean(base?.calcium),
+        cecEffective: Boolean(base?.cecEffective),
+        cecPotential: Boolean(base?.cecPotential),
+        particleSizeDistribution: Boolean(base?.particleSizeDistribution),
+        phosphorusReleaseRate: Boolean(base?.phosphorusReleaseRate)
+      }
+      : defaultParameters;
+
+    return {
+      landUseType: base?.landUseType,
+      cropResiduesRemoved: base?.cropResiduesRemoved,
+      ...(forceBasicDefaults && hasBasic ? defaultParameters : preservedParameters)
+    };
+  }, []);
+
   const buildFieldsFromSource = useCallback((sourceFields: NonNullable<OrderDraft['sourceFields']>, _gridSize: 3 | 5) => {
     return sourceFields.flatMap(source => {
       const fieldId = source.samplingCell
@@ -2009,60 +2064,6 @@ export default function OrderWizard({
     'particleSizeDistribution',
     'phosphorusReleaseRate'
   ]), []);
-
-  const buildParametersForServices = useCallback((
-    services: OrderServiceType[],
-    base?: OrderDraft['parameters'],
-    options?: { forceBasicDefaults?: boolean }
-  ) => {
-    const hasBasic = services.includes('basic_nutrients');
-    const forceBasicDefaults = Boolean(options?.forceBasicDefaults);
-    const hasStoredSelections = [
-      base?.traceElements,
-      base?.organicMatter,
-      base?.cnRatio,
-      base?.potassiumFixation,
-      base?.calcium,
-      base?.cecEffective,
-      base?.cecPotential,
-      base?.particleSizeDistribution,
-      base?.phosphorusReleaseRate
-    ].some((value) => value !== undefined);
-
-    const defaultParameters = {
-      standardPackage: true,
-      traceElements: hasBasic,
-      organicMatter: false,
-      cnRatio: false,
-      potassiumFixation: false,
-      calcium: false,
-      cecEffective: false,
-      cecPotential: false,
-      particleSizeDistribution: false,
-      phosphorusReleaseRate: false
-    };
-
-    const preservedParameters = hasStoredSelections
-      ? {
-        standardPackage: true,
-        traceElements: Boolean(base?.traceElements),
-        organicMatter: Boolean(base?.organicMatter),
-        cnRatio: Boolean(base?.cnRatio),
-        potassiumFixation: Boolean(base?.potassiumFixation),
-        calcium: Boolean(base?.calcium),
-        cecEffective: Boolean(base?.cecEffective),
-        cecPotential: Boolean(base?.cecPotential),
-        particleSizeDistribution: Boolean(base?.particleSizeDistribution),
-        phosphorusReleaseRate: Boolean(base?.phosphorusReleaseRate)
-      }
-      : defaultParameters;
-
-    return {
-      landUseType: base?.landUseType,
-      cropResiduesRemoved: base?.cropResiduesRemoved,
-      ...(forceBasicDefaults && hasBasic ? defaultParameters : preservedParameters)
-    };
-  }, []);
 
   const areServiceParametersAligned = useCallback((current: OrderDraft['parameters'] | undefined, next: OrderDraft['parameters']) => {
     if (!current) return false;

@@ -13,6 +13,7 @@ import { firebaseGPS } from '../services/firebaseSync';
 import { hybridDB } from '../services/hybridDatabase';
 import { secureStorage } from '../utils/secureStorage';
 import { clearStartupRecoveryMarker, triggerAutomaticStartupRecovery } from '../utils/startupRecovery';
+import { debugAuthPersistence } from '../utils/authDebug';
 import {
   getUserAccessSnapshot,
   getUserAccessState,
@@ -367,29 +368,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (email: string, password: string) => {
     console.log('🔐 [AUTH] Login started for:', email);
-    
-    // Test connectivity before attempting Firebase login
-    const testConnectivity = async (): Promise<boolean> => {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
-        
-        await fetch('https://www.google.com/favicon.ico', {
-          method: 'HEAD',
-          mode: 'no-cors',
-          signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
-        console.log('🔐 [AUTH] Internet connectivity: ✅ ONLINE');
-        return true;
-      } catch {
-        console.log('🔐 [AUTH] Internet connectivity: ❌ OFFLINE');
-        return false;
-      }
-    };
-
-    const hasInternet = await testConnectivity();
+    const hasInternet = navigator.onLine;
+    console.log(`🔐 [AUTH] Browser connectivity hint: ${hasInternet ? '✅ ONLINE' : '❌ OFFLINE'}`);
     
     // If offline or no internet, try cached credentials with secure token
     if (!hasInternet) {

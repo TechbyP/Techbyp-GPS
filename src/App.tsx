@@ -13,6 +13,7 @@ import { AnimatedLoader } from './components/ui/AnimatedLoader';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ReloadPrompt } from './components/ReloadPrompt';
 import { clearStartupRecoveryMarker, triggerAutomaticStartupRecovery } from './utils/startupRecovery';
+import { secureStorage } from './utils/secureStorage';
 import './index.css';
 
 // Import auth persistence test in development
@@ -69,6 +70,7 @@ function AppContent() {
 
   useEffect(() => {
     let cancelled = false;
+    let quickFallbackTriggered = false;
 
     if (!auth.loading) {
       setAllowAuthFallback(false);
@@ -78,7 +80,25 @@ function AppContent() {
       };
     }
 
-    const timer = setTimeout(() => {
+    const quickFallbackTimer = setTimeout(() => {
+      if (cancelled || !auth.loading || auth.isAuthenticated || quickFallbackTriggered) return;
+
+      void secureStorage.getOfflineAuth()
+        .then((offlineAuth) => {
+          if (cancelled || !auth.loading || auth.isAuthenticated || quickFallbackTriggered) return;
+          if (!offlineAuth) {
+            quickFallbackTriggered = true;
+            setAllowAuthFallback(true);
+          }
+        })
+        .catch(() => {
+          if (cancelled || !auth.loading || auth.isAuthenticated || quickFallbackTriggered) return;
+          quickFallbackTriggered = true;
+          setAllowAuthFallback(true);
+        });
+    }, 800);
+
+    const recoveryTimer = setTimeout(() => {
       if (cancelled || !auth.loading) return;
 
       void triggerAutomaticStartupRecovery('auth-init-timeout')
@@ -94,9 +114,10 @@ function AppContent() {
 
     return () => {
       cancelled = true;
-      clearTimeout(timer);
+      clearTimeout(quickFallbackTimer);
+      clearTimeout(recoveryTimer);
     };
-  }, [auth.loading]);
+  }, [auth.isAuthenticated, auth.loading]);
 
   // Show loading screen while auth is being resolved
   if (auth.loading && !allowAuthFallback && !auth.isAuthenticated) {
