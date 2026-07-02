@@ -1,10 +1,9 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
-import { useEffect, useState } from 'react';
-import OrdersMainPage from './components/Web/Orders/OrdersMainPage';
-import AdminPage from './components/Web/Admin/AdminPage';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import AuthScreen from './components/Auth/AuthScreen';
+import LandingPage from './components/Web/LandingPage';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { useDarkMode } from './hooks/useDarkMode';
 import NotificationContainer from './components/ui/NotificationContainer';
@@ -12,9 +11,11 @@ import { ConfirmationProvider } from './components/ui/ConfirmationProvider';
 import { AnimatedLoader } from './components/ui/AnimatedLoader';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ReloadPrompt } from './components/ReloadPrompt';
-import { clearStartupRecoveryMarker, triggerAutomaticStartupRecovery } from './utils/startupRecovery';
 import { secureStorage } from './utils/secureStorage';
 import './index.css';
+
+const OrdersMainPage = lazy(() => import('./components/Web/Orders/OrdersMainPage'));
+const AdminPage = lazy(() => import('./components/Web/Admin/AdminPage'));
 
 // Import auth persistence test in development
 if (import.meta.env.DEV) {
@@ -27,8 +28,49 @@ if (import.meta.env.DEV) {
   import('./utils/checkAdminStatus');
 }
 
+function AuthLoadingScreen({ onForceAuthFallback }: { onForceAuthFallback: () => void }) {
+  const [isDarkMode] = useDarkMode();
+  const { t } = useTranslation();
+
+  return (
+    <div className={isDarkMode ? 'dark' : ''}>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col items-center justify-center px-4">
+        <AnimatedLoader message={t('common.loadingAuth') || 'Loading'} />
+        <button
+          type="button"
+          onClick={onForceAuthFallback}
+          className="mt-4 px-4 py-2 rounded-lg border text-sm font-medium transition-colors bg-white text-gray-700 border-gray-300 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-700"
+        >
+          {t('common.continueToLogin') || 'Continue to login'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RouteChunkLoadingScreen() {
+  const [isDarkMode] = useDarkMode();
+  const { t } = useTranslation();
+
+  return (
+    <div className={isDarkMode ? 'dark' : ''}>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center px-4">
+        <AnimatedLoader message={t('common.loading') || 'Loading'} />
+      </div>
+    </div>
+  );
+}
+
 // Protected route wrapper
-function ProtectedRoute({ element }: { element: React.ReactNode }) {
+function ProtectedRoute({
+  element,
+  allowAuthFallback,
+  onForceAuthFallback,
+}: {
+  element: React.ReactNode;
+  allowAuthFallback: boolean;
+  onForceAuthFallback: () => void;
+}) {
   const auth = useAuth();
   
   // Handle HMR race condition where context might not be ready
@@ -41,40 +83,44 @@ function ProtectedRoute({ element }: { element: React.ReactNode }) {
     return element;
   }
   
-  // Still loading auth state - don't show AuthScreen yet
-  if (auth.loading) {
-    return null; // Let the main auth provider handle loading state
+  if (auth.loading && !allowAuthFallback) {
+    return <AuthLoadingScreen onForceAuthFallback={onForceAuthFallback} />;
   }
   
-  // Show login if not authenticated
   if (!auth.isAuthenticated) {
-    return <AuthScreen />;
+    return <Navigate to="/login" replace />;
   }
 
   return element;
+}
+
+function LoginRoute() {
+  const auth = useAuth();
+
+  if (auth.isAuthenticated) {
+    return <Navigate to="/app" replace />;
+  }
+
+  return <AuthScreen />;
 }
 
 // Main app content
 function AppContent() {
   const [isDarkMode] = useDarkMode();
   const auth = useAuth();
-  const { t } = useTranslation();
+  const location = useLocation();
   const [allowAuthFallback, setAllowAuthFallback] = useState(false);
 
   const handleForceAuthFallback = () => {
     setAllowAuthFallback(true);
-    void triggerAutomaticStartupRecovery('auth-init-timeout').catch(error => {
-      console.warn('Manual startup recovery failed from app shell:', error);
-    });
   };
 
   useEffect(() => {
     let cancelled = false;
     let quickFallbackTriggered = false;
 
-    if (!auth.loading) {
+    if (!auth.loading || auth.isAuthenticated) {
       setAllowAuthFallback(false);
-      clearStartupRecoveryMarker();
       return () => {
         cancelled = true;
       };
@@ -100,16 +146,7 @@ function AppContent() {
 
     const recoveryTimer = setTimeout(() => {
       if (cancelled || !auth.loading) return;
-
-      void triggerAutomaticStartupRecovery('auth-init-timeout')
-        .catch(error => {
-          console.warn('Auto startup recovery failed from app shell:', error);
-        })
-        .finally(() => {
-          if (!cancelled) {
-            setAllowAuthFallback(true);
-          }
-        });
+      setAllowAuthFallback(true);
     }, 12000);
 
     return () => {
@@ -119,27 +156,37 @@ function AppContent() {
     };
   }, [auth.isAuthenticated, auth.loading]);
 
-  // Show loading screen while auth is being resolved
-  if (auth.loading && !allowAuthFallback && !auth.isAuthenticated) {
-    return (
-      <div className={isDarkMode ? 'dark' : ''}>
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col items-center justify-center px-4">
-          <AnimatedLoader message={t('common.loadingAuth') || 'Loading'} />
-          <button
-            type="button"
-            onClick={handleForceAuthFallback}
-            className="mt-4 px-4 py-2 rounded-lg border text-sm font-medium transition-colors bg-white text-gray-700 border-gray-300 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-700"
-          >
-            {t('common.continueToLogin') || 'Continue to login'}
-          </button>
-        </div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    const root = document.getElementById('root');
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    const previousHtmlOverflowY = document.documentElement.style.overflowY;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousBodyOverflowY = document.body.style.overflowY;
+    const previousRootOverflow = root?.style.overflow ?? '';
+    const previousRootOverflowY = root?.style.overflowY ?? '';
 
-  if (allowAuthFallback && !auth.isAuthenticated) {
-    return <AuthScreen />;
-  }
+    const publicRoute = location.pathname === '/' || location.pathname === '/login';
+
+    document.documentElement.style.overflow = publicRoute ? 'auto' : 'hidden';
+    document.documentElement.style.overflowY = publicRoute ? 'auto' : 'hidden';
+    document.body.style.overflow = publicRoute ? 'auto' : 'hidden';
+    document.body.style.overflowY = publicRoute ? 'auto' : 'hidden';
+    if (root) {
+      root.style.overflow = publicRoute ? 'auto' : 'hidden';
+      root.style.overflowY = publicRoute ? 'auto' : 'hidden';
+    }
+
+    return () => {
+      document.documentElement.style.overflow = previousHtmlOverflow;
+      document.documentElement.style.overflowY = previousHtmlOverflowY;
+      document.body.style.overflow = previousBodyOverflow;
+      document.body.style.overflowY = previousBodyOverflowY;
+      if (root) {
+        root.style.overflow = previousRootOverflow;
+        root.style.overflowY = previousRootOverflowY;
+      }
+    };
+  }, [location.pathname]);
 
   return (
     <NotificationContainer>
@@ -149,15 +196,39 @@ function AppContent() {
           <Routes>
             <Route
               path="/"
-              element={<ProtectedRoute element={<OrdersMainPage />} />}
+              element={<LandingPage />}
+            />
+            <Route
+              path="/login"
+              element={<LoginRoute />}
+            />
+            <Route
+              path="/app"
+              element={(
+                <Suspense fallback={<RouteChunkLoadingScreen />}>
+                  <ProtectedRoute
+                    element={<OrdersMainPage />}
+                    allowAuthFallback={allowAuthFallback}
+                    onForceAuthFallback={handleForceAuthFallback}
+                  />
+                </Suspense>
+              )}
             />
             <Route
               path="/admin"
-              element={<ProtectedRoute element={<AdminPage />} />}
+              element={(
+                <Suspense fallback={<RouteChunkLoadingScreen />}>
+                  <ProtectedRoute
+                    element={<AdminPage />}
+                    allowAuthFallback={allowAuthFallback}
+                    onForceAuthFallback={handleForceAuthFallback}
+                  />
+                </Suspense>
+              )}
             />
             <Route
               path="*"
-              element={<ProtectedRoute element={<OrdersMainPage />} />}
+              element={<Navigate to="/" replace />}
             />
           </Routes>
 

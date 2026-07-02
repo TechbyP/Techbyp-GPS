@@ -29,6 +29,23 @@
   </head>
   <body>
     <script>
+      const vitePreloadReloadKey = 'gps-vite-preload-reload';
+      window.addEventListener('vite:preloadError', (event) => {
+        event.preventDefault();
+
+        try {
+          if (sessionStorage.getItem(vitePreloadReloadKey) !== '1') {
+            sessionStorage.setItem(vitePreloadReloadKey, '1');
+            window.location.reload();
+            return;
+          }
+        } catch (_) {
+          // Ignore storage issues and continue gracefully.
+        }
+
+        console.warn('[vite:preloadError] Reload already attempted. Continuing without hard crash.');
+      });
+
       (() => {
         // Detect dark mode from localStorage or system preference
         const darkModeStored = localStorage.getItem('darkMode');
@@ -45,8 +62,7 @@
         
         // Language detection and label setting
         const storedLang = localStorage.getItem('language');
-        const browserLang = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
-        const lang = (storedLang || browserLang).startsWith('de') ? 'de' : 'en';
+        const lang = (storedLang || 'de').toLowerCase().startsWith('de') ? 'de' : 'en';
         document.documentElement.setAttribute('lang', lang);
         const setLoaderLabel = () => {
           const label = document.getElementById('app-loader-label');
@@ -138,8 +154,14 @@
       const swDevEnabled = '%VITE_ENABLE_SW_DEV%' === 'true';
       const swCleanupKey = 'gps-app-dev-html-sw-cleanup-v1';
       const workboxCacheNames = ['osm-tiles', 'esri-tiles', 'local-tiles'];
+      const isLocalDevHost = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
 
       const boot = async () => {
+        if (isLocalDevHost) {
+          await import('/src/main.tsx');
+          return;
+        }
+
         if (!swDevEnabled && 'serviceWorker' in navigator && window.sessionStorage.getItem(swCleanupKey) !== 'done') {
           try {
             const registrations = await navigator.serviceWorker.getRegistrations();

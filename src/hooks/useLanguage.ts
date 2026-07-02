@@ -5,7 +5,7 @@ import { useLocalStorage } from './useLocalStorage';
 
 export const useLanguage = () => {
   const { i18n } = useTranslation();
-  const [language, setLanguageStorage] = useLocalStorage<string>('language', 'en');
+  const [language, setLanguageStorage] = useLocalStorage<string>('language', 'de');
 
   const changeLanguage = (lng: string) => {
     i18n.changeLanguage(lng);

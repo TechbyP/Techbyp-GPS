@@ -2,6 +2,110 @@
   "app": {
     "name": "TECHBYP - GPS Pro"
   },
+  "landing": {
+    "nav": {
+      "eyebrow": "TECHBYP GPS platform",
+      "features": "Features",
+      "workflow": "Workflow",
+      "platforms": "Two-part system",
+      "openApp": "Open app"
+    },
+    "hero": {
+      "eyebrow": "GPS-supported field operations",
+      "title": "Plan online. Sample in the field. Export without chaos.",
+      "subtitle": "TECHBYP - GPS Pro is a two-part soil sampling system: a website for planning, contracts, maps and exports, plus a mobile field app for recording every real sample with GPS and barcode support.",
+      "primary": "Open app",
+      "primaryLoggedIn": "Open workspace",
+      "secondary": "See workflow",
+      "proofA": "Website workspace for contracts, fields, parameters and provider-ready exports.",
+      "proofB": "Android or iOS field app for actual sample recording during soil sampling.",
+      "proofC": "Barcode assignment, RTK support, external GPS devices, manual entries and automated recordings stay linked to the same project."
+    },
+    "metrics": {
+      "contractsValue": "Web + app",
+      "contractsLabel": "one connected system instead of disconnected tools",
+      "fieldOpsValue": "Barcode ready",
+      "fieldOpsLabel": "for tracked samples, manual notes and operator workflows",
+      "exportsValue": "Provider aligned",
+      "exportsLabel": "with export paths for AGROLAB, LUFA and PBS"
+    },
+    "graphic": {
+      "panelLabel": "Live workflow board",
+      "mapLabel": "Field map",
+      "mapValue": "North block / 24.8 ha",
+      "contractLabel": "Contract setup",
+      "contractValue": "Sampling + lab export",
+      "gpsLabel": "GPS track",
+      "gpsValue": "Guided collection active",
+      "exportLabel": "Export status",
+      "exportValue": "CSV / XML / workbook ready"
+    },
+    "features": {
+      "eyebrow": "Why teams use it",
+      "title": "Built for real soil sampling operations, not generic map demos.",
+      "subtitle": "The system keeps planning, execution and handover in one place so the data still makes sense once the samples reach the lab.",
+      "mappingTitle": "Field mapping with structure",
+      "mappingBody": "Import or draw boundaries, keep field identities stable and prepare sampling cells without losing context.",
+      "contractsTitle": "Contracts that match the work",
+      "contractsBody": "Set up jobs, owners, laboratory profiles and provider-specific parameters before anyone drives to the field.",
+      "gpsTitle": "GPS-backed field execution",
+      "gpsBody": "Support crews with map context, field focus and a workflow that works on desktop and tablet.",
+      "exportsTitle": "Lab-ready exports",
+      "exportsBody": "Prepare downstream files for AGROLAB, LUFA and PBS workflows without rebuilding project data by hand."
+    },
+    "workflow": {
+      "eyebrow": "How it works",
+      "title": "Four steps from planning to delivery.",
+      "subtitle": "Each stage carries the same field and contract context forward, which means less manual repair later.",
+      "step1Title": "Create the contract",
+      "step1Body": "Start with the customer, owner, lab workflow and sampling scope.",
+      "step2Title": "Map the fields",
+      "step2Body": "Import boundaries or draw them directly and keep every field tied to the project.",
+      "step3Title": "Run the sampling workflow",
+      "step3Body": "Guide fieldwork with GPS context, parameter choices and practical operator inputs.",
+      "step4Title": "Export for the next system",
+      "step4Body": "Generate structured outputs for lab handover, documentation and follow-up."
+    },
+    "platforms": {
+      "eyebrow": "Two connected parts",
+      "title": "A website for coordination. A mobile app for actual sampling.",
+      "subtitle": "Users can manage the project from the website, then switch to the Android or iOS field app when they are physically taking samples. Both parts work on the same project data.",
+      "webLabel": "Part 1",
+      "webTitle": "Website platform",
+      "webPanelTitle": "Used for planning and administration",
+      "webFeatureA": "Create contracts and assign owners",
+      "webFeatureB": "Map, import and review fields",
+      "webFeatureC": "Configure lab workflows and parameters",
+      "webFeatureD": "Prepare exports and project documentation",
+      "fieldLabel": "Part 2",
+      "fieldTitle": "Android / iOS field app",
+      "fieldFeatureA": "Barcode assignment for each sample",
+      "fieldFeatureB": "Manual sample entries while working in the field",
+      "fieldFeatureC": "Automatic and GPS-backed recordings during collection",
+      "fieldFeatureD": "RTK and external GPS devices can be linked for added accuracy"
+    },
+    "compatibility": {
+      "eyebrow": "Made for handover",
+      "title": "Provider-aware output, not one-size-fits-all files.",
+      "subtitle": "Use one operational workflow, then export in the format the next step actually needs."
+    },
+    "audiences": {
+      "eyebrow": "Who it is for",
+      "title": "Useful for teams that move between office planning and field execution.",
+      "consultantsTitle": "Agronomy and advisory teams",
+      "consultantsBody": "Prepare contracts, field data and exports without splitting the job across multiple tools.",
+      "samplingTitle": "Sampling crews",
+      "samplingBody": "Work with clear GPS context, stable field references and less back-and-forth once the workday starts.",
+      "serviceTitle": "Lab-connected service providers",
+      "serviceBody": "Keep project data consistent from first boundary upload to final provider-specific handover."
+    },
+    "finalCta": {
+      "title": "One system across office planning and field sampling.",
+      "subtitle": "Use the website to manage contracts, maps and exports, then use the mobile app in the field to record the real sampling work with barcodes, RTK or external GPS devices, manual notes and automatic tracking.",
+      "primary": "Open app",
+      "primaryLoggedIn": "Open workspace"
+    }
+  },
   "admin": {
     "accessDeniedTitle": "Admin access only",
     "accessDeniedBody": "You do not have permission to view this page.",

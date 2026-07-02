@@ -19,8 +19,8 @@ i18n
   .use(initReactI18next)
   .init({
     resources,
-    fallbackLng: 'en',
-    lng: localStorage.getItem('language') || 'en', // Use our custom language key
+    fallbackLng: 'de',
+    lng: localStorage.getItem('language') || 'de', // Use our custom language key
     debug: false,
     
     interpolation: {

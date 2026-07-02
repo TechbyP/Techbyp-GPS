@@ -5,9 +5,43 @@
   RewriteCond %{HTTPS} !=on
   RewriteCond %{HTTP:X-Forwarded-Proto} !https [NC]
   RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301,NE]
+
+  # Serve favicon requests from the existing PNG asset to avoid noisy 404s.
+  RewriteRule ^favicon\.ico$ /app-logo.png [L]
+
+  # Let existing files and directories pass through unchanged.
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # SPA fallback: serve index.html for client-side routes like /app and /admin.
+  RewriteRule ^ index.html [L]
 </IfModule>
 
 <IfModule mod_headers.c>
   # Start with a conservative HSTS policy. Extend max-age later after production verification.
   Header always set Strict-Transport-Security "max-age=2592000"
+
+  # Never cache HTML entry documents; they must always point to fresh hashed assets.
+  <FilesMatch "\.(html?)$">
+    Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </FilesMatch>
+
+  # Service worker and manifest must revalidate quickly after deploys.
+  <Files "sw.js">
+    Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+  </Files>
+  <FilesMatch "^workbox-.*\.js$">
+    Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+  </FilesMatch>
+  <Files "manifest.webmanifest">
+    Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+  </Files>
+
+  # Hashed static assets can be cached aggressively.
+  <FilesMatch "\.(js|css|png|jpe?g|gif|svg|webp|woff2?)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
 </IfModule>

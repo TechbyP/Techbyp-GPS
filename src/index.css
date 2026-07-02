@@ -1,6 +1,7 @@
 /* Leaflet CSS must be imported first */
 @import 'leaflet/dist/leaflet.css';
 @import 'leaflet-draw/dist/leaflet.draw.css';
+@import url('https://fonts.adobe.com/fonts/gin');
 
 /* Tablet optimizations for Phase 4 */
 @import './styles/tablet-optimizations.css';
@@ -34,6 +35,10 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overscroll-behavior: none;
+}
+
+.landing-brand-font {
+  font-family: 'Gin', 'Oswald', ui-sans-serif, system-ui, sans-serif;
 }
 
 .mobile-web-safe-shell {

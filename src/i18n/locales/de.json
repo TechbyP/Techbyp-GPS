@@ -2,6 +2,110 @@
   "app": {
     "name": "TECHBYP - GPS Pro"
   },
+  "landing": {
+    "nav": {
+      "eyebrow": "TECHBYP GPS Plattform",
+      "features": "Funktionen",
+      "workflow": "Ablauf",
+      "platforms": "Zwei Teile",
+      "openApp": "App oeffnen"
+    },
+    "hero": {
+      "eyebrow": "GPS-gestuetzte Feldarbeit",
+      "title": "Online planen. Im Feld beproben. Sauber exportieren.",
+      "subtitle": "TECHBYP - GPS Pro ist ein zweiteiliges System fuer Bodenproben: eine Website fuer Planung, Auftraege, Karten und Exporte sowie eine mobile App fuer die echte Probenerfassung mit GPS- und Barcode-Unterstuetzung im Feld.",
+      "primary": "App oeffnen",
+      "primaryLoggedIn": "Arbeitsbereich oeffnen",
+      "secondary": "Workflow ansehen",
+      "proofA": "Website-Arbeitsbereich fuer Auftraege, Felder, Parameter und exportfertige Projektdaten.",
+      "proofB": "Android- oder iOS-App fuer die echte Probenerfassung waehrend der Bodenprobenahme.",
+      "proofC": "Barcode-Zuordnung, RTK-Unterstuetzung, externe GPS-Geraete, manuelle Eingaben und automatische Aufzeichnungen bleiben demselben Projekt zugeordnet."
+    },
+    "metrics": {
+      "contractsValue": "Web + App",
+      "contractsLabel": "ein verbundenes System statt getrennter Werkzeuge",
+      "fieldOpsValue": "Barcode bereit",
+      "fieldOpsLabel": "fuer erfasste Proben, manuelle Notizen und Teams im Feld",
+      "exportsValue": "Labororientiert",
+      "exportsLabel": "mit Exportwegen fuer AGROLAB, LUFA und PBS"
+    },
+    "graphic": {
+      "panelLabel": "Live-Workflow-Board",
+      "mapLabel": "Feldkarte",
+      "mapValue": "Nordblock / 24,8 ha",
+      "contractLabel": "Auftrags-Setup",
+      "contractValue": "Probenahme + Laborexport",
+      "gpsLabel": "GPS-Spur",
+      "gpsValue": "Gefuehrte Erfassung aktiv",
+      "exportLabel": "Exportstatus",
+      "exportValue": "CSV / XML / Arbeitsmappe bereit"
+    },
+    "features": {
+      "eyebrow": "Warum Teams es nutzen",
+      "title": "Gebaut fuer echte Bodenproben-Ablaufe, nicht fuer beliebige Karten-Demos.",
+      "subtitle": "Das System haelt Planung, Ausfuehrung und Uebergabe an einem Ort, damit die Daten auch dann noch Sinn ergeben, wenn die Proben im Labor ankommen.",
+      "mappingTitle": "Feldkartierung mit Struktur",
+      "mappingBody": "Grenzen importieren oder zeichnen, Feldidentitaeten stabil halten und Probenahmezellen vorbereiten, ohne Kontext zu verlieren.",
+      "contractsTitle": "Auftraege passend zur Arbeit",
+      "contractsBody": "Jobs, Inhaber, Laborprofile und anbieterspezifische Parameter festlegen, bevor jemand ins Feld faehrt.",
+      "gpsTitle": "GPS-gestuetzte Feldeinsaetze",
+      "gpsBody": "Teams mit Kartenkontext, Feldfokus und einem Workflow unterstuetzen, der auf Desktop und Tablet funktioniert.",
+      "exportsTitle": "Laborfertige Exporte",
+      "exportsBody": "Nachgelagerte Dateien fuer AGROLAB-, LUFA- und PBS-Workflows vorbereiten, ohne Projektdaten von Hand neu aufzubauen."
+    },
+    "workflow": {
+      "eyebrow": "So funktioniert es",
+      "title": "Vier Schritte von der Planung bis zur Uebergabe.",
+      "subtitle": "Jede Stufe nimmt denselben Feld- und Auftragskontext mit, sodass spaeter weniger manuell repariert werden muss.",
+      "step1Title": "Auftrag anlegen",
+      "step1Body": "Mit Kunde, Inhaber, Laborablauf und Probenahmeumfang starten.",
+      "step2Title": "Felder kartieren",
+      "step2Body": "Grenzen importieren oder direkt zeichnen und jedes Feld sauber mit dem Projekt verbinden.",
+      "step3Title": "Probenahme ausfuehren",
+      "step3Body": "Die Feldarbeit mit GPS-Kontext, Parameterwahl und praxistauglichen Eingaben fuehren.",
+      "step4Title": "Ins naechste System exportieren",
+      "step4Body": "Strukturierte Ausgaben fuer Laboruebergabe, Dokumentation und Nachverfolgung erzeugen."
+    },
+    "platforms": {
+      "eyebrow": "Zwei verbundene Teile",
+      "title": "Eine Website fuer die Koordination. Eine mobile App fuer die echte Probenahme.",
+      "subtitle": "Benutzer verwalten das Projekt ueber die Website und wechseln dann zur Android- oder iOS-App, wenn sie draussen im Feld wirklich Proben nehmen. Beide Teile greifen auf dieselben Projektdaten zu.",
+      "webLabel": "Teil 1",
+      "webTitle": "Website-Plattform",
+      "webPanelTitle": "Fuer Planung und Verwaltung",
+      "webFeatureA": "Auftraege anlegen und Inhaber zuweisen",
+      "webFeatureB": "Felder kartieren, importieren und pruefen",
+      "webFeatureC": "Laborablaeufe und Parameter konfigurieren",
+      "webFeatureD": "Exporte und Projektdokumentation vorbereiten",
+      "fieldLabel": "Teil 2",
+      "fieldTitle": "Android- / iOS-Feld-App",
+      "fieldFeatureA": "Barcode-Zuordnung fuer jede Probe",
+      "fieldFeatureB": "Manuelle Probeneintraege direkt im Feld",
+      "fieldFeatureC": "Automatische und GPS-gestuetzte Aufzeichnungen waehrend der Erfassung",
+      "fieldFeatureD": "RTK und externe GPS-Geraete koennen fuer hoehere Genauigkeit angebunden werden"
+    },
+    "compatibility": {
+      "eyebrow": "Fuer die Uebergabe gebaut",
+      "title": "Anbieterorientierte Ausgaben statt Einheitsdateien.",
+      "subtitle": "Ein operativer Workflow, danach der Export in genau dem Format, das der naechste Schritt wirklich braucht."
+    },
+    "audiences": {
+      "eyebrow": "Fuer wen es gedacht ist",
+      "title": "Nuetzlich fuer Teams, die zwischen Bueroplanung und Feldausfuehrung wechseln.",
+      "consultantsTitle": "Agrarberatung und Fachberater",
+      "consultantsBody": "Auftraege, Felddaten und Exporte vorbereiten, ohne die Arbeit auf mehrere Werkzeuge aufzuteilen.",
+      "samplingTitle": "Probenahme-Teams",
+      "samplingBody": "Mit klarem GPS-Kontext, stabilen Feldreferenzen und weniger Rueckfragen starten, sobald der Arbeitstag beginnt.",
+      "serviceTitle": "Labornahe Dienstleister",
+      "serviceBody": "Projektdaten vom ersten Feldimport bis zur anbieterspezifischen Uebergabe konsistent halten."
+    },
+    "finalCta": {
+      "title": "Ein System fuer Bueroplanung und Probenerfassung im Feld.",
+      "subtitle": "Die Website steuert Auftraege, Karten und Exporte. Die mobile App erfasst die echte Probenahme mit Barcodes, RTK oder externen GPS-Geraeten, manuellen Notizen und automatischer Nachverfolgung.",
+      "primary": "App oeffnen",
+      "primaryLoggedIn": "Arbeitsbereich oeffnen"
+    }
+  },
   "admin": {
     "accessDeniedTitle": "Nur Admin-Zugriff",
     "accessDeniedBody": "Sie haben keine Berechtigung, diese Seite zu sehen.",

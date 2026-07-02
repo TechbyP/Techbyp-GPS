@@ -11,7 +11,6 @@ import { ConfirmationProvider } from './components/ui/ConfirmationProvider';
 import { AnimatedLoader } from './components/ui/AnimatedLoader';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ReloadPrompt } from './components/ReloadPrompt';
-import { clearStartupRecoveryMarker, triggerAutomaticStartupRecovery } from './utils/startupRecovery';
 import './index.css';
 
 // Import auth persistence test in development
@@ -99,17 +98,13 @@ function AppContent() {
 
   const handleForceAuthFallback = () => {
     setAllowAuthFallback(true);
-    void triggerAutomaticStartupRecovery('auth-init-timeout').catch(error => {
-      console.warn('Manual startup recovery failed from tablet shell:', error);
-    });
   };
 
   useEffect(() => {
     let cancelled = false;
 
-    if (!auth.loading) {
+    if (!auth.loading || auth.isAuthenticated) {
       setAllowAuthFallback(false);
-      clearStartupRecoveryMarker();
       return () => {
         cancelled = true;
       };
@@ -117,16 +112,7 @@ function AppContent() {
 
     const timer = setTimeout(() => {
       if (cancelled || !auth.loading) return;
-
-      void triggerAutomaticStartupRecovery('auth-init-timeout')
-        .catch(error => {
-          console.warn('Auto startup recovery failed from tablet shell:', error);
-        })
-        .finally(() => {
-          if (!cancelled) {
-            setAllowAuthFallback(true);
-          }
-        });
+      setAllowAuthFallback(true);
     }, 12000);
 
     return () => {

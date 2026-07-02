@@ -145,8 +145,11 @@ const testFirebaseConnection = async () => {
   }
 };
 
-// Initialize persistence and test connection
-if (environmentConfig.shouldRunFirebaseConnectionTests()) {
+// Run connectivity probe only in development unless explicitly forced.
+const shouldRunConnectionProbe = import.meta.env.DEV && environmentConfig.shouldRunFirebaseConnectionTests();
+
+// Initialize persistence and optionally test connection
+if (shouldRunConnectionProbe) {
   if (isCapacitor) {
     // For mobile apps, test connection after a short delay to allow network to be ready
     setTimeout(() => testFirebaseConnection(), 1000);

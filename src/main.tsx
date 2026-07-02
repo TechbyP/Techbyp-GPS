@@ -101,6 +101,12 @@ if (import.meta.env.DEV) {
 // Hide splash screen once React app loads
 const hideSplashScreen = () => {
   const loader = document.getElementById('app-loader');
+  document.documentElement.style.overflow = 'auto';
+  document.body.style.overflow = 'auto';
+  const root = document.getElementById('root');
+  if (root) {
+    root.style.overflow = 'visible';
+  }
   if (loader) {
     loader.style.opacity = '0';
     loader.style.transition = 'opacity 0.3s ease-out';

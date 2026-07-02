@@ -2,10 +2,48 @@ import { useRegisterSW } from 'virtual:pwa-register/react'
 import { useEffect } from 'react'
 import { useLanguage } from '../hooks/useLanguage'
 import toast from 'react-hot-toast'
+import { isCapacitorApp } from '../utils/platform'
 
 const swDevEnabled = !import.meta.env.DEV || import.meta.env.VITE_ENABLE_SW_DEV === 'true'
 const swCleanupSessionKey = 'gps-app-sw-cleanup-v3'
 const workboxCacheNames = ['osm-tiles', 'esri-tiles', 'local-tiles']
+const webPwaEnabled = ((import.meta.env.VITE_ENABLE_WEB_PWA as string | undefined) || '').toLowerCase() === 'true'
+const shouldEnableSwRuntime = isCapacitorApp() || webPwaEnabled
+
+function DisableWebServiceWorker() {
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
+      return
+    }
+
+    let cancelled = false
+
+    const disableServiceWorker = async () => {
+      try {
+        const registrations = await navigator.serviceWorker.getRegistrations()
+        await Promise.all(registrations.map((registration) => registration.unregister().catch(() => false)))
+
+        const cacheNames = typeof caches !== 'undefined' ? await caches.keys() : []
+        const staleCacheNames = cacheNames.filter((cacheName) => (
+          cacheName.startsWith('workbox-') || workboxCacheNames.includes(cacheName)
+        ))
+        await Promise.all(staleCacheNames.map((cacheName) => caches.delete(cacheName).catch(() => false)))
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('[sw-disable] Failed to disable service worker on web runtime:', error)
+        }
+      }
+    }
+
+    void disableServiceWorker()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  return null
+}
 
 function DevServiceWorkerCleanup() {
   useEffect(() => {
@@ -72,11 +110,9 @@ function ActiveReloadPrompt() {
 
   useEffect(() => {
     if (offlineReady) {
-      // Provide a default English fallback in case the key is missing for the current locale
-      toast.success(t('common.appReadyOffline', 'App ready to work offline'))
       setOfflineReady(false)
     }
-  }, [offlineReady, setOfflineReady, t])
+  }, [offlineReady, setOfflineReady])
 
   useEffect(() => {
     if (needRefresh) {
@@ -112,6 +148,10 @@ function ActiveReloadPrompt() {
 }
 
 export function ReloadPrompt() {
+  if (!shouldEnableSwRuntime) {
+    return <DisableWebServiceWorker />
+  }
+
   if (!swDevEnabled) {
     return <DevServiceWorkerCleanup />
   }

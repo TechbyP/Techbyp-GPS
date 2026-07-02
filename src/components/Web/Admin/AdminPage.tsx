@@ -20,6 +20,9 @@ import {
   normalizeAccessTimestamp,
   toAccessDateInputValue
 } from '../../../utils/userAccess';
+import { withTimeout } from '../../../config/timeouts';
+
+const ADMIN_USERS_FETCH_TIMEOUT_MS = 15000;
 
 const normalizeTimestamp = (value: any): string => {
   if (!value) return '';
@@ -174,6 +177,17 @@ const hasAccessTimeBeenAdded = (previousValue: unknown, nextValue: unknown): boo
   return previousTimestamp === null || nextTimestamp > previousTimestamp;
 };
 
+const ROLE_VALUES: UserRole[] = ['admin', 'client', 'consultant', 'lab_manager', 'technician'];
+
+const toUserRole = (value: unknown): UserRole | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.toLowerCase();
+  return ROLE_VALUES.includes(normalized as UserRole) ? (normalized as UserRole) : null;
+};
+
 export default function AdminPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -200,8 +214,43 @@ export default function AdminPage() {
   const [billPrompt, setBillPrompt] = useState<BillPromptState | null>(null);
   const billPromptResolverRef = useRef<((value: string | null) => void) | null>(null);
 
+  const resolveRoleWithClaimsFallback = useCallback(async (): Promise<UserRole> => {
+    if (!user) {
+      return 'client';
+    }
+
+    const firestoreRole = await getUserRole(user.uid);
+    if (firestoreRole) {
+      return firestoreRole;
+    }
+
+    try {
+      const tokenResult = await user.getIdTokenResult();
+      const claimRole = toUserRole(tokenResult.claims.role);
+      const resolvedRole = tokenResult.claims.admin === true
+        ? 'admin'
+        : (claimRole || null);
+
+      if (!resolvedRole) {
+        return 'client';
+      }
+
+      // Keep Firestore role in sync with token claims so rules and UI agree.
+      await setDoc(doc(db, 'users', user.uid), {
+        role: resolvedRole,
+        email: user.email || '',
+        updated_at: serverTimestamp()
+      }, { merge: true });
+
+      return resolvedRole;
+    } catch (error) {
+      console.warn('Failed to resolve role from token claims:', error);
+      return 'client';
+    }
+  }, [user]);
+
   const loadUsers = useCallback(async () => {
-    if (authLoading) {
+    if (authLoading && !user) {
       setIsLoading(true);
       return;
     }
@@ -215,17 +264,21 @@ export default function AdminPage() {
 
     setIsLoading(true);
     try {
-      const role = await getUserRole(user.uid);
+      const role = await resolveRoleWithClaimsFallback();
       setCurrentRole(role);
       if (role !== 'admin') {
         setUsers([]);
         return;
       }
 
-      const [userSnap, profileSnap] = await Promise.all([
-        getDocs(collection(db, 'users')),
-        getDocs(collection(db, 'user_profiles'))
-      ]);
+      const [userSnap, profileSnap] = await withTimeout(
+        Promise.all([
+          getDocs(collection(db, 'users')),
+          getDocs(collection(db, 'user_profiles'))
+        ]),
+        ADMIN_USERS_FETCH_TIMEOUT_MS,
+        'Admin users query timeout'
+      );
 
       const profileMap = new Map<string, UserProfile>();
       profileSnap.forEach(doc => {
@@ -267,7 +320,7 @@ export default function AdminPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [authLoading, t, user]);
+  }, [authLoading, resolveRoleWithClaimsFallback, t, user]);
 
   useEffect(() => {
     void loadUsers();

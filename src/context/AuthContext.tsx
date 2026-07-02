@@ -12,7 +12,6 @@ import { userProfileService } from '../services/userProfileService';
 import { firebaseGPS } from '../services/firebaseSync';
 import { hybridDB } from '../services/hybridDatabase';
 import { secureStorage } from '../utils/secureStorage';
-import { clearStartupRecoveryMarker, triggerAutomaticStartupRecovery } from '../utils/startupRecovery';
 import { debugAuthPersistence } from '../utils/authDebug';
 import {
   getUserAccessSnapshot,
@@ -25,7 +24,7 @@ import {
 const getAuthErrorMessage = (key: string, fallback: string): string => {
   try {
     // Try to get current language from localStorage
-    const lang = localStorage.getItem('i18nextLng') || 'en';
+    const lang = localStorage.getItem('language') || localStorage.getItem('i18nextLng') || 'de';
     
     // Basic translations for auth errors
     const translations = {
@@ -198,7 +197,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             } catch (error) {
               console.warn('🔐 Failed to sign out blocked user:', error);
             }
-            clearStartupRecoveryMarker();
             return;
           }
 
@@ -242,36 +240,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         
         setLoading(false);
-        clearStartupRecoveryMarker();
       });
 
       // Safety timeout: ensure UI never stays on loading forever if auth callback stalls.
       authTimeout = setTimeout(() => {
         if (!mounted || authResolved) return;
-        console.warn('🔐 Auth initialization timeout - attempting automatic startup recovery');
-
-        void triggerAutomaticStartupRecovery('auth-init-timeout')
-          .then((recoveryStarted) => {
-            if (!mounted || authResolved) return;
-
-            if (recoveryStarted) {
-              authResolved = true;
-              return;
-            }
-
-            console.warn('🔐 Automatic recovery not available - continuing without resolved Firebase auth state');
-            authResolved = true;
-            setIsAuthReady(true);
-            setLoading(false);
-          })
-          .catch((error) => {
-            if (!mounted || authResolved) return;
-
-            console.warn('🔐 Automatic recovery failed - continuing without resolved Firebase auth state', error);
-            authResolved = true;
-            setIsAuthReady(true);
-            setLoading(false);
-          });
+        console.warn('🔐 Auth initialization timeout - continuing without resolved Firebase auth state');
+        authResolved = true;
+        setIsAuthReady(true);
+        setLoading(false);
       }, 10000);
       
       // Check for cached auth only if Firebase hasn't resolved yet
@@ -312,16 +289,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
       .catch(async error => {
         console.error('🔐 Auth initialization failed:', error);
-
-        try {
-          const recoveryStarted = await triggerAutomaticStartupRecovery('auth-init-timeout');
-          if (recoveryStarted) {
-            authResolved = true;
-            return;
-          }
-        } catch (recoveryError) {
-          console.warn('🔐 Startup recovery failed after auth initialization error:', recoveryError);
-        }
 
         if (!mounted || authResolved) return;
         authResolved = true;
